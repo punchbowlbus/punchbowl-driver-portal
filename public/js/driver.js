@@ -5,11 +5,18 @@ import { showError } from "./ui.js";
 
 export async function setShiftConfirmation(shiftId, value) {
   showError("");
+
+  const safeValue = String(value || "").trim();
+  if (safeValue !== "Yes" && safeValue !== "No") {
+    showError("Invalid confirmation value");
+    return;
+  }
+
   try {
     const a = getActor(auth);
     await patchShift(shiftId, {
-      confirmation: value,
-      confirmationAt: serverTimestamp(),
+      driverAcknowledgment: safeValue,
+      driverAcknowledgmentAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       updatedByUid: a.uid,
       updatedByEmail: a.email

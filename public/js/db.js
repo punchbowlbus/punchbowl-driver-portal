@@ -25,6 +25,7 @@ export function listenShifts({ isAdmin, driverEmail }, onData, onErr) {
     qy = query(
       collection(db, "shifts"),
       where("driverEmail", "==", driverEmail),
+      where("dispatchStatus", "==", "Assigned"),
       orderBy("serviceDate", "desc")
     );
   }
