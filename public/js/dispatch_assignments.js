@@ -15,16 +15,18 @@ export async function assignBlockToDriver({
     throw new Error("Driver employee number is required.");
   }
 
-  console.log("assignBlockToDriver()", {
-    blockId: block?.id,
-    driverEmployeeNumber,
-    driverName,
-    serviceDate
-  });
+console.log("assignBlockToDriver()", {
+  blockId: block?.id,
+  driverEmployeeNumber,
+  driverName,
+  serviceDate,
+  createDutySpan
+});
 
   await updateBlock(block.id, {
     assignedDriverEmployeeNumber: String(driverEmployeeNumber).trim(),
-    assignmentStatus: "Assigned"
+    assignedDriverName: String(driverName || "").trim(),
+    dispatchStatus: "Assigned"
   });
 
   if (createDutySpan) {
@@ -53,7 +55,8 @@ export async function unassignBlockFromDriver(blockId) {
 
   await updateBlock(blockId, {
     assignedDriverEmployeeNumber: "",
-    assignmentStatus: "Unassigned"
+    assignedDriverName: "",
+    dispatchStatus: "Pending"
   });
 
   return true;

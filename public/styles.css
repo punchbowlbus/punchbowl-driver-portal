@@ -329,3 +329,63 @@ textarea {
     flex-direction: column;
   }
 }
+/* =========================
+   MOBILE MENU DRAWER
+========================= */
+
+.menuToggleBtn {
+  display: none;
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* PHONE MODE */
+@media (max-width: 650px) {
+
+  /* show menu button */
+  .menuToggleBtn {
+    display: block;
+  }
+
+  /* sidebar becomes overlay drawer */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: -260px; /* hidden */
+    width: 260px;
+    height: 100%;
+    z-index: 1000;
+    background: #fff;
+    transition: left 0.25s ease;
+    border-right: 1px solid var(--border-color);
+  }
+
+  /* when open */
+  .sidebar.open {
+    left: 0;
+  }
+
+  /* overlay background */
+  .sidebarOverlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 999;
+    display: none;
+  }
+
+  .sidebarOverlay.show {
+    display: block;
+  }
+
+  /* main takes full width */
+  .app {
+    flex-direction: column;
+  }
+}

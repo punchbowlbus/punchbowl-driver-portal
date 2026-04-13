@@ -265,6 +265,52 @@ export async function go(pageId) {
     return;
   }
 
+if (pageId === "jobDetails") {
+  const job = state.jobs.find(j => j.id === state.selectedJobId);
+
+  if (!job) {
+    renderPlaceholder("Job Details", "Job not found");
+    return;
+  }
+
+  els.contentArea.innerHTML = `
+    <div class="card">
+      <h3>Job Details</h3>
+
+      <div style="margin-top:10px">
+        <b>Date:</b> ${job.serviceDate || job.date || "-"}
+      </div>
+
+      <div style="margin-top:10px">
+        <b>Job:</b> ${job.jobDescription || "-"}
+      </div>
+
+      <div style="margin-top:10px">
+        <b>Depot:</b> ${job.depotStartTime || "-"} → ${job.depotFinishTime || "-"}
+      </div>
+
+      <div style="margin-top:10px">
+        <b>Driver:</b> ${job.driverName || job.driverEmail || "-"}
+      </div>
+
+      <div style="margin-top:20px">
+        <button id="yesBtn">Yes</button>
+        <button id="noBtn">No</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById("yesBtn").onclick = () => {
+    alert("Confirmed (next step we save to DB)");
+  };
+
+  document.getElementById("noBtn").onclick = () => {
+    alert("Cannot do (next step we save to DB)");
+  };
+
+  return;
+}
+
   // Shared menu
   if (pageId === "notice") {
     renderPlaceholder("Notice Board", "Coming soon...");
@@ -300,10 +346,42 @@ export async function go(pageId) {
   // Fallback
   loadShifts({ mode: "driver" });
 }
+window.go = go;
+function setupMobileMenu() {
+  const menuBtn = document.getElementById("menuToggleBtn");
+  const sidebar = document.getElementById("sidebar");
+  const overlay = document.getElementById("sidebarOverlay");
+
+  if (!menuBtn || !sidebar || !overlay) return;
+
+  const openMenu = () => {
+    sidebar.classList.add("open");
+    overlay.classList.add("show");
+  };
+
+  const closeMenu = () => {
+    sidebar.classList.remove("open");
+    overlay.classList.remove("show");
+  };
+
+  menuBtn.onclick = () => {
+    if (sidebar.classList.contains("open")) {
+      closeMenu();
+    } else {
+      openMenu();
+    }
+  };
+
+  overlay.onclick = closeMenu;
+
+  // expose globally for next step
+  window.closeMobileMenu = closeMenu;
+}
 
 /* =========================================================
    Auth Boot
 ========================================================= */
+setupMobileMenu();
 onAuthStateChanged(auth, (u) => {
   state.currentUser = u;
   state.isAdmin = !!u && isAdminEmail(u.email);

@@ -1,5 +1,7 @@
 // public/js/ui.js
 import { escapeHtml, fmtDate } from "./utils.js";
+import { state } from "./state.js";
+import { go } from "./main.js";
 
 /** ✅ Central DOM references (exported) */
 export const els = {
@@ -77,7 +79,7 @@ export function renderTabs({ currentUser, isAdmin, currentTab }, onDriverTab, on
   if (a) a.onclick = onAdminTab;
 }
 
-/** ✅ Sidebar renderer (UPDATED) */
+/** ✅ Sidebar renderer */
 export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
   if (!els.navArea || !els.adminNavArea) return;
 
@@ -152,8 +154,15 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
 
   const hook = (container) => {
     if (!container) return;
+
     [...container.querySelectorAll("button[data-nav]")].forEach((btn) => {
-      btn.onclick = () => onNav(btn.getAttribute("data-nav"));
+      btn.onclick = () => {
+        onNav(btn.getAttribute("data-nav"));
+
+        if (window.innerWidth <= 650 && window.closeMobileMenu) {
+          window.closeMobileMenu();
+        }
+      };
     });
   };
 
@@ -161,6 +170,16 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
   hook(els.adminNavArea);
 
   if (window.lucide) window.lucide.createIcons();
+}
+
+function getDriverStatusLabel(j) {
+  const dispatchStatus = String(j.dispatchStatus || "").trim();
+  const ack = String(j.driverAcknowledgment || "Pending").trim();
+
+  if (dispatchStatus === "Cancelled") return "Cancelled";
+  if (ack === "Yes") return "Confirmed";
+  if (ack === "No") return "Cannot Do";
+  return "Awaiting Response";
 }
 
 /** ✅ Driver My Work page */
@@ -177,7 +196,9 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
       const driverEmail = (j.driverEmail || "").toLowerCase().trim();
       return !!email && driverEmail === email;
     })
-    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    .sort((a, b) =>
+      String(a.serviceDate || a.date || "").localeCompare(String(b.serviceDate || b.date || ""))
+    );
 
   if (!mine.length) {
     els.contentArea.innerHTML = `
@@ -197,12 +218,14 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
           ? [j.pdfLink]
           : [];
 
+      const statusLabel = getDriverStatusLabel(j);
+
       return `
-        <div class="card" style="margin-top:10px">
+        <div class="card jobCard" data-job-id="${escapeHtml(j.id)}" style="margin-top:10px; cursor:pointer;">
           <div class="row">
             <div style="min-width:280px;flex:1">
               <div class="muted">${escapeHtml(j.jobId || j.id || "-")}</div>
-              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.date))}</div>
+              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.serviceDate || j.date))}</div>
 
               <div style="margin-top:8px">
                 <b>Job:</b> ${escapeHtml(j.jobDescription || "-")}
@@ -229,7 +252,7 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
                       ${links
                         .map(
                           (u, i) =>
-                            `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer">PDF ${i + 1}</a>`
+                            `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">PDF ${i + 1}</a>`
                         )
                         .join(" | ")}
                     </div>
@@ -240,14 +263,10 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
 
             <div style="min-width:230px">
               <div style="font-size:13px;margin-bottom:8px">
-                <b>Status:</b> ${escapeHtml(j.confirmation || "PENDING")}
-              </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button data-c="${j.id}" data-v="CONFIRMED">Confirm</button>
-                <button data-c="${j.id}" data-v="CANT_DO">Can’t do</button>
+                <b>Status:</b> ${escapeHtml(statusLabel)}
               </div>
               <div class="muted" style="margin-top:10px">
-                Your confirmation updates automatically.
+                Tap to view job details.
               </div>
             </div>
           </div>
@@ -261,8 +280,19 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
     ${rows}
   `;
 
+  [...els.contentArea.querySelectorAll(".jobCard")].forEach((el) => {
+    el.onclick = () => {
+      const jobId = el.getAttribute("data-job-id");
+      state.selectedJobId = jobId;
+      go("jobDetails");
+    };
+  });
+
   [...els.contentArea.querySelectorAll("button[data-c]")].forEach((btn) => {
-    btn.onclick = () => actions.onConfirm?.(btn.getAttribute("data-c"), btn.getAttribute("data-v"));
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      actions.onConfirm?.(btn.getAttribute("data-c"), btn.getAttribute("data-v"));
+    };
   });
 }
 
@@ -290,7 +320,7 @@ export function renderJobs(jobs, { isAdmin }, actions = {}) {
           <div class="row">
             <div style="min-width:260px">
               <div class="muted">${escapeHtml(j.jobId || j.id)}</div>
-              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.date))}</div>
+              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.serviceDate || j.date))}</div>
 
               <div style="margin-top:8px">${escapeHtml(j.jobDescription || "-")}</div>
 
@@ -326,7 +356,7 @@ export function renderJobs(jobs, { isAdmin }, actions = {}) {
               isAdmin
                 ? `
               <div style="min-width:260px;font-size:13px;color:#444">
-                <div><b>Confirmation:</b> ${escapeHtml(j.confirmation || "PENDING")}</div>
+                <div><b>Acknowledgment:</b> ${escapeHtml(j.driverAcknowledgment || "Pending")}</div>
                 <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
                   <button data-edit="${j.id}">Edit</button>
                   <button data-del="${j.id}">Delete</button>
@@ -335,10 +365,10 @@ export function renderJobs(jobs, { isAdmin }, actions = {}) {
             `
                 : `
               <div style="min-width:230px">
-                <div style="font-size:13px;margin-bottom:8px"><b>Status:</b> ${escapeHtml(j.confirmation || "PENDING")}</div>
+                <div style="font-size:13px;margin-bottom:8px"><b>Status:</b> ${escapeHtml(getDriverStatusLabel(j))}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button data-c="${j.id}" data-v="CONFIRMED">Confirm</button>
-                  <button data-c="${j.id}" data-v="CANT_DO">Can’t do</button>
+                  <button data-c="${j.id}" data-v="Yes">Yes</button>
+                  <button data-c="${j.id}" data-v="No">No</button>
                 </div>
                 <div class="muted" style="margin-top:10px">Your confirmation updates automatically.</div>
               </div>

@@ -238,6 +238,7 @@ let jobGroupsCache = [];
 let selectedDriverEmpNo = "";
 let slotWidth = 10;
 let unsubscribeDutySpans = null;
+let unsubscribeBlocks = null;
 let blocksCache = [];
 let draggedBlockId = "";
 
@@ -2086,6 +2087,12 @@ function renderUnassignedJobs(blocks, selectedDate) {
   });
 }
 
+// stop previous blocks listener
+if (unsubscribeBlocks) {
+  unsubscribeBlocks();
+  unsubscribeBlocks = null;
+}
+
 function loadUnassignedJobsForDate(selectedDate) {
   if (!selectedDate) {
     if (unassignedJobsPanelBodyEl) {
@@ -2096,13 +2103,18 @@ function loadUnassignedJobsForDate(selectedDate) {
     return;
   }
 
+    if (unsubscribeBlocks) {
+    unsubscribeBlocks();
+    unsubscribeBlocks = null;
+  }
+
   if (unassignedJobsPanelBodyEl) {
     unassignedJobsPanelBodyEl.innerHTML = `
       <div class="muted">Loading unassigned jobs...</div>
     `;
   }
 
-  listenBlocksByDate(
+  unsubscribeBlocks = listenBlocksByDate(
     selectedDate,
     (blocks) => {
       blocksCache = blocks || [];
@@ -2285,6 +2297,7 @@ function setupSyncedScroll() {
 
 loadBtn.onclick = () => {
   const selectedDate = dispatchDateEl.value;
+  console.log("LOAD DISPATCH CLICKED", selectedDate);
 
   if (!selectedDate) {
     showError("Please select a dispatch date.");
@@ -2377,7 +2390,6 @@ renderNowLine();
 renderDriverDetail(null);
 setupSyncedScroll();
 setupTimelineWheelZoom();
-startDutySpanListener(getSelectedDate());
 
 if (nowLineTimer) {
   clearInterval(nowLineTimer);
@@ -2386,4 +2398,8 @@ if (nowLineTimer) {
 nowLineTimer = setInterval(() => {
   renderNowLine();
 }, 60000);
+
+console.log("BOTTOM OF DISPATCH FILE REACHED");
+loadBtn.click();
+
 }
