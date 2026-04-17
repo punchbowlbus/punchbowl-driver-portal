@@ -30,26 +30,51 @@ export function showError(msg) {
 }
 
 /** ✅ Top auth area (exported) */
-export function renderAuth({ currentUser, isAdmin }, onLogin, onLogout) {
-  if (!els.authArea) return;
+export function renderAuth(user, employee, onSignIn, onSignOut) {
+  const authArea = document.getElementById("authArea");
+  if (!authArea) return;
 
-  if (!currentUser) {
-    els.authArea.innerHTML = `<button id="loginBtn">Sign in with Google</button>`;
-    const btn = document.getElementById("loginBtn");
-    if (btn) btn.onclick = onLogin;
+  if (!user) {
+    authArea.innerHTML = `
+      <div class="authWrap">
+        <div class="authTop">
+          <button id="signInBtn" class="signOutBtn">Sign in</button>
+        </div>
+      </div>
+    `;
+
+    const signInBtn = document.getElementById("signInBtn");
+    if (signInBtn && typeof onSignIn === "function") {
+      signInBtn.addEventListener("click", onSignIn);
+    }
     return;
   }
 
-  els.authArea.innerHTML = `
-    <div class="muted">
-      Signed in as <b>${escapeHtml(currentUser.email)}</b>
-      ${isAdmin ? `<span class="pill">Admin</span>` : ``}
-    </div>
-    <button id="logoutBtn">Sign out</button>
-  `;
+  const roleLabel = employee?.role || employee?.accessLevel || "Driver";
+  const empLabel = employee?.employeeNumber
+    ? `Emp: ${employee.employeeNumber}`
+    : "Emp: —";
 
-  const out = document.getElementById("logoutBtn");
-  if (out) out.onclick = onLogout;
+    authArea.innerHTML = `
+      <div class="authWrap">
+        <div class="authTop">
+          <button id="signOutBtn" class="signOutBtn">Sign out</button>
+        </div>
+
+        <div class="authBottom">
+          <div class="empText">${empLabel}</div>
+
+          <div class="signedIn" title="${user.email || ""}">
+            Signed in as ${user.email || ""}
+          </div>
+        </div>
+      </div>
+    `;
+
+  const signOutBtn = document.getElementById("signOutBtn");
+  if (signOutBtn && typeof onSignOut === "function") {
+    signOutBtn.addEventListener("click", onSignOut);
+  }
 }
 
 /** ✅ Tabs (exported) - kept for compatibility */
@@ -182,16 +207,27 @@ function getDriverStatusLabel(j) {
   return "Awaiting Response";
 }
 
+function formatMinutes(mins) {
+  if (typeof mins !== "number") return "-";
+  const h = Math.floor(mins / 60).toString().padStart(2, "0");
+  const m = (mins % 60).toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 /** ✅ Driver My Work page */
 export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
   if (!els.contentArea) return;
 
   const email = (currentUser?.email || "").toLowerCase().trim();
 
-  const mine = (jobs || [])
-    .filter((j) => !j.deleted)
+    const mine = (jobs || [])
+      .filter((j) => !j.deleted)
+      .filter((j) => j.dispatchStatus !== "Pending")
     .filter((j) => {
       if (isAdmin) return true;
+
+      // dutySpans are already filtered in main.js by driverEmployeeNumber + date
+      if (j.driverEmployeeNumber) return true;
 
       const driverEmail = (j.driverEmail || "").toLowerCase().trim();
       return !!email && driverEmail === email;
@@ -218,32 +254,41 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
           ? [j.pdfLink]
           : [];
 
-      const statusLabel = getDriverStatusLabel(j);
+              let statusLabel = "Confirmed";
+
+        if (j.dispatchStatus === "Cancelled") {
+          statusLabel = "Cancelled";
+        }
 
       return `
-        <div class="card jobCard" data-job-id="${escapeHtml(j.id)}" style="margin-top:10px; cursor:pointer;">
+                    <div
+              class="card jobCard"
+              data-job-id="${escapeHtml(j.id)}"
+              style="
+                margin-top:10px;
+                cursor:pointer;
+                ${j.dispatchStatus === "Cancelled" ? "background:#fff1f1; border:1px solid #e57373;" : ""}
+              "
+            >
           <div class="row">
             <div style="min-width:280px;flex:1">
-              <div class="muted">${escapeHtml(j.jobId || j.id || "-")}</div>
+              <div class="muted mobileHide">${escapeHtml(j.jobId || j.id || "-")}</div>
               <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.serviceDate || j.date))}</div>
 
-              <div style="margin-top:8px">
-                <b>Job:</b> ${escapeHtml(j.jobDescription || "-")}
-              </div>
+                ${
+                  j.jobDescription
+                    ? `
+                      <div style="margin-top:8px">
+                        <b>Job:</b> ${escapeHtml(j.jobDescription)}
+                      </div>
+                    `
+                    : ``
+                }
 
               <div style="margin-top:8px;font-size:13px">
-                <b>Depot:</b> ${escapeHtml(j.depotStartTime || "-")} → ${escapeHtml(j.depotFinishTime || "-")}
+                <b>Depot:</b> ${escapeHtml(formatMinutes(j.startMin))} → ${escapeHtml(formatMinutes(j.endMin))}
               </div>
 
-              ${
-                j.driverName || j.driverEmail
-                  ? `
-                    <div class="muted" style="margin-top:8px">
-                      <b>Driver:</b> ${escapeHtml(j.driverName || j.driverEmail || "-")}
-                    </div>
-                  `
-                  : ``
-              }
 
               ${
                 links.length
@@ -261,14 +306,45 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
               }
             </div>
 
-            <div style="min-width:230px">
-              <div style="font-size:13px;margin-bottom:8px">
-                <b>Status:</b> ${escapeHtml(statusLabel)}
+              <div style="min-width:230px">
+                <div style="font-size:13px;margin-bottom:8px">
+                  <b>Status:</b> 
+                  <span style="color: ${j.dispatchStatus === "Cancelled" ? "red" : "green"}; font-weight: 600;">
+                    ${escapeHtml(statusLabel)}
+                  </span>
+                  ${j.dispatchStatus === "Cancelled" 
+                    ? `<div style="margin-top:8px; color:#c62828; font-weight:500;">
+                        This job has been cancelled
+                      </div>` 
+                    : ``}
+                </div>
+
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px">
+                  <button 
+                    data-c="${escapeHtml(j.id)}" 
+                    data-v="Yes"
+                    style="
+                      ${j.driverAcknowledgment === "Yes" ? "background:#2e7d32; color:white; border:1px solid #2e7d32;" : ""}
+                      ${j.dispatchStatus === "Cancelled" ? "opacity:0.5; cursor:not-allowed;" : ""}
+                    "
+                    ${j.dispatchStatus === "Cancelled" ? "disabled" : ""}
+                  >
+                    Yes
+                  </button>
+
+                  <button 
+                    data-c="${escapeHtml(j.id)}" 
+                    data-v="No"
+                    style="
+                      ${j.driverAcknowledgment === "No" ? "background:#c62828; color:white; border:1px solid #c62828;" : ""}
+                      ${j.dispatchStatus === "Cancelled" ? "opacity:0.5; cursor:not-allowed;" : ""}
+                    "
+                    ${j.dispatchStatus === "Cancelled" ? "disabled" : ""}
+                  >
+                    No
+                  </button>
+                </div>
               </div>
-              <div class="muted" style="margin-top:10px">
-                Tap to view job details.
-              </div>
-            </div>
           </div>
         </div>
       `;
@@ -283,6 +359,13 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
   [...els.contentArea.querySelectorAll(".jobCard")].forEach((el) => {
     el.onclick = () => {
       const jobId = el.getAttribute("data-job-id");
+
+      const job = (state.driverDutySpans || []).find(j => j.id === jobId);
+
+      if (job?.dispatchStatus === "Cancelled") {
+        return; // ❌ do nothing if cancelled
+      }
+
       state.selectedJobId = jobId;
       go("jobDetails");
     };

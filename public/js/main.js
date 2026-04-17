@@ -4,13 +4,21 @@ import { onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstati
 import { auth, provider } from "./firebase.js";
 import { ADMIN_EMAILS } from "./config.js";
 import { state } from "./state.js";
-import { normalizeEmail } from "./utils.js";
-
-import { listenShifts, listenLegs, patchShift, patchLeg } from "./db.js";
+import { normalizeEmail, escapeHtml } from "./utils.js";
+import {
+  listenShifts,
+  listenLegs,
+  listenDutySpansByDriverAndDate,
+  listenDutySpansByDriverAndDateRange,
+  listenBlocksByDate,
+  patchShift,
+  patchLeg,
+  getEmployeeByEmail
+} from "./db.js";
 import { els, showError, renderAuth, renderSidebar, renderMyWork } from "./ui.js";
-
 import { renderShifts } from "./shifts_ui.js";
 import { openLegModal } from "./modals.js";
+import { updateDutySpanDriverAcknowledgment } from "./db.js";
 
 /* =========================================================
    Helpers
@@ -22,6 +30,9 @@ function isAdminEmail(email) {
 function stopAllListeners() {
   if (state.unsubscribeShifts) state.unsubscribeShifts();
   state.unsubscribeShifts = null;
+
+  if (state.unsubscribeDriverDutySpans) state.unsubscribeDriverDutySpans();
+  state.unsubscribeDriverDutySpans = null;
 
   if (state.unsubscribeLegsByShiftId) {
     Object.values(state.unsubscribeLegsByShiftId).forEach((fn) => {
@@ -150,13 +161,16 @@ function render() {
   // My Work page uses the new UI renderer
   if (state.activePage === "myWork") {
     renderMyWork(
-      state.shifts || [],
-      { currentUser: state.currentUser, isAdmin: state.isAdmin },
+      state.driverDutySpans || [],
       {
-        onConfirm: (shiftId, uiValue) => {
-          // UI sends CONFIRMED / CANT_DO; DB expects Yes / No
-          const dbValue = uiValue === "CONFIRMED" ? "Yes" : "No";
-          setShiftConfirmation(shiftId, dbValue);
+        currentUser: state.currentUser,
+        isAdmin: state.isAdmin,
+        isDriver: state.isDriver,
+        employee: state.employee
+      },
+      {
+        onConfirm: (dutySpanId, uiValue) => {
+          updateDutySpanDriverAcknowledgment(dutySpanId, uiValue);
         }
       }
     );
@@ -265,50 +279,146 @@ export async function go(pageId) {
     return;
   }
 
-if (pageId === "jobDetails") {
-  const job = state.jobs.find(j => j.id === state.selectedJobId);
+  if (pageId === "jobDetails") {
+    const job = (state.driverDutySpans || []).find(j => j.id === state.selectedJobId);
+    const dutyDate = String(job?.serviceDate || job?.date || "").trim();
+    console.log("jobDetails state.blocks:", state.blocks);
 
   if (!job) {
-    renderPlaceholder("Job Details", "Job not found");
+    renderPlaceholder("Duty Sheet", "Duty not found");
     return;
   }
 
   els.contentArea.innerHTML = `
     <div class="card">
-      <h3>Job Details</h3>
+      <h3>Duty Sheet</h3>
 
-      <div style="margin-top:10px">
-        <b>Date:</b> ${job.serviceDate || job.date || "-"}
-      </div>
+    <div style="margin-top:10px">
+      <b>Duty Time:</b> ${formatMinutes(job.startMin)} → ${formatMinutes(job.endMin)}
+    </div>
 
-      <div style="margin-top:10px">
-        <b>Job:</b> ${job.jobDescription || "-"}
-      </div>
+    <div style="margin-top:10px">
+      <b>Status:</b> ${job.dispatchStatus === "Cancelled" ? "Cancelled" : "Confirmed"}
+    </div>
 
-      <div style="margin-top:10px">
-        <b>Depot:</b> ${job.depotStartTime || "-"} → ${job.depotFinishTime || "-"}
-      </div>
+    <div style="margin-top:16px; font-weight:700;">
+      Assigned Jobs
+    </div>
 
-      <div style="margin-top:10px">
-        <b>Driver:</b> ${job.driverName || job.driverEmail || "-"}
-      </div>
+    ${(() => {
+      const rows = [];
 
-      <div style="margin-top:20px">
-        <button id="yesBtn">Yes</button>
-        <button id="noBtn">No</button>
-      </div>
+        rows.push({
+          label: "Sign on",
+          time: formatMinutes(job.startMin)
+        });
+
+        rows.push({
+          label: "Depart depot",
+          time: formatMinutes(Number(job.startMin || 0) + 5)
+        });
+      console.log("sample block:", state.blocks?.[0]);
+      const jobs = (state.blocks || [])
+        .filter((b) => {
+          const sameDate =
+            String(b.serviceDate || b.date || "").trim() ===
+            String(job.serviceDate || job.date || "").trim();
+
+          const assignedDriver =
+            String(
+              b.assignedDriverEmployeeNumber ||
+              b.assignedDriverId ||
+              b.driverId ||
+              ""
+            ).trim();
+
+          const sameDriver =
+            assignedDriver === String(job.driverEmployeeNumber || "").trim();
+
+          const start = Number(b.startMin ?? b.startMinutes ?? 0);
+          const end = Number(b.endMin ?? b.endMinutes ?? 0);
+
+          const insideDuty =
+            start >= Number(job.startMin || 0) &&
+            end <= Number(job.endMin || 0);
+
+          return sameDate && sameDriver && insideDuty;
+        })
+        .sort((a, b) => {
+          const aStart = Number(a.startMin ?? a.startMinutes ?? 0);
+          const bStart = Number(b.startMin ?? b.startMinutes ?? 0);
+          return aStart - bStart;
+        });
+          jobs.forEach((b) => {
+            const from = b.fromName || b.from || b.startLocation || "Start";
+            const to = b.toName || b.to || b.endLocation || "Destination";
+
+            const startMin = Number(b.startMin ?? b.startMinutes ?? 0);
+            const endMin = Number(b.endMin ?? b.endMinutes ?? 0);
+
+            rows.push({
+              label: `Depart ${from}`,
+              time: formatMinutes(startMin)
+            });
+
+            rows.push({
+              label: `Arrive ${to}`,
+              time: formatMinutes(endMin)
+            });
+          });
+
+      if (Array.isArray(job.breaks)) {
+        job.breaks.forEach((b) => {
+          rows.push({
+            label: "Meal break",
+            time: `${formatMinutes(b.startMin)} – ${formatMinutes(b.endMin)}`
+          });
+        });
+      }
+
+      rows.push({
+        label: "Duty finish",
+        time: formatMinutes(job.endMin)
+      });
+
+      return rows
+        .map(
+          (r) => `
+            <div style="margin-top:8px; display:flex; justify-content:space-between; gap:12px;">
+              <div style="flex:1; min-width:0;">${escapeHtml(r.label)}</div>
+              <div style="font-weight:600; white-space:nowrap;">${escapeHtml(r.time)}</div>
+            </div>
+          `
+        )
+        .join("");
+    })()}
+
+    <div style="margin-top:20px">
+      <button id="yesBtn">Yes</button>
+      <button id="noBtn">No</button>
     </div>
   `;
 
-  document.getElementById("yesBtn").onclick = () => {
-    alert("Confirmed (next step we save to DB)");
-  };
+    document.getElementById("yesBtn").onclick = () => {
+      alert("Confirmed (next step we save to DB)");
+    };
 
-  document.getElementById("noBtn").onclick = () => {
-    alert("Cannot do (next step we save to DB)");
-  };
+    document.getElementById("noBtn").onclick = () => {
+      alert("Cannot do (next step we save to DB)");
+    };
 
-  return;
+    if (!state.blocks && dutyDate) {
+      listenBlocksByDate(
+        dutyDate,
+        (blocks) => {
+          state.blocks = blocks || [];
+          render();
+        },
+        (e) => showError(e?.message || "Failed to load blocks")
+      );
+    }
+
+    return;
 }
 
   // Shared menu
@@ -334,7 +444,7 @@ if (pageId === "jobDetails") {
 
   // Driver menu
   if (pageId === "myWork") {
-    loadShifts({ mode: "driver" });
+    loadDriverWork();
     return;
   }
 
@@ -346,6 +456,63 @@ if (pageId === "jobDetails") {
   // Fallback
   loadShifts({ mode: "driver" });
 }
+
+function loadDriverWork() {
+  showError("");
+  stopAllListeners();
+
+  if (!state.currentUser) {
+    els.contentArea.innerHTML = `Please sign in to view work.`;
+    return;
+  }
+
+  const driverEmployeeNumber = String(state.employee?.employeeNumber || "").trim();
+
+  if (!driverEmployeeNumber) {
+    els.contentArea.innerHTML = `<div class="muted">No driver employee number found.</div>`;
+    return;
+  }
+
+      const now = new Date();
+    const day = now.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+
+    const start = new Date(now);
+    start.setDate(now.getDate() + diffToMonday);
+
+    const end = new Date(start);
+    end.setDate(start.getDate() + 13);
+
+    const startDate = start.toISOString().slice(0, 10);
+    const endDate = end.toISOString().slice(0, 10);
+
+  console.log("loadDriverWork called");
+  console.log("driver email:", state.currentUser?.email || null);
+  console.log("driver employeeNumber:", driverEmployeeNumber);
+  console.log("driver range:", startDate, "→", endDate);
+
+  els.contentArea.innerHTML = `<div class="muted">Loading work…</div>`;
+
+  state.unsubscribeDriverDutySpans = listenDutySpansByDriverAndDateRange(
+    driverEmployeeNumber,
+    startDate,
+    endDate,
+    (dutySpans) => {
+      state.driverDutySpans = dutySpans || [];
+      console.log("driver duty spans loaded:", state.driverDutySpans);
+      render();
+    },
+    (e) => showError(e?.message || "Failed to load duty spans")
+  );
+}
+
+function formatMinutes(mins) {
+  if (typeof mins !== "number") return "-";
+  const h = String(Math.floor(mins / 60)).padStart(2, "0");
+  const m = String(mins % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 window.go = go;
 function setupMobileMenu() {
   const menuBtn = document.getElementById("menuToggleBtn");
@@ -382,23 +549,85 @@ function setupMobileMenu() {
    Auth Boot
 ========================================================= */
 setupMobileMenu();
-onAuthStateChanged(auth, (u) => {
-  state.currentUser = u;
-  state.isAdmin = !!u && isAdminEmail(u.email);
 
-  renderAuth(
-    { currentUser: state.currentUser, isAdmin: state.isAdmin },
-    () => signInWithPopup(auth, provider),
-    () => signOut(auth)
+onAuthStateChanged(auth, async (u) => {
+  state.currentUser = u;
+
+  // ✅ NEW (add this block)
+  state.employee = null;
+
+if (u?.email) {
+  try {
+    console.log("Signed in email:", u.email);
+    const emp = await getEmployeeByEmail(u.email);
+    state.employee = emp || null;
+    console.log("Employee match:", emp);
+  } catch (e) {
+    console.error("Employee lookup failed", e);
+  }
+}
+
+  // ❗ KEEP EXISTING (do NOT change yet)
+  state.isAdmin =
+  !!u &&
+  (
+    isAdminEmail(u.email) ||
+    String(state.employee?.role || "").trim().toLowerCase() === "admin" ||
+    String(state.employee?.accessLevel || "").trim().toLowerCase().includes("admin")
   );
+
+  state.isDriver =
+  !!u &&
+  !!state.employee &&
+  String(state.employee?.status || "").trim().toLowerCase() === "active" &&
+  (
+    String(state.employee?.role || "").trim().toLowerCase() === "driver" ||
+    String(state.employee?.accessLevel || "").trim().toLowerCase() === "driver"
+  );
+
+renderAuth(
+  state.currentUser,
+  state.employee,
+  () => signInWithPopup(auth, provider),
+  () => signOut(auth)
+)
 
   els.contentArea.style.display = u ? "block" : "none";
 
   stopAllListeners();
 
-  if (!u) return;
+if (!u) return;
 
-  // Default page
-  state.activePage = state.isAdmin ? "adminBookings" : "myWork";
+// ✅ ADD THIS (you are missing it)
+state.isDriver =
+  !!u &&
+  !!state.employee &&
+  String(state.employee?.status || "").trim().toLowerCase() === "active" &&
+  (
+    String(state.employee?.role || "").trim().toLowerCase() === "driver" ||
+    String(state.employee?.accessLevel || "").trim().toLowerCase() === "driver"
+  );
+
+// ✅ KEEP THIS
+if (state.isAdmin) {
+  state.activePage = "adminBookings";
   go(state.activePage);
+  return;
+}
+
+// ✅ KEEP THIS
+if (state.isDriver) {
+  state.activePage = "myWork";
+  go(state.activePage);
+  return;
+}
+
+// ✅ KEEP THIS
+showError("Your account is signed in, but no active employee access was found.");
+els.contentArea.innerHTML = `
+  <div class="card">
+    <h3>Access not configured</h3>
+    <div class="muted">Please contact admin to link your email to an active employee record.</div>
+</div>
+`;
 });

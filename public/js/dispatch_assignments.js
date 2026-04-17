@@ -1,4 +1,4 @@
-import { updateBlock, addDutySpan } from "./db.js";
+import { updateBlock, addDutySpan, getEmployee } from "./db.js";
 
 export async function assignBlockToDriver({
   block,
@@ -15,6 +15,14 @@ export async function assignBlockToDriver({
     throw new Error("Driver employee number is required.");
   }
 
+    // ✅ ADD THIS RIGHT HERE
+  const driver = await getEmployee(driverEmployeeNumber);
+  const driverEmail = String(driver?.email || "").trim().toLowerCase();
+
+  if (!driverEmail) {
+    throw new Error("Driver email not found for selected employee.");
+  }
+
 console.log("assignBlockToDriver()", {
   blockId: block?.id,
   driverEmployeeNumber,
@@ -28,6 +36,13 @@ console.log("assignBlockToDriver()", {
     assignedDriverName: String(driverName || "").trim(),
     dispatchStatus: "Assigned"
   });
+
+console.log("ABOUT TO CREATE SHIFT", {
+  serviceDate,
+  driverEmail,
+  driverName,
+  driverEmployeeNumber
+});
 
   if (createDutySpan) {
     await addDutySpan({
