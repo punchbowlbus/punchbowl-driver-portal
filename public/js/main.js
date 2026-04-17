@@ -177,6 +177,11 @@ function render() {
     return;
   }
 
+  if (state.activePage === "jobDetails") {
+    go("jobDetails");
+    return;
+  }
+
   // Existing shift renderer for charters + admin all-shifts
   const isAdminViewAll = state.isAdmin && state.activePage === "allShifts";
 
@@ -279,147 +284,203 @@ export async function go(pageId) {
     return;
   }
 
-  if (pageId === "jobDetails") {
-    const job = (state.driverDutySpans || []).find(j => j.id === state.selectedJobId);
-    const dutyDate = String(job?.serviceDate || job?.date || "").trim();
-    console.log("jobDetails state.blocks:", state.blocks);
+  
+        if (pageId === "jobDetails") {
+          const job = (state.driverDutySpans || []).find(j => j.id === state.selectedJobId);
+          const dutyDate = String(job?.serviceDate || job?.date || "").trim();
+          console.log("jobDetails state.blocks:", state.blocks);
 
-  if (!job) {
-    renderPlaceholder("Duty Sheet", "Duty not found");
-    return;
-  }
+          if (!job) {
+            renderPlaceholder("Duty Sheet", "Duty not found");
+            return;
+          }
 
-  els.contentArea.innerHTML = `
-    <div class="card">
-      <h3>Duty Sheet</h3>
+          if (String(state.blocksDate || "") !== dutyDate) {
+            state.blocks = null;
+            state.blocksDate = dutyDate;
+          }
 
-    <div style="margin-top:10px">
-      <b>Duty Time:</b> ${formatMinutes(job.startMin)} → ${formatMinutes(job.endMin)}
-    </div>
+          els.contentArea.innerHTML = `
+            <div class="card">
+              <h3>Duty Sheet</h3>
 
-    <div style="margin-top:10px">
-      <b>Status:</b> ${job.dispatchStatus === "Cancelled" ? "Cancelled" : "Confirmed"}
-    </div>
+              <div style="margin-top:10px">
+                <b>Duty Time:</b> ${formatMinutes(job.startMin)} → ${formatMinutes(job.endMin)}
+              </div>
 
-    <div style="margin-top:16px; font-weight:700;">
-      Assigned Jobs
-    </div>
+              <div style="margin-top:10px">
+                <b>Status:</b> ${job.dispatchStatus === "Cancelled" ? "Cancelled" : "Confirmed"}
+              </div>
 
-    ${(() => {
-      const rows = [];
+              <div style="margin-top:16px; font-weight:700;">
+                Assigned Jobs
+              </div>
 
-        rows.push({
-          label: "Sign on",
-          time: formatMinutes(job.startMin)
-        });
+              ${(() => {
+                const rows = [];
 
-        rows.push({
-          label: "Depart depot",
-          time: formatMinutes(Number(job.startMin || 0) + 5)
-        });
-      console.log("sample block:", state.blocks?.[0]);
-      const jobs = (state.blocks || [])
-        .filter((b) => {
-          const sameDate =
-            String(b.serviceDate || b.date || "").trim() ===
-            String(job.serviceDate || job.date || "").trim();
+                rows.push({
+                  label: "Sign on",
+                  time: formatMinutes(job.startMin),
+                  sortMin: Number(job.startMin || 0)
+                });
 
-          const assignedDriver =
-            String(
-              b.assignedDriverEmployeeNumber ||
-              b.assignedDriverId ||
-              b.driverId ||
-              ""
-            ).trim();
+                rows.push({
+                  label: "Depart depot",
+                  time: formatMinutes(Number(job.startMin || 0) + 5),
+                  sortMin: Number(job.startMin || 0) + 5
+                });
 
-          const sameDriver =
-            assignedDriver === String(job.driverEmployeeNumber || "").trim();
+                const jobs = (state.blocks || [])
+                  .filter((b) => {
+                    const blockDutySpanId = String(b.dutySpanId || "").trim();
 
-          const start = Number(b.startMin ?? b.startMinutes ?? 0);
-          const end = Number(b.endMin ?? b.endMinutes ?? 0);
+                    if (blockDutySpanId) {
+                      return blockDutySpanId === String(job.id || "").trim();
+                    }
 
-          const insideDuty =
-            start >= Number(job.startMin || 0) &&
-            end <= Number(job.endMin || 0);
+                    const sameDate =
+                      String(b.serviceDate || b.date || "").trim() ===
+                      String(job.serviceDate || job.date || "").trim();
 
-          return sameDate && sameDriver && insideDuty;
-        })
-        .sort((a, b) => {
-          const aStart = Number(a.startMin ?? a.startMinutes ?? 0);
-          const bStart = Number(b.startMin ?? b.startMinutes ?? 0);
-          return aStart - bStart;
-        });
-          jobs.forEach((b) => {
-            const from = b.fromName || b.from || b.startLocation || "Start";
-            const to = b.toName || b.to || b.endLocation || "Destination";
+                    const assignedDriver =
+                      String(
+                        b.assignedDriverEmployeeNumber ||
+                        b.assignedDriverId ||
+                        b.driverId ||
+                        ""
+                      ).trim();
 
-            const startMin = Number(b.startMin ?? b.startMinutes ?? 0);
-            const endMin = Number(b.endMin ?? b.endMinutes ?? 0);
+                    const sameDriver =
+                      assignedDriver === String(job.driverEmployeeNumber || "").trim();
 
-            rows.push({
-              label: `Depart ${from}`,
-              time: formatMinutes(startMin)
-            });
+                    const start = Number(b.startMin ?? b.startMinutes ?? 0);
+                    const end = Number(b.endMin ?? b.endMinutes ?? 0);
 
-            rows.push({
-              label: `Arrive ${to}`,
-              time: formatMinutes(endMin)
-            });
-          });
+                    const insideDuty =
+                      start >= Number(job.startMin || 0) &&
+                      end <= Number(job.endMin || 0);
 
-      if (Array.isArray(job.breaks)) {
-        job.breaks.forEach((b) => {
-          rows.push({
-            label: "Meal break",
-            time: `${formatMinutes(b.startMin)} – ${formatMinutes(b.endMin)}`
-          });
-        });
-      }
+                    return sameDate && sameDriver && insideDuty;
+                  });
 
-      rows.push({
-        label: "Duty finish",
-        time: formatMinutes(job.endMin)
-      });
+                jobs.forEach((b) => {
+                  const from = b.fromName || b.from || b.startLocation || "Start";
+                  const to = b.toName || b.to || b.endLocation || "Destination";
 
-      return rows
-        .map(
-          (r) => `
-            <div style="margin-top:8px; display:flex; justify-content:space-between; gap:12px;">
-              <div style="flex:1; min-width:0;">${escapeHtml(r.label)}</div>
-              <div style="font-weight:600; white-space:nowrap;">${escapeHtml(r.time)}</div>
+                  const startMin = Number(b.startMin ?? b.startMinutes ?? 0);
+                  const endMin = Number(b.endMin ?? b.endMinutes ?? 0);
+
+                  rows.push({
+                    label: `Depart ${from}`,
+                    time: formatMinutes(startMin),
+                    sortMin: startMin
+                  });
+
+                  rows.push({
+                    label: `Arrive ${to}`,
+                    time: formatMinutes(endMin),
+                    sortMin: endMin
+                  });
+                });
+
+                  if (Array.isArray(job.breaks)) {
+                    job.breaks.forEach((b) => {
+                      const breakStart = Number(b.startMin || 0);
+                      const breakEnd = Number(b.endMin || 0);
+                      const breakType = String(b.type || "").trim().toLowerCase();
+
+                      rows.push({
+                        label: breakType === "crib" ? "Crib break" : "Meal break",
+                        time: `${formatMinutes(breakStart)} – ${formatMinutes(breakEnd)}`,
+                        sortMin: breakStart
+                      });
+                    });
+                  }
+
+                  rows.push({
+                    label: "Estimated finish<br><span style='font-size:12px;color:#666'>(subject to change)</span>",
+                    time: formatMinutes(job.endMin),
+                    sortMin: Number(job.endMin || 0)
+                  });
+
+                rows.sort((a, b) => a.sortMin - b.sortMin);
+
+                return rows
+                  .map(
+                    (r) => `
+                      <div style="margin-top:8px; display:flex; justify-content:space-between; gap:12px;">
+                        <div style="flex:1; min-width:0;">${r.label}</div>
+                        <div style="font-weight:600; white-space:nowrap;">${escapeHtml(r.time)}</div>
+                      </div>
+                    `
+                  )
+                  .join("");
+              })()}
+              <div style="margin-top:20px; display:flex; gap:8px;">
+                <button 
+                  id="yesBtn"
+                  style="
+                    ${job.driverAcknowledgment === "Yes" ? "background:#2e7d32; color:white; border:1px solid #2e7d32;" : ""}
+                  "
+                >
+                  Yes
+                </button>
+
+                <button 
+                  id="noBtn"
+                  style="
+                    ${job.driverAcknowledgment === "No" ? "background:#c62828; color:white; border:1px solid #c62828;" : ""}
+                  "
+                >
+                  No
+                </button>
+              </div>
+              <div style="
+                position: fixed;
+                bottom: 20px;
+                right: 20px;
+                z-index: 1000;
+              ">
+                <button id="backBtn" style="
+                  padding: 10px 14px;
+                  border-radius: 20px;
+                  border: none;
+                  background: #d21919;
+                  color: white;
+                  font-weight: 600;
+                  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+                ">
+                  ← Back
+                </button>
+              </div>
             </div>
-          `
-        )
-        .join("");
-    })()}
+          `;
 
-    <div style="margin-top:20px">
-      <button id="yesBtn">Yes</button>
-      <button id="noBtn">No</button>
-    </div>
-  `;
+            document.getElementById("yesBtn").onclick = () => {
+              updateDutySpanDriverAcknowledgment(job.id, "Yes");
+            };
 
-    document.getElementById("yesBtn").onclick = () => {
-      alert("Confirmed (next step we save to DB)");
-    };
+            document.getElementById("noBtn").onclick = () => {
+              updateDutySpanDriverAcknowledgment(job.id, "No");
+            };
+            document.getElementById("backBtn").onclick = () => {
+              go("myWork");
+            };
 
-    document.getElementById("noBtn").onclick = () => {
-      alert("Cannot do (next step we save to DB)");
-    };
+          if (!state.blocks && dutyDate) {
+            listenBlocksByDate(
+              dutyDate,
+              (blocks) => {
+                state.blocks = blocks || [];
+                go("jobDetails");
+              },
+              (e) => showError(e?.message || "Failed to load blocks")
+            );
+          }
 
-    if (!state.blocks && dutyDate) {
-      listenBlocksByDate(
-        dutyDate,
-        (blocks) => {
-          state.blocks = blocks || [];
-          render();
-        },
-        (e) => showError(e?.message || "Failed to load blocks")
-      );
-    }
-
-    return;
-}
+          return;
+        }
 
   // Shared menu
   if (pageId === "notice") {

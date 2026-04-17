@@ -1798,7 +1798,13 @@ function attachDriverRowEvents(activeDrivers) {
       return;
     }
 
-    if (!driverHasDutySpanCoverage(driverEmpNo, blockStart, blockEnd)) {
+    const matchingDutySpans = getDriverDutySpans(driverEmpNo).filter((span) => {
+      const spanStart = Number(span.startMin || 0);
+      const spanEnd = Number(span.endMin || 0);
+      return blockStart >= spanStart && blockEnd <= spanEnd;
+    });
+
+    if (!matchingDutySpans.length) {
       alert(
         "This job is outside the driver's duty span. Please extend or edit the duty span first."
       );
@@ -1807,14 +1813,26 @@ function attachDriverRowEvents(activeDrivers) {
       return;
     }
 
-      try {
-        await assignBlockToDriver({
-          block,
-          serviceDate: getSelectedDate(),
-          driverEmployeeNumber: driverEmpNo,
-          driverName,
-          createDutySpan: false
-        });
+    if (matchingDutySpans.length > 1) {
+      alert(
+        "This job matches more than one duty span for this driver. Please fix the duty spans before assigning."
+      );
+      draggedBlockId = "";
+      clearAllTimelineRowDropStates();
+      return;
+    }
+
+    const matchedDutySpan = matchingDutySpans[0];
+
+    try {
+      await assignBlockToDriver({
+        block,
+        serviceDate: getSelectedDate(),
+        driverEmployeeNumber: driverEmpNo,
+        driverName,
+        dutySpanId: String(matchedDutySpan.id || ""),
+        createDutySpan: false
+      });
 
         console.log("Assigned block", blockId, "to driver", driverEmpNo);
       } catch (err) {

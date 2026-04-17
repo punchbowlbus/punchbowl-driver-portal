@@ -5,6 +5,7 @@ export async function assignBlockToDriver({
   serviceDate,
   driverEmployeeNumber,
   driverName,
+  dutySpanId = "",
   createDutySpan = true
 }) {
   if (!block?.id) {
@@ -15,7 +16,6 @@ export async function assignBlockToDriver({
     throw new Error("Driver employee number is required.");
   }
 
-    // ✅ ADD THIS RIGHT HERE
   const driver = await getEmployee(driverEmployeeNumber);
   const driverEmail = String(driver?.email || "").trim().toLowerCase();
 
@@ -23,26 +23,28 @@ export async function assignBlockToDriver({
     throw new Error("Driver email not found for selected employee.");
   }
 
-console.log("assignBlockToDriver()", {
-  blockId: block?.id,
-  driverEmployeeNumber,
-  driverName,
-  serviceDate,
-  createDutySpan
-});
+  console.log("assignBlockToDriver()", {
+    blockId: block?.id,
+    driverEmployeeNumber,
+    driverName,
+    serviceDate,
+    dutySpanId,
+    createDutySpan
+  });
 
   await updateBlock(block.id, {
     assignedDriverEmployeeNumber: String(driverEmployeeNumber).trim(),
     assignedDriverName: String(driverName || "").trim(),
+    dutySpanId: String(dutySpanId || "").trim(),
     dispatchStatus: "Assigned"
   });
 
-console.log("ABOUT TO CREATE SHIFT", {
-  serviceDate,
-  driverEmail,
-  driverName,
-  driverEmployeeNumber
-});
+  console.log("ABOUT TO CREATE SHIFT", {
+    serviceDate,
+    driverEmail,
+    driverName,
+    driverEmployeeNumber
+  });
 
   if (createDutySpan) {
     await addDutySpan({
@@ -71,6 +73,7 @@ export async function unassignBlockFromDriver(blockId) {
   await updateBlock(blockId, {
     assignedDriverEmployeeNumber: "",
     assignedDriverName: "",
+    dutySpanId: "",
     dispatchStatus: "Pending"
   });
 
