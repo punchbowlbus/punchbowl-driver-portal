@@ -399,7 +399,7 @@ export async function go(pageId) {
                   }
 
                   rows.push({
-                    label: "Estimated finish<br><span style='font-size:12px;color:#666'>(subject to change)</span>",
+                    label: "Estimated duty end<br><span style='font-size:12px;color:#666'>(subject to change)</span>",
                     time: formatMinutes(job.endMin),
                     sortMin: Number(job.endMin || 0)
                   });
