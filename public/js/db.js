@@ -128,7 +128,13 @@ export function listenBlocksByDate(date, onData, onErr) {
 
   return onSnapshot(
     qy,
-    (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true);
+
+      onData(list);
+    },
     onErr
   );
 }

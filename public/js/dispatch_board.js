@@ -2313,9 +2313,8 @@ function setupSyncedScroll() {
   );
 }
 
-loadBtn.onclick = () => {
-  const selectedDate = dispatchDateEl.value;
-  console.log("LOAD DISPATCH CLICKED", selectedDate);
+function loadDispatchForDate(selectedDate, { openPanel = false } = {}) {
+  console.log("LOAD DISPATCH", { selectedDate, openPanel });
 
   if (!selectedDate) {
     showError("Please select a dispatch date.");
@@ -2330,15 +2329,19 @@ loadBtn.onclick = () => {
   }
 
   if (unassignedJobsPanelEl) {
-    unassignedJobsPanelEl.style.display = "flex";
+    unassignedJobsPanelEl.style.display = openPanel ? "flex" : "none";
   }
 
   loadUnassignedJobsForDate(selectedDate);
   startDutySpanListener(selectedDate);
+}
+
+loadBtn.onclick = () => {
+  loadDispatchForDate(dispatchDateEl.value, { openPanel: true });
 };
 
 dispatchDateEl.onchange = () => {
-  loadBtn.click();
+  loadDispatchForDate(dispatchDateEl.value, { openPanel: false });
 };
 
 if (closeUnassignedJobsPanelBtn) {
@@ -2418,6 +2421,6 @@ nowLineTimer = setInterval(() => {
 }, 60000);
 
 console.log("BOTTOM OF DISPATCH FILE REACHED");
-loadBtn.click();
+loadDispatchForDate(today, { openPanel: false });
 
 }
