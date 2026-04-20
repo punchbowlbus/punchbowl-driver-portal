@@ -1843,6 +1843,11 @@ function attachDriverRowEvents(activeDrivers) {
   });
 }
 
+function getBusLabel(block) {
+  const match = String(block.notes || "").match(/Bus\s+(\d+)/i);
+  return match ? `Bus ${match[1]}` : "";
+}
+
 function renderUnassignedJobs(blocks, selectedDate) {
   if (!unassignedJobsPanelBodyEl) return;
 
@@ -1942,20 +1947,34 @@ function renderUnassignedJobs(blocks, selectedDate) {
 
       return sameDate && noDriver;
     })
-    .sort((a, b) => {
-      const aStart = getStartMin(a);
-      const bStart = getStartMin(b);
-      if (aStart !== bStart) return aStart - bStart;
+      .sort((a, b) => {
+        const aGroup = getGroupKey(a).toLowerCase();
+        const bGroup = getGroupKey(b).toLowerCase();
+        const groupCompare = aGroup.localeCompare(bGroup);
+        if (groupCompare !== 0) return groupCompare;
 
-      const aGroup = getGroupKey(a).toLowerCase();
-      const bGroup = getGroupKey(b).toLowerCase();
-      const groupCompare = aGroup.localeCompare(bGroup);
-      if (groupCompare !== 0) return groupCompare;
+        const typeRank = (block) => {
+          const t = String(getTypeText(block) || "").toLowerCase();
+          if (t === "forward") return 1;
+          if (t === "return") return 2;
+          return 9;
+        };
 
-      const aFrom = getFromText(a).toLowerCase();
-      const bFrom = getFromText(b).toLowerCase();
-      return aFrom.localeCompare(bFrom);
-    });
+        const typeCompare = typeRank(a) - typeRank(b);
+        if (typeCompare !== 0) return typeCompare;
+
+        const getBusNo = (block) => {
+          const match = String(block.notes || "").match(/Bus\s+(\d+)/i);
+          return match ? Number(match[1]) : 0;
+        };
+
+        const busCompare = getBusNo(a) - getBusNo(b);
+        if (busCompare !== 0) return busCompare;
+
+        const aStart = getStartMin(a);
+        const bStart = getStartMin(b);
+        return aStart - bStart;
+      });
 
   if (!unassigned.length) {
     unassignedJobsPanelBodyEl.innerHTML = `
@@ -1966,11 +1985,27 @@ function renderUnassignedJobs(blocks, selectedDate) {
     return;
   }
 
+  let lastGroup = "";
+  let lastType = "";
   unassignedJobsPanelBodyEl.innerHTML = unassigned
     .map((b) => {
       const groupName = getGroupKey(b);
       const directionText = getDirectionText(b);
       const typeText = getTypeText(b);
+      let headerHtml = "";
+      if (groupName !== lastGroup) {
+        headerHtml += `
+          <div style="
+            font-weight:700;
+            margin:10px 0 4px;
+            font-size:13px;
+          ">
+            ${escapeHtml(groupName)}
+          </div>
+        `;
+        lastGroup = groupName;
+        lastType = "";
+      }
       const fromText = getFromText(b);
       const toText = getToText(b);
       const startMin = getStartMin(b);
@@ -1990,9 +2025,10 @@ function renderUnassignedJobs(blocks, selectedDate) {
         durationMin ? `${durationMin} min` : ""
       ].filter(Boolean);
 
-      return `
-        <div
-          draggable="true"
+        return `
+          ${headerHtml}
+          <div
+            draggable="true"
           data-block-id="${escapeHtml(b.id || b.blockId || "")}"
           data-start="${startMin}"
           data-end="${endMin}"
@@ -2018,6 +2054,7 @@ function renderUnassignedJobs(blocks, selectedDate) {
             white-space:nowrap;
             overflow:hidden;
             text-overflow:ellipsis;
+            display:none;
           ">
             ${escapeHtml(groupName)}
           </div>
@@ -2057,17 +2094,11 @@ function renderUnassignedJobs(blocks, selectedDate) {
           }
 
           ${
-            typeText
+            typeText || getBusLabel(b)
               ? `
-                <div style="
-                  font-size:10px;
-                  margin-top:3px;
-                  opacity:0.85;
-                  white-space:nowrap;
-                  overflow:hidden;
-                  text-overflow:ellipsis;
-                ">
-                  ${escapeHtml(typeText)}
+                <div style="display:flex; gap:6px; margin-top:3px; align-items:center;">
+                  ${typeText ? `<span style="font-size:10px; opacity:0.85;">${escapeHtml(typeText)}</span>` : ""}
+                  ${getBusLabel(b) ? `<span style="font-size:10px; background:rgba(255,255,255,0.25); padding:2px 6px; border-radius:6px; font-weight:600;">${escapeHtml(getBusLabel(b))}</span>` : ""}
                 </div>
               `
               : ""

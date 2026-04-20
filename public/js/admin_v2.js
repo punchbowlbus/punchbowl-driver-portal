@@ -547,73 +547,85 @@ export function renderAdminBlocks() {
 
     ${renderJobGroupDropdownOnly()}
 
-    <div class="card" style="margin-top:18px">
-      <h3 style="margin-top:0">Add Block / Trip</h3>
+        <div class="card" style="margin-top:18px">
+          <h3 style="margin-top:0">Add Block / Trip</h3>
 
-      <div class="muted" style="margin-bottom:8px">
-        Saving under: <b id="blockJGLabel">No Job Group selected</b>
-      </div>
-
-      <input id="blockDate" type="date" />
-
-      <div class="muted" style="margin:10px 0 4px">Trip Pattern</div>
-      <select id="tripPattern">
-        <option value="ONE">One Way (1 leg)</option>
-        <option value="FR">Forward + Return (2 legs)</option>
-        <option value="LOOP">Loop / Multi-leg (many legs)</option>
-      </select>
-
-      <div id="oneWayWrap" style="margin-top:12px">
-        <div class="muted" style="margin-bottom:6px">Forward / One Way</div>
-
-        <input id="blockFrom" placeholder="From" />
-        <input id="blockTo" placeholder="To" />
-
-        <div style="display:flex; gap:10px">
-          <div style="flex:1">
-            <div class="muted" style="margin:6px 0 4px">Start Time</div>
-            <input id="blockStart" type="time" />
+          <div class="muted" style="margin-bottom:8px">
+            Saving under: <b id="blockJGLabel">No Job Group selected</b>
           </div>
-          <div style="flex:1">
-            <div class="muted" style="margin:6px 0 4px">End Time</div>
-            <input id="blockEnd" type="time" />
-          </div>
-        </div>
 
-        <div class="muted" style="margin:10px 0 4px">Block Type</div>
-        <select id="blockType">
-          <option value="Forward">Forward</option>
-          <option value="Return">Return</option>
-          <option value="Loop">Loop</option>
-          <option value="Extra">Extra</option>
-        </select>
+          <input id="blockDate" type="date" />
 
-        <div id="returnWrap" style="display:none; margin-top:12px; padding-top:10px; border-top:1px solid #eee">
-          <div class="muted" style="margin-bottom:6px">Return (times only — From/To will be auto swapped)</div>
+          <div class="muted" style="margin:10px 0 4px">Trip Pattern</div>
 
-          <div style="display:flex; gap:10px">
-            <div style="flex:1">
-              <div class="muted" style="margin:6px 0 4px">Return Start Time</div>
-              <input id="returnStart" type="time" />
-            </div>
-            <div style="flex:1">
-              <div class="muted" style="margin:6px 0 4px">Return End Time</div>
-              <input id="returnEnd" type="time" />
+          <select id="tripPattern">
+            <option value="ONE">One Way (1 leg)</option>
+            <option value="FR">Forward + Return (2 legs)</option>
+            <option value="LOOP">Loop / Multi-leg (many legs)</option>
+          </select>
+
+          <!-- ✅ CORRECT placement -->
+          <div style="margin-top:10px">
+            <div class="muted" style="margin-bottom:4px">How many buses?</div>
+            <input id="busCount" type="number" min="1" value="1" style="width:120px" />
+            <div style="font-size:12px; color:#666; margin-top:4px;">
+              Creates multiple identical blocks
             </div>
           </div>
+
+          <div id="oneWayWrap" style="margin-top:12px">
+            <div class="muted" style="margin-bottom:6px">Forward / One Way</div>
+
+            <input id="blockFrom" placeholder="From" />
+            <input id="blockTo" placeholder="To" />
+
+            <div style="display:flex; gap:10px">
+              <div style="flex:1">
+                <div class="muted" style="margin:6px 0 4px">Start Time</div>
+                <input id="blockStart" type="time" />
+              </div>
+              <div style="flex:1">
+                <div class="muted" style="margin:6px 0 4px">End Time</div>
+                <input id="blockEnd" type="time" />
+              </div>
+            </div>
+
+            <div class="muted" style="margin:10px 0 4px">Block Type</div>
+            <select id="blockType">
+              <option value="Forward">Forward</option>
+              <option value="Return">Return</option>
+              <option value="Loop">Loop</option>
+              <option value="Extra">Extra</option>
+            </select>
+
+            <div id="returnWrap" style="display:none; margin-top:12px; padding-top:10px; border-top:1px solid #eee">
+              <div class="muted" style="margin-bottom:6px">
+                Return (times only — From/To will be auto swapped)
+              </div>
+
+              <div style="display:flex; gap:10px">
+                <div style="flex:1">
+                  <div class="muted" style="margin:6px 0 4px">Return Start Time</div>
+                  <input id="returnStart" type="time" />
+                </div>
+                <div style="flex:1">
+                  <div class="muted" style="margin:6px 0 4px">Return End Time</div>
+                  <input id="returnEnd" type="time" />
+                </div>
+              </div>
+            </div>
+
+            ${renderMultiLegRowsContainer()}
+
+            <textarea id="blockNotes" placeholder="Notes (bus 1/bus 2, pax, changes, school time change etc.)"></textarea>
+
+            <button id="createBlock">Save</button>
+
+            <div class="muted" style="margin-top:8px">
+              Tip: For 2 buses, create another leg (or duplicate) and put “Bus 1 / Bus 2” in Notes.
+            </div>
+          </div>
         </div>
-
-        ${renderMultiLegRowsContainer()}
-
-        <textarea id="blockNotes" placeholder="Notes (bus 1/bus 2, pax, changes, school time change etc.)"></textarea>
-
-        <button id="createBlock">Save</button>
-
-        <div class="muted" style="margin-top:8px">
-          Tip: For 2 buses, create another leg (or duplicate) and put “Bus 1 / Bus 2” in Notes.
-        </div>
-      </div>
-    </div>
   `;
 
   wireJobGroupDropdownOnly();
@@ -627,6 +639,8 @@ function wireCreateBlockAdvanced() {
 
   btn.onclick = async () => {
     showError("");
+        const busCount = Number(document.getElementById("busCount")?.value || 1);
+        console.log("busCount:", busCount);
     try {
       if (!state.selectedJobGroupId) return showError("Please select a Job Group first.");
 
@@ -702,18 +716,22 @@ function wireCreateBlockAdvanced() {
         const err = validateLegBasics(from, to, start, end);
         if (err) return showError(err);
 
-        await addBlock({
-          jobGroupId: state.selectedJobGroupId,
-          serviceDate,
-          from,
-          to,
-          startMin: minFromTimeStr(start),
-          endMin: minFromTimeStr(end),
-          blockType: baseType,
-          notes,
-          createdBy,
-          tripPattern: "ONE"
-        });
+        for (let i = 0; i < busCount; i++) {
+          await addBlock({
+            jobGroupId: state.selectedJobGroupId,
+            serviceDate,
+            from,
+            to,
+            startMin: minFromTimeStr(start),
+            endMin: minFromTimeStr(end),
+            blockType: baseType,
+            notes: busCount > 1
+              ? `${notes || ""} | Bus ${i + 1}`
+              : notes,
+            createdBy,
+            tripPattern: "ONE"
+          });
+        }
 
         alert("Block saved ✅");
         document.getElementById("blockFrom").value = "";
@@ -738,8 +756,14 @@ function wireCreateBlockAdvanced() {
         if (rs == null || re == null) return showError("Invalid return times.");
         if (re <= rs) return showError("Return end time must be after return start time.");
 
+      for (let i = 0; i < busCount; i++) {
         const pairId = uid();
 
+        const busNote = busCount > 1
+          ? `${notes || ""} | Bus ${i + 1}`
+          : notes;
+
+        // Forward
         await addBlock({
           jobGroupId: state.selectedJobGroupId,
           serviceDate,
@@ -748,13 +772,14 @@ function wireCreateBlockAdvanced() {
           startMin: minFromTimeStr(start),
           endMin: minFromTimeStr(end),
           blockType: "Forward",
-          notes,
+          notes: busNote,
           createdBy,
           tripPattern: "FR",
           pairId,
           legIndex: 1
         });
 
+        // Return
         await addBlock({
           jobGroupId: state.selectedJobGroupId,
           serviceDate,
@@ -763,12 +788,13 @@ function wireCreateBlockAdvanced() {
           startMin: rs,
           endMin: re,
           blockType: "Return",
-          notes,
+          notes: busNote,
           createdBy,
           tripPattern: "FR",
           pairId,
           legIndex: 2
         });
+      }
 
         alert("Forward + Return saved ✅");
         document.getElementById("blockFrom").value = "";
@@ -981,14 +1007,24 @@ function wireBlocksBrowser() {
       });
     }
 
-    list = list
-      .slice()
-      .sort((a, b) => {
-        const da = a.serviceDate || "";
-        const db = b.serviceDate || "";
-        if (da !== db) return da.localeCompare(db);
-        return (a.startMin ?? 0) - (b.startMin ?? 0);
-      });
+      list = list
+        .slice()
+        .sort((a, b) => {
+          const da = a.serviceDate || "";
+          const db = b.serviceDate || "";
+          if (da !== db) return da.localeCompare(db);
+
+          const aStart = Number(a.startMin ?? 0);
+          const bStart = Number(b.startMin ?? 0);
+          if (aStart !== bStart) return aStart - bStart;
+
+          const getBusNo = (notes) => {
+            const match = String(notes || "").match(/Bus\s+(\d+)/i);
+            return match ? Number(match[1]) : 0;
+          };
+
+          return getBusNo(a.notes) - getBusNo(b.notes);
+        });
 
     renderBlocks(list);
   }
