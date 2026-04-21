@@ -528,6 +528,14 @@ if (pageId === "adminBulkDutySpans") {
             <div class="card">
               <h3>Duty Sheet</h3>
 
+                <div style="margin-top:10px">
+                  <b>Duty Date:</b> ${formatDutyDate(job.serviceDate)}
+                </div>
+
+                <div style="margin-top:10px">
+                  <b>Duty Number:</b> ${escapeHtml(String(job.dutyNumber || "-"))}
+                </div>
+
               <div style="margin-top:10px">
                 <b>Duty Time:</b> ${formatMinutes(job.startMin)} → ${formatMinutes(job.endMin)}
               </div>
@@ -789,6 +797,16 @@ function loadDriverWork() {
     },
     (e) => showError(e?.message || "Failed to load duty spans")
   );
+}
+
+function formatDutyDate(dateStr) {
+  if (!dateStr) return "-";
+
+  const d = new Date(dateStr);
+  if (isNaN(d)) return dateStr;
+
+  const options = { day: "2-digit", month: "short", year: "numeric", weekday: "short" };
+  return d.toLocaleDateString("en-AU", options);
 }
 
 function formatMinutes(mins) {
