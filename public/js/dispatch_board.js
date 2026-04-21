@@ -607,7 +607,15 @@ function renderDriverDetail(driver) {
                             Delete
                           </button>
                         </div>
-
+                          ${
+                            span.dutyNumber
+                              ? `
+                                <div style="font-weight:800; font-size:14px; margin-bottom:6px; color:#1d4ed8; padding-right:92px;">
+                                  Duty Number: ${escapeHtml(span.dutyNumber)}
+                                </div>
+                              `
+                              : ""
+                          }
                         <div style="font-weight:700; font-size:13px; padding-right:92px;">
                           ${minToTimeStr(span.startMin)} - ${minToTimeStr(span.endMin)}
                         </div>
@@ -783,6 +791,10 @@ function renderDriverDetail(driver) {
         <div id="driverDutySpanFormTitle_${empNo}" style="font-weight:700; margin-bottom:10px;">Create Duty Span</div>
 
         <div style="display:grid; gap:10px;">
+        <div>
+            <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Number</div>
+            <input id="dutyNumber_${empNo}" type="text" placeholder="e.g. 101" />
+          </div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
               <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Start</div>
@@ -1031,6 +1043,7 @@ function renderDriverDetail(driver) {
       const startLocation = document.getElementById(`dutyStartLocation_${empNo}`)?.value || "";
       const endLocation = document.getElementById(`dutyEndLocation_${empNo}`)?.value || "";
       const assignedBus = document.getElementById(`dutyAssignedBus_${empNo}`)?.value || "";
+      const dutyNumber = document.getElementById(`dutyNumber_${empNo}`)?.value || "";
 
       const startMin = timeStrToMin(dutyStart);
       const endMin = timeStrToMin(dutyEnd);
@@ -1111,6 +1124,7 @@ function renderDriverDetail(driver) {
           serviceDate: getSelectedDate(),
           driverEmployeeNumber: empNo,
           driverName: String(driver.displayName || driver.firstName || "").trim(),
+          dutyNumber,
           startMin,
           endMin,
           startLocation,
@@ -1156,6 +1170,7 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyStartLocation_${empNo}`).value = span.startLocation || "";
       document.getElementById(`dutyEndLocation_${empNo}`).value = span.endLocation || "";
       document.getElementById(`dutyAssignedBus_${empNo}`).value = span.assignedBus || "";
+      document.getElementById(`dutyNumber_${empNo}`).value = span.dutyNumber || "";
 
       clearBreakRows();
       (Array.isArray(span.breaks) ? span.breaks : []).forEach((b) => appendBreakRow(b));
@@ -2044,7 +2059,16 @@ function renderUnassignedJobs(blocks, selectedDate) {
             user-select:none;
             box-shadow:0 1px 2px rgba(0,0,0,0.06);
           "
-          title="${escapeHtml(groupName)} ${escapeHtml(timeText)}"
+            title="${escapeHtml(
+              [
+                groupName,
+                timeText ? `Time: ${timeText}` : "",
+                fromText || toText ? `Route: ${fromText} → ${toText}` : "",
+                typeText ? `Type: ${typeText}` : "",
+                getBusLabel(b) ? `Bus: ${getBusLabel(b)}` : "",
+                b.notes ? `Notes: ${b.notes}` : ""
+              ].filter(Boolean).join(" | ")
+            )}"
         >
           <div style="
             font-weight:700;

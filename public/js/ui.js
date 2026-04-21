@@ -142,6 +142,7 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
         { id: "adminBookings", label: "Job Groups", icon: "layers" },
         { id: "adminBlocks", label: "Blocks", icon: "grid" },
         { id: "adminPermanentRuns", label: "Permanent Runs", icon: "repeat" },
+        { id: "adminBulkDutySpans", label: "Bulk Duty Spans", icon: "layers" },
         { id: "adminBlocksByDate", label: "Blocks By Date", icon: "calendar" },
         { id: "settings", label: "Settings", icon: "settings" },
       ]
