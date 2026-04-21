@@ -1494,6 +1494,13 @@ function renderNowLine() {
   }
 }
 
+  function getDispatchStatusBg(status) {
+    const s = String(status || "").toLowerCase();
+
+    if (s === "assigned") return "#22c55e";   // green
+    if (s === "cancelled") return "#ef4444";  // red
+    return "#3b82f6"; // pending = blue
+  }
 function renderDrivers() {
   const activeDrivers = getActiveDrivers();
 
@@ -1555,8 +1562,8 @@ function renderDrivers() {
                   border-radius:999px;
                   padding:0 16px 0 6px;
                   border:1px solid #d1d5db;
-                  background:${hasSpan ? "#fff" : "#f3f4f6"};
-                  color:${hasSpan ? "#111" : "#9ca3af"};
+                  background:${hasSpan ? getDispatchStatusBg(dispatchStatus) : "#f3f4f6"};
+                  color:${hasSpan ? "#fff" : "#9ca3af"};
                   box-sizing:border-box;
                 "
                 onclick="event.stopPropagation()"
