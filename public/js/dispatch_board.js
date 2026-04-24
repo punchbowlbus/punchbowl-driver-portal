@@ -620,9 +620,35 @@ function renderDriverDetail(driver) {
                           ${minToTimeStr(span.startMin)} - ${minToTimeStr(span.endMin)}
                         </div>
 
-                        <div class="muted" style="font-size:12px; margin-top:3px;">
-                          ${escapeHtml(span.startLocation || "")} → ${escapeHtml(span.endLocation || "")}
-                        </div>
+                          <div class="muted" style="font-size:12px; margin-top:3px;">
+                            Duty Type: ${escapeHtml(span.dutyType || "Charter")}
+                          </div>
+
+                          ${
+                            span.dutyType === "Rail Replacement"
+                              ? `
+                                <div class="muted" style="font-size:12px; margin-top:3px;">
+                                  Route: ${escapeHtml(span.routeNumber || "-")}
+                                </div>
+                                <div class="muted" style="font-size:12px; margin-top:3px;">
+                                  ${escapeHtml(span.startLocation || "")} → ${escapeHtml(span.endLocation || "")}
+                                </div>
+                                ${
+                                  span.routePdfUrl
+                                    ? `
+                                      <div class="muted" style="font-size:12px; margin-top:3px;">
+                                        <a href="${span.routePdfUrl}" target="_blank">Route Description</a>
+                                      </div>
+                                    `
+                                    : ""
+                                }
+                              `
+                              : `
+                                <div class="muted" style="font-size:12px; margin-top:3px;">
+                                  ${escapeHtml(span.startLocation || "")} → ${escapeHtml(span.endLocation || "")}
+                                </div>
+                              `
+                          }
 
                         <div class="muted" style="font-size:12px; margin-top:3px;">
                           Bus: ${escapeHtml(span.assignedBus || "Unassigned")}
@@ -791,10 +817,34 @@ function renderDriverDetail(driver) {
         <div id="driverDutySpanFormTitle_${empNo}" style="font-weight:700; margin-bottom:10px;">Create Duty Span</div>
 
         <div style="display:grid; gap:10px;">
-        <div>
+          <div>
+            <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Type</div>
+            <select id="dutyType_${empNo}">
+              <option value="Charter" selected>Charter</option>
+              <option value="Rail Replacement">Rail Replacement</option>
+              <option value="Yard">Yard</option>
+              <option value="Mechanic">Mechanic</option>
+              <option value="Office">Office</option>
+            </select>
+          </div>
+
+          <div>
             <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Number</div>
             <input id="dutyNumber_${empNo}" type="text" placeholder="e.g. 101" />
           </div>
+
+          <div id="railFields_${empNo}" style="display:none; gap:10px;">
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">Route Number</div>
+              <input id="routeNumber_${empNo}" type="text" placeholder="e.g. T4" />
+            </div>
+
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">Route Description (PDF link)</div>
+              <input id="routePdf_${empNo}" type="text" placeholder="https://..." />
+            </div>
+          </div>
+
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
               <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Start</div>
@@ -810,7 +860,7 @@ function renderDriverDetail(driver) {
             Use 24+ time for overnight (e.g. 25:30 = 01:30 next day)
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div id="charterLocationFields_${empNo}" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
               <div class="muted" style="margin-bottom:4px; font-size:12px;">Start Location</div>
               <select id="dutyStartLocation_${empNo}">
@@ -826,6 +876,17 @@ function renderDriverDetail(driver) {
                 <option value="Hannans Depot">Hannans Depot</option>
                 <option value="Bounds Depot">Bounds Depot</option>
               </select>
+            </div>
+          </div>
+
+          <div id="railLocationFields_${empNo}" style="display:none; grid-template-columns:1fr 1fr; gap:8px;">
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">Start Station</div>
+              <input id="railStart_${empNo}" type="text" placeholder="e.g. Central" />
+            </div>
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">End Station</div>
+              <input id="railEnd_${empNo}" type="text" placeholder="e.g. Parramatta" />
             </div>
           </div>
 
@@ -862,7 +923,6 @@ function renderDriverDetail(driver) {
           </div>
         </div>
       </div>
-    </div>
   `;
 
   const showBtn = document.getElementById(`showAddDutySpanBtn_${empNo}`);
@@ -874,6 +934,36 @@ function renderDriverDetail(driver) {
   const breakRowsWrap = document.getElementById(`breakRowsWrap_${empNo}`);
   const addMealBreakBtn = document.getElementById(`addMealBreakBtn_${empNo}`);
   const addCribBreakBtn = document.getElementById(`addCribBreakBtn_${empNo}`);
+  const dutyTypeEl = document.getElementById(`dutyType_${empNo}`);
+  const railFieldsEl = document.getElementById(`railFields_${empNo}`);
+  const charterLocationFieldsEl = document.getElementById(`charterLocationFields_${empNo}`);
+  const railLocationFieldsEl = document.getElementById(`railLocationFields_${empNo}`);
+
+    function updateRailFields() {
+      if (!dutyTypeEl) return;
+
+      const isRail = dutyTypeEl.value === "Rail Replacement";
+
+      if (railFieldsEl) {
+        railFieldsEl.style.display = isRail ? "grid" : "none";
+      }
+
+      if (charterLocationFieldsEl) {
+        charterLocationFieldsEl.style.display = isRail ? "none" : "grid";
+      }
+
+      if (railLocationFieldsEl) {
+        railLocationFieldsEl.style.display = isRail ? "grid" : "none";
+      }
+    }
+
+  // run once
+  updateRailFields();
+
+  // run on change
+  if (dutyTypeEl) {
+    dutyTypeEl.addEventListener("change", updateRailFields);
+  }
 
   const editAssignedWrap = document.getElementById(`editAssignedBlockWrap_${empNo}`);
   const editAssignedBlockIdEl = document.getElementById(`editAssignedBlockId_${empNo}`);
@@ -1020,6 +1110,7 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyStartLocation_${empNo}`).value = "";
       document.getElementById(`dutyEndLocation_${empNo}`).value = "";
       document.getElementById(`dutyAssignedBus_${empNo}`).value = "";
+      document.getElementById(`dutyType_${empNo}`).value = "Charter";
 
       clearBreakRows();
 
@@ -1040,11 +1131,20 @@ function renderDriverDetail(driver) {
 
       const dutyStart = document.getElementById(`dutyStart_${empNo}`)?.value || "";
       const dutyEnd = document.getElementById(`dutyEnd_${empNo}`)?.value || "";
-      const startLocation = document.getElementById(`dutyStartLocation_${empNo}`)?.value || "";
-      const endLocation = document.getElementById(`dutyEndLocation_${empNo}`)?.value || "";
+      const dutyType = document.getElementById(`dutyType_${empNo}`)?.value || "Charter";
+
+      const startLocation =
+        dutyType === "Rail Replacement"
+          ? document.getElementById(`railStart_${empNo}`)?.value || ""
+          : document.getElementById(`dutyStartLocation_${empNo}`)?.value || "";
+
+      const endLocation =
+        dutyType === "Rail Replacement"
+          ? document.getElementById(`railEnd_${empNo}`)?.value || ""
+          : document.getElementById(`dutyEndLocation_${empNo}`)?.value || "";
+
       const assignedBus = document.getElementById(`dutyAssignedBus_${empNo}`)?.value || "";
       const dutyNumber = document.getElementById(`dutyNumber_${empNo}`)?.value || "";
-
       const startMin = timeStrToMin(dutyStart);
       const endMin = timeStrToMin(dutyEnd);
 
@@ -1124,6 +1224,7 @@ function renderDriverDetail(driver) {
           serviceDate: getSelectedDate(),
           driverEmployeeNumber: empNo,
           driverName: String(driver.displayName || driver.firstName || "").trim(),
+          dutyType,
           dutyNumber,
           startMin,
           endMin,
@@ -1171,6 +1272,7 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyEndLocation_${empNo}`).value = span.endLocation || "";
       document.getElementById(`dutyAssignedBus_${empNo}`).value = span.assignedBus || "";
       document.getElementById(`dutyNumber_${empNo}`).value = span.dutyNumber || "";
+      document.getElementById(`dutyType_${empNo}`).value = span.dutyType || "Charter";
 
       clearBreakRows();
       (Array.isArray(span.breaks) ? span.breaks : []).forEach((b) => appendBreakRow(b));
