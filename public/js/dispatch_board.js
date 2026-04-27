@@ -142,10 +142,10 @@ els.contentArea.innerHTML = `
             <span id="dispatchRightPanelTitle">Driver / Duty Details</span>
           </div>
 
-          <div
-            id="dispatchDetailPanel"
-            style="flex:1; padding:12px; overflow:auto; min-height:0;"
-          >
+            <div
+              id="dispatchDetailPanel"
+              style="flex:1; padding:12px 12px 80px 12px; overflow-y:auto; min-height:0; box-sizing:border-box;"
+            >
           <div class="muted">Click a driver row to view details.</div>
         </div>
       </div>
