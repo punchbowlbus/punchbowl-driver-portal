@@ -1245,12 +1245,12 @@ function renderDriverDetail(driver) {
           fatigueWarning: fatigue.fatigueWarning
         };
 
-          if (editingSpanId) {
-            await updateDutySpan(editingSpanId, payload);
-          } else {
-            console.log("CREATE PAYLOAD:", payload);
-            await addDutySpan(payload);
-          }
+        if (editingSpanId) {
+          await updateDutySpan(editingSpanId, payload);
+        } else {
+          console.log("CREATE PAYLOAD:", payload);
+          await addDutySpan(payload);
+        }
 
         formWrap.style.display = "none";
         formWrap.dataset.editingSpanId = "";
@@ -1503,7 +1503,7 @@ function renderAssignedBlocksForDriver(empNo) {
       const colors = getGroupColors(groupId);
       const groupName = getGroupName(block);
 
-      const blockWidth = Math.max(120, width);
+      const blockWidth = Math.max(6, width);
 
       const label = groupName;
 

@@ -584,11 +584,19 @@ if (pageId === "adminBulkDutySpans") {
                   sortMin: Number(job.startMin || 0)
                 });
 
-                rows.push({
-                  label: "Depart depot",
-                  time: formatMinutes(Number(job.startMin || 0) + 5),
-                  sortMin: Number(job.startMin || 0) + 5
-                });
+                if (String(job.dutyType || "Charter").trim() === "Yard") {
+                  rows.push({
+                    label: "Yard duties start",
+                    time: formatMinutes(job.startMin),
+                    sortMin: Number(job.startMin || 0)
+                  });
+                } else {
+                  rows.push({
+                    label: "Depart depot",
+                    time: formatMinutes(Number(job.startMin || 0) + 5),
+                    sortMin: Number(job.startMin || 0) + 5
+                  });
+                }
 
                 const jobs = (state.blocks || [])
                   .filter((b) => {
