@@ -65,6 +65,7 @@ els.contentArea.innerHTML = `
         <div>
           <div class="muted" style="margin-bottom:6px;">Zoom</div>
           <div style="display:flex; gap:6px;">
+           <button id="boardFullscreenBtn" type="button">Full Board</button>
             <button id="zoomOutBtn" type="button">-</button>
             <button id="zoomResetBtn" type="button">100%</button>
             <button id="zoomInBtn" type="button">+</button>
@@ -225,6 +226,7 @@ toggleDetailPanelBtn.onclick = () => {
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
+const boardFullscreenBtn = document.getElementById("boardFullscreenBtn");
 
 const unassignedJobsPanelEl = document.getElementById("unassignedJobsPanel");
 const closeUnassignedJobsPanelBtn = document.getElementById("closeUnassignedJobsPanel");
@@ -253,6 +255,61 @@ let draggedBlockId = "";
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   }
 
+    function setBoardFullscreen(enabled) {
+    const mainWorkArea = document.getElementById("dispatchMainWorkArea");
+    const rightPanel = document.getElementById("dispatchRightPanel");
+    const sidebar = document.querySelector("aside, nav, .sidebar");
+    const card = document.querySelector(".card");
+
+    if (!mainWorkArea) return;
+
+    if (enabled) {
+      document.body.classList.add("dispatch-board-fullscreen");
+
+      if (rightPanel) rightPanel.style.display = "none";
+      if (sidebar) sidebar.style.display = "none";
+
+      mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr)";
+
+      if (card) {
+        card.style.position = "fixed";
+        card.style.left = "0";
+        card.style.top = "0";
+        card.style.width = "100vw";
+        card.style.height = "100vh";
+        card.style.zIndex = "99999";
+        card.style.borderRadius = "0";
+      }
+
+      if (boardFullscreenBtn) boardFullscreenBtn.textContent = "Exit Full Board";
+    } else {
+      document.body.classList.remove("dispatch-board-fullscreen");
+
+      if (rightPanel) rightPanel.style.display = "";
+      if (sidebar) sidebar.style.display = "";
+
+      mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 300px";
+
+      if (card) {
+        card.style.position = "";
+        card.style.left = "";
+        card.style.top = "";
+        card.style.width = "";
+        card.style.height = "";
+        card.style.zIndex = "";
+        card.style.borderRadius = "";
+      }
+
+      if (boardFullscreenBtn) boardFullscreenBtn.textContent = "Full Board";
+    }
+
+  setTimeout(() => {
+    buildTimelineHeader();
+    syncDriverSpacerHeight();
+    renderDrivers();
+    renderNowLine();
+  }, 50);
+}
   function timeStrToMin(value) {
     const v = String(value || "").trim();
 
@@ -1171,7 +1228,6 @@ function renderDriverDetail(driver) {
         showError("Duty span overlaps an existing span for this driver.");
         return;
       }
-
       const breakRows = Array.from(
         breakRowsWrap ? breakRowsWrap.querySelectorAll("[data-break-row]") : []
       );
@@ -2521,6 +2577,21 @@ if (closeUnassignedJobsPanelBtn) {
 zoomOutBtn.onclick = () => applyZoom(Math.max(2, slotWidth - 8));
 zoomResetBtn.onclick = () => applyZoom(52);
 zoomInBtn.onclick = () => applyZoom(slotWidth + 8);
+
+if (boardFullscreenBtn) {
+  boardFullscreenBtn.onclick = () => {
+    console.log("FULL BOARD BUTTON CLICKED");
+
+    const isFull = document.body.classList.contains("dispatch-board-fullscreen");
+    setBoardFullscreen(!isFull);
+  };
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    setBoardFullscreen(false);
+  }
+});
 
 driverSortByEl.onchange = () => {
   renderDrivers();
