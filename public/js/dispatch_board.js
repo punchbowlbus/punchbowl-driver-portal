@@ -1116,14 +1116,14 @@ function renderDriverDetail(driver) {
 
       if (startEl) startEl.focus();
     };
-  }
+    }
 
-  if (cancelBtn && formWrap) {
-    cancelBtn.onclick = () => {
-      formWrap.style.display = "none";
-      formWrap.dataset.editingSpanId = "";
-    };
-  }
+    if (cancelBtn && formWrap) {
+      cancelBtn.onclick = () => {
+        formWrap.style.display = "none";
+        formWrap.dataset.editingSpanId = "";
+      };
+    }
 
   if (saveBtn) {
     saveBtn.onclick = async () => {
@@ -1132,6 +1132,8 @@ function renderDriverDetail(driver) {
       const dutyStart = document.getElementById(`dutyStart_${empNo}`)?.value || "";
       const dutyEnd = document.getElementById(`dutyEnd_${empNo}`)?.value || "";
       const dutyType = document.getElementById(`dutyType_${empNo}`)?.value || "Charter";
+      const routeNumber = document.getElementById(`routeNumber_${empNo}`)?.value || "";
+      const routePdfUrl = document.getElementById(`routePdf_${empNo}`)?.value || "";
 
       const startLocation =
         dutyType === "Rail Replacement"
@@ -1226,6 +1228,8 @@ function renderDriverDetail(driver) {
           driverName: String(driver.displayName || driver.firstName || "").trim(),
           dutyType,
           dutyNumber,
+          routeNumber,
+          routePdfUrl,
           startMin,
           endMin,
           startLocation,
@@ -1274,6 +1278,25 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyNumber_${empNo}`).value = span.dutyNumber || "";
       document.getElementById(`dutyType_${empNo}`).value = span.dutyType || "Charter";
 
+      // load rail fields
+        document.getElementById(`routeNumber_${empNo}`).value = span.routeNumber || "";
+        document.getElementById(`routePdf_${empNo}`).value = span.routePdfUrl || "";
+
+        // load correct locations
+        if (span.dutyType === "Rail Replacement") {
+          document.getElementById(`railStart_${empNo}`).value = span.startLocation || "";
+          document.getElementById(`railEnd_${empNo}`).value = span.endLocation || "";
+        } else {
+          document.getElementById(`dutyStartLocation_${empNo}`).value = span.startLocation || "";
+          document.getElementById(`dutyEndLocation_${empNo}`).value = span.endLocation || "";
+        }
+
+        // VERY IMPORTANT → update UI
+        const dutyTypeEl = document.getElementById(`dutyType_${empNo}`);
+        if (dutyTypeEl && typeof updateRailFields === "function") {
+          updateRailFields();
+        }
+
       clearBreakRows();
       (Array.isArray(span.breaks) ? span.breaks : []).forEach((b) => appendBreakRow(b));
 
@@ -1299,30 +1322,8 @@ function renderDriverDetail(driver) {
   });
 }
 
-const unassignButtons = detailPanelEl.querySelectorAll("[data-unassign-block]");
 
-unassignButtons.forEach((btn) => {
-  btn.onclick = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
 
-    const blockId = String(btn.getAttribute("data-unassign-block") || "");
-    console.log("UNASSIGN CLICK", { blockId });
-
-    if (!blockId) return;
-
-    const ok = confirm("Unassign this job?");
-    if (!ok) return;
-
-    try {
-      await unassignBlockFromDriver(blockId);
-      console.log("UNASSIGNED OK", { blockId });
-    } catch (e) {
-      console.error("UNASSIGN ERROR", e);
-      showError(e?.message || "Failed to unassign job.");
-    }
-  };
-});
 function getGroupColors(groupKey) {
   const palette = [
     { bg: "#1d4ed8", border: "#1e40af", text: "#ffffff" }, // blue
@@ -2586,5 +2587,5 @@ nowLineTimer = setInterval(() => {
 
 console.log("BOTTOM OF DISPATCH FILE REACHED");
 loadDispatchForDate(today, { openPanel: false });
-
 }
+

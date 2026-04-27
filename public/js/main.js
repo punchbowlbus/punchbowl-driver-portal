@@ -532,9 +532,36 @@ if (pageId === "adminBulkDutySpans") {
                   <b>Duty Date:</b> ${formatDutyDate(job.serviceDate)}
                 </div>
 
-                <div style="margin-top:10px">
-                  <b>Duty Number:</b> ${escapeHtml(String(job.dutyNumber || "-"))}
-                </div>
+              <div style="margin-top:10px">
+                <b>Duty Number:</b> ${escapeHtml(String(job.dutyNumber || "-"))}
+              </div>
+
+              <div style="margin-top:10px">
+                <b>Duty Type:</b> ${escapeHtml(String(job.dutyType || "Charter"))}
+              </div>
+
+              ${
+                job.dutyType === "Rail Replacement"
+                  ? `
+                    <div style="margin-top:10px">
+                      <b>Route Number:</b> ${escapeHtml(String(job.routeNumber || "-"))}
+                    </div>
+
+                    ${
+                      job.routePdfUrl
+                        ? `
+                          <div style="margin-top:10px">
+                            <b>Route Description:</b>
+                            <a href="${escapeHtml(String(job.routePdfUrl))}" target="_blank">
+                              Route Description
+                            </a>
+                          </div>
+                        `
+                        : ""
+                    }
+                  `
+                  : ""
+              }
 
               <div style="margin-top:10px">
                 <b>Duty Time:</b> ${formatMinutes(job.startMin)} → ${formatMinutes(job.endMin)}
