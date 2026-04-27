@@ -167,6 +167,11 @@ export async function addDutySpan(data) {
     driverEmployeeNumber: String(data.driverEmployeeNumber || "").trim(),
     driverName: String(data.driverName || "").trim(),
 
+    dutyType: String(data.dutyType || "Charter").trim(),
+    dutyNumber: String(data.dutyNumber || "").trim(),
+    routeNumber: String(data.routeNumber || "").trim(),
+    routePdfUrl: String(data.routePdfUrl || "").trim(),
+
     startMin: Number(data.startMin || 0),
     endMin: Number(data.endMin || 0),
 

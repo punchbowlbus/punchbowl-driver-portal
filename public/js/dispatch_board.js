@@ -1111,7 +1111,7 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyEndLocation_${empNo}`).value = "";
       document.getElementById(`dutyAssignedBus_${empNo}`).value = "";
       document.getElementById(`dutyType_${empNo}`).value = "Charter";
-
+      updateRailFields();
       clearBreakRows();
 
       if (startEl) startEl.focus();
@@ -1220,7 +1220,7 @@ function renderDriverDetail(driver) {
         endMin,
         breaks
       });
-
+       console.log("PDF VALUE:", routePdfUrl);
       try {
         const payload = {
           serviceDate: getSelectedDate(),
@@ -1245,11 +1245,12 @@ function renderDriverDetail(driver) {
           fatigueWarning: fatigue.fatigueWarning
         };
 
-        if (editingSpanId) {
-          await updateDutySpan(editingSpanId, payload);
-        } else {
-          await addDutySpan(payload);
-        }
+          if (editingSpanId) {
+            await updateDutySpan(editingSpanId, payload);
+          } else {
+            console.log("CREATE PAYLOAD:", payload);
+            await addDutySpan(payload);
+          }
 
         formWrap.style.display = "none";
         formWrap.dataset.editingSpanId = "";
