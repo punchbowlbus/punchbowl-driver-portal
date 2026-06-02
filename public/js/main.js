@@ -20,6 +20,7 @@ import { els, showError, renderAuth, renderSidebar, renderMyWork } from "./ui.js
 import { renderShifts } from "./shifts_ui.js";
 import { openLegModal } from "./modals.js";
 import { updateDutySpanDriverAcknowledgment } from "./db.js";
+let notificationRegisteredForEmpNo = "";
 
 /* =========================================================
    Helpers
@@ -888,6 +889,10 @@ async function registerDriverNotifications(employee) {
     if (!employee) return;
 
     const empNo = String(employee.employeeNumber || "").trim();
+    if (notificationRegisteredForEmpNo === empNo) {
+  console.log("FCM already registered for driver:", empNo);
+  return;
+}
     const role = String(employee.role || "").trim().toLowerCase();
     const status = String(employee.status || "").trim().toLowerCase();
 
@@ -924,6 +929,7 @@ async function registerDriverNotifications(employee) {
     );
 
     console.log("FCM token saved for driver:", empNo);
+    notificationRegisteredForEmpNo = empNo;
   } catch (err) {
     console.error("Notification registration failed:", err);
   }
