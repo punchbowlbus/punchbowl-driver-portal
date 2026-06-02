@@ -1,9 +1,9 @@
 // public/js/main.js
 import { onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
-import { collection, addDoc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
-
-import { auth, provider, db } from "./firebase.js";
-import { ADMIN_EMAILS } from "./config.js";
+import { collection, addDoc, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import { getToken } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
+import { auth, provider, db, messaging } from "./firebase.js";
+import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
 import { state } from "./state.js";
 import { normalizeEmail, escapeHtml } from "./utils.js";
 import {
@@ -883,6 +883,52 @@ function setupMobileMenu() {
   window.closeMobileMenu = closeMenu;
 }
 
+async function registerDriverNotifications(employee) {
+  try {
+    if (!employee) return;
+
+    const empNo = String(employee.employeeNumber || "").trim();
+    const role = String(employee.role || "").trim().toLowerCase();
+    const status = String(employee.status || "").trim().toLowerCase();
+
+    if (!empNo || role !== "driver" || status !== "active") return;
+
+    if (!("Notification" in window)) {
+      console.log("Notifications not supported in this browser");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+
+    if (permission !== "granted") {
+      console.log("Notification permission not granted");
+      return;
+    }
+
+    const token = await getToken(messaging, {
+      vapidKey: FCM_VAPID_KEY
+    });
+
+    if (!token) {
+      console.log("No FCM token returned");
+      return;
+    }
+
+    await setDoc(
+      doc(db, "employees", empNo),
+      {
+        fcmToken: token,
+        fcmTokenUpdatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
+
+    console.log("FCM token saved for driver:", empNo);
+  } catch (err) {
+    console.error("Notification registration failed:", err);
+  }
+}
+
 /* =========================================================
    Auth Boot
 ========================================================= */
@@ -955,6 +1001,8 @@ if (state.isAdmin) {
 
 // ✅ KEEP THIS
 if (state.isDriver) {
+  await registerDriverNotifications(state.employee);
+
   state.activePage = "myWork";
   go(state.activePage);
   return;
