@@ -14,12 +14,4 @@ const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage((payload) => {
   console.log("Background message received:", payload);
-
-  self.registration.showNotification(
-    payload.notification?.title || "PBC Charters",
-    {
-      body: payload.notification?.body || "You have a new update.",
-      icon: "/icons/icon-192.png"
-    }
-  );
 });
