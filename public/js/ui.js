@@ -274,7 +274,18 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
           <div class="row">
             <div style="min-width:280px;flex:1">
               <div class="muted mobileHide">${escapeHtml(j.jobId || j.id || "-")}</div>
-              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.serviceDate || j.date))}</div>
+              <div style="font-size:18px;font-weight:900">
+                ${escapeHtml(
+                  j.serviceDate || j.date
+                    ? new Date(j.serviceDate || j.date).toLocaleDateString("en-AU", {
+                        weekday: "long",
+                        day: "2-digit",
+                        month: "long",
+                        year: "numeric"
+                      })
+                    : "-"
+                )}
+              </div>
 
                 ${
                   j.jobDescription

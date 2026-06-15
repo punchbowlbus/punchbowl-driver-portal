@@ -9,6 +9,7 @@ import { normalizeEmail, escapeHtml } from "./utils.js";
 import {
   listenShifts,
   listenLegs,
+  listenDutySpansByDate,
   listenDutySpansByDriverAndDate,
   listenDutySpansByDriverAndDateRange,
   listenBlocksByDate,
@@ -491,11 +492,130 @@ if (pageId === "adminBulkDutySpans") {
     }
   }
 
-  // Admin quick menu
-  if (pageId === "allShifts") {
-    loadShifts({ mode: "adminAll" });
-    return;
+// Admin quick menu
+if (pageId === "allShifts") {
+  if (!state.isAdmin) return showError("No admin access");
+
+  stopAllListeners();
+
+  els.contentArea.innerHTML = `
+    <h2 style="margin-top:0">All Jobs</h2>
+
+    <div class="card" style="max-width:100%;">
+      <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:end;">
+        <div style="flex:1; min-width:220px;">
+          <div style="font-weight:700; margin-bottom:8px;">Select Date</div>
+          <input id="allJobsDate" type="date" style="width:100%;" />
+        </div>
+      </div>
+
+      <div id="allJobsList" style="margin-top:14px;">
+        <div class="muted">Select a date to view driver jobs.</div>
+      </div>
+    </div>
+  `;
+
+  const dateEl = document.getElementById("allJobsDate");
+  const listEl = document.getElementById("allJobsList");
+
+  let allJobsUnsub = null;
+
+  function loadAllJobsForDate(selectedDate) {
+    if (!selectedDate) {
+      listEl.innerHTML = `<div class="muted">Select a date to view driver jobs.</div>`;
+      return;
+    }
+
+    state.allJobsSelectedDate = selectedDate;
+
+    if (allJobsUnsub) allJobsUnsub();
+
+    listEl.innerHTML = `<div class="muted">Loading jobs...</div>`;
+
+    allJobsUnsub = listenDutySpansByDate(
+      selectedDate,
+      (jobs) => {
+        console.log("All Jobs loaded:", jobs);
+
+        if (!jobs.length) {
+          listEl.innerHTML = `<div class="muted">No driver jobs found for this date.</div>`;
+          return;
+        }
+
+        listEl.innerHTML = jobs
+          .map((j) => `
+            <div
+              class="card adminJobCard"
+              data-job-id="${escapeHtml(j.id)}"
+              style="margin-top:10px; cursor:pointer"
+            >
+              <div style="font-weight:900">
+                ${escapeHtml(j.driverName || j.driverEmployeeNumber || "Unassigned Driver")}
+              </div>
+
+              <div style="color:#555; margin-top:4px;">
+                ${escapeHtml(
+                  new Date(j.serviceDate || selectedDate).toLocaleDateString("en-AU", {
+                    weekday: "long",
+                    day: "2-digit",
+                    month: "long",
+                    year: "numeric"
+                  })
+                )}
+              </div>
+
+              <div style="margin-top:6px">
+                <b>Duty Number:</b> ${escapeHtml(j.dutyNumber || "-")}
+              </div>
+
+              <div style="margin-top:6px">
+                <b>Time:</b> ${formatMinutes(j.startMin)} → ${formatMinutes(j.endMin)}
+              </div>
+
+              <div style="margin-top:6px">
+                <b>Status:</b> ${escapeHtml(j.dispatchStatus || "-")}
+              </div>
+
+              <div style="margin-top:6px">
+                <b>Driver Acknowledgment:</b>
+                ${
+                  j.driverAcknowledgment === "Yes"
+                    ? '<span style="color:#2e7d32;font-weight:700">Yes</span>'
+                    : j.driverAcknowledgment === "No"
+                    ? '<span style="color:#c62828;font-weight:700">No</span>'
+                    : '<span style="color:#1565c0;font-weight:700">Pending</span>'
+                }
+              </div>
+            </div>
+          `)
+          .join("");
+
+        listEl.querySelectorAll(".adminJobCard").forEach((card) => {
+          card.onclick = () => {
+            const jobId = card.getAttribute("data-job-id");
+
+            state.selectedJobId = jobId;
+            state.driverDutySpans = jobs;
+
+            go("jobDetails");
+          };
+        });
+      },
+      (e) => showError(e?.message || "Failed to load all jobs")
+    );
   }
+
+  dateEl.onchange = () => {
+    loadAllJobsForDate(dateEl.value);
+  };
+
+  if (state.allJobsSelectedDate) {
+    dateEl.value = state.allJobsSelectedDate;
+    loadAllJobsForDate(state.allJobsSelectedDate);
+  }
+
+  return;
+}
 
   if (pageId === "driverMonitor") {
     if (!state.isAdmin) return showError("No admin access");
@@ -733,7 +853,11 @@ if (pageId === "adminBulkDutySpans") {
               updateDutySpanDriverAcknowledgment(job.id, "No");
             };
             document.getElementById("backBtn").onclick = () => {
-              go("myWork");
+              if (state.isAdmin) {
+                go("allShifts");
+              } else {
+                go("myWork");
+              }
             };
 
           if (!state.blocks && dutyDate) {
