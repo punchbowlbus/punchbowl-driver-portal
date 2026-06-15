@@ -506,6 +506,11 @@ if (pageId === "allShifts") {
         <div style="flex:1; min-width:220px;">
           <div style="font-weight:700; margin-bottom:8px;">Select Date</div>
           <input id="allJobsDate" type="date" style="width:100%;" />
+
+          <div style="margin-top:12px;">
+            <div style="font-weight:700; margin-bottom:8px;">Driver Filter</div>
+            <input id="driverFilter" type="text" placeholder="Type driver name or employee number..." style="width:100%;" />
+          </div>
         </div>
       </div>
 
@@ -517,8 +522,84 @@ if (pageId === "allShifts") {
 
   const dateEl = document.getElementById("allJobsDate");
   const listEl = document.getElementById("allJobsList");
+  const driverFilterEl = document.getElementById("driverFilter");
 
   let allJobsUnsub = null;
+
+  function renderAllJobsList(jobsToRender, selectedDate) {
+    const filterText = (driverFilterEl?.value || "").trim().toLowerCase();
+
+    const filteredJobs = !filterText
+      ? jobsToRender
+      : jobsToRender.filter((j) => {
+          const haystack = [
+            j.driverName,
+            j.driverEmployeeNumber,
+            j.dutyNumber,
+            j.assignedBus
+          ].filter(Boolean).join(" ").toLowerCase();
+
+          return haystack.includes(filterText);
+        });
+
+    if (!filteredJobs.length) {
+      listEl.innerHTML = `<div class="muted">No matching driver jobs found.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = filteredJobs.map((j) => `
+      <div class="card adminJobCard" data-job-id="${escapeHtml(j.id)}" style="margin-top:10px; cursor:pointer">
+        <div style="font-weight:900">
+          ${escapeHtml(j.driverName || j.driverEmployeeNumber || "Unassigned Driver")}
+        </div>
+
+        <div style="color:#555; margin-top:4px;">
+          ${escapeHtml(
+            new Date(j.serviceDate || selectedDate).toLocaleDateString("en-AU", {
+              weekday: "long",
+              day: "2-digit",
+              month: "long",
+              year: "numeric"
+            })
+          )}
+        </div>
+
+        <div style="margin-top:6px">
+          <b>Duty Number:</b> ${escapeHtml(j.dutyNumber || "-")}
+        </div>
+
+        <div style="margin-top:6px">
+          <b>Time:</b> ${formatMinutes(j.startMin)} → ${formatMinutes(j.endMin)}
+        </div>
+
+        <div style="margin-top:6px">
+          <b>Status:</b> ${escapeHtml(j.dispatchStatus || "-")}
+        </div>
+
+        <div style="margin-top:6px">
+          <b>Driver Acknowledgment:</b>
+          ${
+            j.driverAcknowledgment === "Yes"
+              ? '<span style="color:#2e7d32;font-weight:700">Yes</span>'
+              : j.driverAcknowledgment === "No"
+              ? '<span style="color:#c62828;font-weight:700">No</span>'
+              : '<span style="color:#1565c0;font-weight:700">Pending</span>'
+          }
+        </div>
+      </div>
+    `).join("");
+
+    listEl.querySelectorAll(".adminJobCard").forEach((card) => {
+      card.onclick = () => {
+        const jobId = card.getAttribute("data-job-id");
+
+        state.selectedJobId = jobId;
+        state.driverDutySpans = jobsToRender;
+
+        go("jobDetails");
+      };
+    });
+  }
 
   function loadAllJobsForDate(selectedDate) {
     if (!selectedDate) {
@@ -536,70 +617,14 @@ if (pageId === "allShifts") {
       selectedDate,
       (jobs) => {
         console.log("All Jobs loaded:", jobs);
+        state.allJobsLoaded = jobs;
 
         if (!jobs.length) {
           listEl.innerHTML = `<div class="muted">No driver jobs found for this date.</div>`;
           return;
         }
 
-        listEl.innerHTML = jobs
-          .map((j) => `
-            <div
-              class="card adminJobCard"
-              data-job-id="${escapeHtml(j.id)}"
-              style="margin-top:10px; cursor:pointer"
-            >
-              <div style="font-weight:900">
-                ${escapeHtml(j.driverName || j.driverEmployeeNumber || "Unassigned Driver")}
-              </div>
-
-              <div style="color:#555; margin-top:4px;">
-                ${escapeHtml(
-                  new Date(j.serviceDate || selectedDate).toLocaleDateString("en-AU", {
-                    weekday: "long",
-                    day: "2-digit",
-                    month: "long",
-                    year: "numeric"
-                  })
-                )}
-              </div>
-
-              <div style="margin-top:6px">
-                <b>Duty Number:</b> ${escapeHtml(j.dutyNumber || "-")}
-              </div>
-
-              <div style="margin-top:6px">
-                <b>Time:</b> ${formatMinutes(j.startMin)} → ${formatMinutes(j.endMin)}
-              </div>
-
-              <div style="margin-top:6px">
-                <b>Status:</b> ${escapeHtml(j.dispatchStatus || "-")}
-              </div>
-
-              <div style="margin-top:6px">
-                <b>Driver Acknowledgment:</b>
-                ${
-                  j.driverAcknowledgment === "Yes"
-                    ? '<span style="color:#2e7d32;font-weight:700">Yes</span>'
-                    : j.driverAcknowledgment === "No"
-                    ? '<span style="color:#c62828;font-weight:700">No</span>'
-                    : '<span style="color:#1565c0;font-weight:700">Pending</span>'
-                }
-              </div>
-            </div>
-          `)
-          .join("");
-
-        listEl.querySelectorAll(".adminJobCard").forEach((card) => {
-          card.onclick = () => {
-            const jobId = card.getAttribute("data-job-id");
-
-            state.selectedJobId = jobId;
-            state.driverDutySpans = jobs;
-
-            go("jobDetails");
-          };
-        });
+        renderAllJobsList(jobs, selectedDate);
       },
       (e) => showError(e?.message || "Failed to load all jobs")
     );
@@ -607,6 +632,10 @@ if (pageId === "allShifts") {
 
   dateEl.onchange = () => {
     loadAllJobsForDate(dateEl.value);
+  };
+
+  driverFilterEl.oninput = () => {
+    renderAllJobsList(state.allJobsLoaded || [], dateEl.value);
   };
 
   if (state.allJobsSelectedDate) {
