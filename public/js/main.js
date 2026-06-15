@@ -30,14 +30,19 @@ function isAdminEmail(email) {
   return ADMIN_EMAILS.map(normalizeEmail).includes(normalizeEmail(email));
 }
 
-function stopAllListeners() {
-  if (state.unsubscribeShifts) state.unsubscribeShifts();
-  state.unsubscribeShifts = null;
+  function stopAllListeners() {
+    if (state.unsubscribeShifts) state.unsubscribeShifts();
+    state.unsubscribeShifts = null;
 
-  if (state.unsubscribeDriverDutySpans) state.unsubscribeDriverDutySpans();
-  state.unsubscribeDriverDutySpans = null;
+    if (state.unsubscribeDriverDutySpans) state.unsubscribeDriverDutySpans();
+    state.unsubscribeDriverDutySpans = null;
 
-  if (state.unsubscribeLegsByShiftId) {
+    if (state.unsubscribeJobDetailsBlocks) {
+      state.unsubscribeJobDetailsBlocks();
+      state.unsubscribeJobDetailsBlocks = null;
+    }
+
+    if (state.unsubscribeLegsByShiftId) {
     Object.values(state.unsubscribeLegsByShiftId).forEach((fn) => {
       try {
         fn?.();
@@ -494,7 +499,7 @@ if (pageId === "adminBulkDutySpans") {
   }
 
 // Admin quick menu
-if (pageId === "allShifts") {
+if (pageId === "adminAllJobs") {
   if (!state.isAdmin) return showError("No admin access");
 
   stopAllListeners();
@@ -647,6 +652,14 @@ if (pageId === "allShifts") {
   return;
 }
 
+  if (pageId === "allShifts") {
+    renderPlaceholder(
+      "Old All Shifts",
+      "Something is still calling the old allShifts route."
+    );
+    return;
+  }
+
   if (pageId === "driverMonitor") {
     if (!state.isAdmin) return showError("No admin access");
     renderPlaceholder("Driver Monitor", "Coming soon...");
@@ -659,7 +672,6 @@ if (pageId === "allShifts") {
     return;
   }
 
-  
         if (pageId === "jobDetails") {
           const job = (state.driverDutySpans || []).find(j => j.id === state.selectedJobId);
           const dutyDate = String(job?.serviceDate || job?.date || "").trim();
@@ -679,9 +691,13 @@ if (pageId === "allShifts") {
             <div class="card">
               <h3>Duty Sheet</h3>
 
-                <div style="margin-top:10px">
-                  <b>Duty Date:</b> ${formatDutyDate(job.serviceDate)}
-                </div>
+              <div style="margin-top:10px">
+                <b>Driver:</b> ${escapeHtml(String(job.driverName || job.driverEmployeeNumber || "Unassigned Driver"))}
+              </div>
+
+              <div style="margin-top:10px">
+                <b>Duty Date:</b> ${formatDutyDate(job.serviceDate)}
+              </div>
 
               <div style="margin-top:10px">
                 <b>Duty Number:</b> ${escapeHtml(String(job.dutyNumber || "-"))}
@@ -884,22 +900,35 @@ if (pageId === "allShifts") {
             };
             document.getElementById("backBtn").onclick = () => {
               if (state.isAdmin) {
-                go("allShifts");
+                go("adminAllJobs");
               } else {
                 go("myWork");
               }
             };
 
-          if (!state.blocks && dutyDate) {
-            listenBlocksByDate(
-              dutyDate,
-              (blocks) => {
-                state.blocks = blocks || [];
-                go("jobDetails");
-              },
-              (e) => showError(e?.message || "Failed to load blocks")
-            );
-          }
+            if (!state.blocks && dutyDate) {
+              if (state.unsubscribeJobDetailsBlocks) {
+                state.unsubscribeJobDetailsBlocks();
+                state.unsubscribeJobDetailsBlocks = null;
+              }
+
+              const currentJobId = String(job.id || "");
+
+              state.unsubscribeJobDetailsBlocks = listenBlocksByDate(
+                dutyDate,
+                (blocks) => {
+                  state.blocks = blocks || [];
+
+                  if (
+                    state.activePage === "jobDetails" &&
+                    String(state.selectedJobId || "") === currentJobId
+                  ) {
+                    go("jobDetails");
+                  }
+                },
+                (e) => showError(e?.message || "Failed to load blocks")
+              );
+            }
 
           return;
         }
