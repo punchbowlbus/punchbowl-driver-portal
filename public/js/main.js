@@ -220,6 +220,7 @@ function renderPlaceholder(title, msg) {
    Navigation
 ========================================================= */
 export async function go(pageId) {
+
   state.activePage = pageId;
 
   renderSidebar(
