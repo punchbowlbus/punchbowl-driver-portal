@@ -12,8 +12,13 @@ import {
   onSnapshot,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import {
+  ref,
+  uploadBytes,
+  getDownloadURL
+} from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
 import { getToken } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
-import { auth, provider, db, messaging } from "./firebase.js";
+import { auth, provider, db, messaging, storage } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
 import { state } from "./state.js";
 import { normalizeEmail, escapeHtml } from "./utils.js";
@@ -946,6 +951,83 @@ if (pageId === "adminAllJobs") {
 
   // Shared menu
 if (pageId === "notice") {
+    const canManageNotices = state.isAdmin;
+
+  if (!canManageNotices) {
+    els.contentArea.innerHTML = `
+      <h2 style="margin-top:0">Notice Board</h2>
+
+      <div class="card" style="max-width:900px;">
+        <h3 style="margin-top:0">Notices</h3>
+
+        <div id="existingNotices">
+          <div class="muted">Loading notices...</div>
+        </div>
+      </div>
+    `;
+
+    const existingNoticesEl = document.getElementById("existingNotices");
+
+    const noticesQuery = query(
+      collection(db, "notices"),
+      where("active", "==", true),
+      orderBy("createdAt", "desc")
+    );
+
+    onSnapshot(noticesQuery, (snapshot) => {
+      const notices = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data()
+      }));
+
+      if (!notices.length) {
+        existingNoticesEl.innerHTML = `<div class="muted">No notices found.</div>`;
+        return;
+      }
+
+      existingNoticesEl.innerHTML = notices
+        .map((n) => `
+          <div class="card" style="margin-top:10px; border-left:6px solid ${
+            n.priority === "critical"
+              ? "#c62828"
+              : n.priority === "warning"
+              ? "#ef6c00"
+              : n.priority === "good"
+              ? "#2e7d32"
+              : "#1565c0"
+          };">
+            <div style="font-weight:900; font-size:16px;">
+              ${escapeHtml(n.title || "-")}
+            </div>
+
+            <div style="margin-top:8px; white-space:pre-wrap;">
+              ${escapeHtml(n.message || "")}
+            </div>
+
+            ${
+              n.imageUrl
+                ? `
+                  <div style="margin-top:12px;">
+                    <img
+                      src="${escapeHtml(n.imageUrl)}"
+                      alt="Notice image"
+                      style="max-width:100%; border-radius:8px;"
+                    />
+                  </div>
+                `
+                : ""
+            }
+
+            <div class="muted" style="margin-top:8px;">
+              Priority: ${escapeHtml(n.priority || "info")}
+            </div>
+          </div>
+        `)
+        .join("");
+    });
+
+    return;
+  }
   els.contentArea.innerHTML = `
     <h2 style="margin-top:0">Notice Board</h2>
 
@@ -1064,6 +1146,19 @@ onSnapshot(
           <div style="margin-top:8px; white-space:pre-wrap;">
             ${escapeHtml(n.message || "")}
           </div>
+          ${
+            n.imageUrl
+              ? `
+                <div style="margin-top:12px;">
+                  <img
+                    src="${escapeHtml(n.imageUrl)}"
+                    alt="Notice image"
+                    style="max-width:100%; border-radius:8px;"
+                  />
+                </div>
+              `
+              : ""
+          }
 
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
             <div class="muted">
@@ -1088,7 +1183,7 @@ onSnapshot(
         </div>
       `)
       .join("");
-      
+
       existingNoticesEl.querySelectorAll(".deleteNoticeBtn").forEach((btn) => {
         btn.onclick = async () => {
           const noticeId = btn.getAttribute("data-id");
@@ -1179,22 +1274,41 @@ onSnapshot(
           return;
         }
 
-        await addDoc(collection(db, "notices"), {
-          title,
-          message,
-          priority,
-          active: true,
-          createdAt: serverTimestamp(),
-          createdByEmail: normalizeEmail(state.currentUser?.email || "")
-        });
+          let imageUrl = "";
+
+          const imageFile = imageEl.files?.[0];
+
+          if (imageFile) {
+            const fileName = `notice-images/${Date.now()}-${imageFile.name}`;
+
+            const storageRef = ref(storage, fileName);
+
+            await uploadBytes(storageRef, imageFile);
+
+            imageUrl = await getDownloadURL(storageRef);
+          }
+
+          await addDoc(collection(db, "notices"), {
+            title,
+            message,
+            priority,
+            imageUrl,
+            active: true,
+            createdAt: serverTimestamp(),
+            createdByEmail: normalizeEmail(state.currentUser?.email || "")
+          });
 
         alert("Notice saved successfully");
 
-        titleEl.value = "";
-        messageEl.value = "";
-        priorityEl.value = "info";
+            titleEl.value = "";
+            messageEl.value = "";
+            priorityEl.value = "info";
+            imageEl.value = "";
 
-        updatePreview();
+            previewImage.src = "";
+            previewImage.style.display = "none";
+
+            updatePreview();
       } catch (e) {
         console.error(e);
         alert("Failed to save notice");
