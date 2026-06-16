@@ -1,6 +1,17 @@
 // public/js/main.js
 import { onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
-import { collection, addDoc, doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import {
+  collection,
+  addDoc,
+  doc,
+  setDoc,
+  serverTimestamp,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+  updateDoc
+} from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { getToken } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
 import { auth, provider, db, messaging } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
@@ -934,10 +945,264 @@ if (pageId === "adminAllJobs") {
         }
 
   // Shared menu
-  if (pageId === "notice") {
-    renderPlaceholder("Notice Board", "Coming soon...");
+if (pageId === "notice") {
+  els.contentArea.innerHTML = `
+    <h2 style="margin-top:0">Notice Board</h2>
+
+    <div class="card" style="max-width:900px;">
+      <h3 style="margin-top:0">Create Notice</h3>
+
+      <div style="margin-top:12px;">
+        <div style="font-weight:700; margin-bottom:6px;">Title</div>
+        <input id="noticeTitle" type="text" placeholder="Notice title" style="width:100%;" />
+      </div>
+
+      <div style="margin-top:12px;">
+        <div style="font-weight:700; margin-bottom:6px;">Message</div>
+        <textarea id="noticeMessage" placeholder="Write notice message..." style="width:100%; min-height:120px;"></textarea>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div style="font-weight:700; margin-bottom:6px;">Priority</div>
+        <select id="noticePriority" style="width:100%;">
+          <option value="info">Information</option>
+          <option value="warning">Warning</option>
+          <option value="critical">Critical</option>
+          <option value="good">Good News</option>
+        </select>
+      </div>
+
+      <div style="margin-top:12px;">
+        <div style="font-weight:700; margin-bottom:6px;">Image</div>
+        <input id="noticeImage" type="file" accept="image/*" />
+      </div>
+
+      <div style="margin-top:16px;">
+        <button id="saveNoticeBtn">Save Notice</button>
+      </div>
+    </div>
+
+    <div class="card" style="max-width:900px; margin-top:14px;">
+      <h3 style="margin-top:0">Driver Preview</h3>
+
+      <div id="noticePreviewCard" class="card" style="border-left:6px solid #1565c0;">
+        <div id="previewTitle" style="font-size:18px;font-weight:900;">
+          Sample Notice Title
+        </div>
+
+        <div style="margin-top:8px;color:#555;">
+          Posted today
+        </div>
+
+          <div id="previewMessage" style="margin-top:12px; white-space: pre-wrap;">
+          This is how the notice message will appear to drivers.
+        </div>
+
+        <div style="margin-top:12px;">
+          <img
+            id="noticePreviewImage"
+            alt="Notice Preview"
+            style="max-width:100%;display:none;border-radius:8px;"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="max-width:900px; margin-top:14px;">
+          <h3 style="margin-top:0">Existing Notices</h3>
+
+          <div id="existingNotices">
+            <div class="muted">Loading notices...</div>
+          </div>
+        </div>
+  `;
+
+  const titleEl = document.getElementById("noticeTitle");
+  const messageEl = document.getElementById("noticeMessage");
+  const priorityEl = document.getElementById("noticePriority");
+  const imageEl = document.getElementById("noticeImage");
+  const previewImage = document.getElementById("noticePreviewImage");
+
+  const previewTitle = document.getElementById("previewTitle");
+  const previewMessage = document.getElementById("previewMessage");
+  const previewCard = document.getElementById("noticePreviewCard");
+  const existingNoticesEl = document.getElementById("existingNotices");
+  const noticesQuery = query(
+  collection(db, "notices"),
+  where("active", "==", true),
+  orderBy("createdAt", "desc")
+);
+
+onSnapshot(
+  noticesQuery,
+  (snapshot) => {
+    const notices = snapshot.docs.map((d) => ({
+      id: d.id,
+      ...d.data()
+    }));
+
+    if (!notices.length) {
+      existingNoticesEl.innerHTML = `<div class="muted">No notices found.</div>`;
+      return;
+    }
+
+    existingNoticesEl.innerHTML = notices
+      .map((n) => `
+        <div class="card" style="margin-top:10px; border-left:6px solid ${
+          n.priority === "critical"
+            ? "#c62828"
+            : n.priority === "warning"
+            ? "#ef6c00"
+            : n.priority === "good"
+            ? "#2e7d32"
+            : "#1565c0"
+        };">
+          <div style="font-weight:900; font-size:16px;">
+            ${escapeHtml(n.title || "-")}
+          </div>
+
+          <div style="margin-top:8px; white-space:pre-wrap;">
+            ${escapeHtml(n.message || "")}
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+            <div class="muted">
+              Priority: ${escapeHtml(n.priority || "info")}
+            </div>
+
+            <button
+              class="deleteNoticeBtn"
+              data-id="${n.id}"
+              style="
+                background:#c62828;
+                color:white;
+                border:none;
+                border-radius:6px;
+                padding:6px 12px;
+                cursor:pointer;
+              "
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      `)
+      .join("");
+      
+      existingNoticesEl.querySelectorAll(".deleteNoticeBtn").forEach((btn) => {
+        btn.onclick = async () => {
+          const noticeId = btn.getAttribute("data-id");
+
+          if (!confirm("Delete this notice?")) return;
+
+          try {
+            await updateDoc(doc(db, "notices", noticeId), {
+              active: false,
+              deleted: true,
+              deletedAt: serverTimestamp(),
+              deletedByEmail: normalizeEmail(state.currentUser?.email || "")
+            });
+
+            alert("Notice deleted");
+          } catch (e) {
+            console.error(e);
+            alert("Failed to delete notice");
+          }
+        };
+      });
+  },
+  (e) => {
+    console.error(e);
+    existingNoticesEl.innerHTML = `<div class="muted">Failed to load notices.</div>`;
+  }
+);
+
+  function updatePreview() {
+    previewTitle.textContent = titleEl.value.trim() || "Sample Notice Title";
+
+    previewMessage.textContent =
+      messageEl.value.trim() ||
+      "This is how the notice message will appear to drivers.";
+
+    const priority = priorityEl.value;
+
+    if (priority === "critical") {
+      previewCard.style.borderLeft = "6px solid #c62828";
+    } else if (priority === "warning") {
+      previewCard.style.borderLeft = "6px solid #ef6c00";
+    } else if (priority === "good") {
+      previewCard.style.borderLeft = "6px solid #2e7d32";
+    } else {
+      previewCard.style.borderLeft = "6px solid #1565c0";
+    }
+  }
+
+  titleEl.oninput = updatePreview;
+  messageEl.oninput = updatePreview;
+  priorityEl.onchange = updatePreview;
+
+  imageEl.onchange = () => {
+  const file = imageEl.files?.[0];
+
+  if (!file) {
+    previewImage.style.display = "none";
+    previewImage.src = "";
     return;
   }
+
+  const reader = new FileReader();
+
+  reader.onload = (e) => {
+    previewImage.src = e.target.result;
+    previewImage.style.display = "block";
+  };
+
+  reader.readAsDataURL(file);
+};
+
+  updatePreview();
+  const saveBtn = document.getElementById("saveNoticeBtn");
+
+    saveBtn.onclick = async () => {
+      try {
+        const title = titleEl.value.trim();
+        const message = messageEl.value.trim();
+        const priority = priorityEl.value;
+
+        if (!title) {
+          alert("Please enter a title");
+          return;
+        }
+
+        if (!message) {
+          alert("Please enter a message");
+          return;
+        }
+
+        await addDoc(collection(db, "notices"), {
+          title,
+          message,
+          priority,
+          active: true,
+          createdAt: serverTimestamp(),
+          createdByEmail: normalizeEmail(state.currentUser?.email || "")
+        });
+
+        alert("Notice saved successfully");
+
+        titleEl.value = "";
+        messageEl.value = "";
+        priorityEl.value = "info";
+
+        updatePreview();
+      } catch (e) {
+        console.error(e);
+        alert("Failed to save notice");
+      }
+    };
+
+  return;
+}
 
   if (pageId === "defectReport") {
     renderPlaceholder("Defect Report", "Coming soon...");
