@@ -181,6 +181,56 @@ function loadShifts({ mode } = { mode: "driver" }) {
   );
 }
 
+  function renderEnableNotificationsButton() {
+    if (!state.isDriver) return;
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") return;
+
+    const area = els.contentArea;
+    if (!area) return;
+
+    if (document.getElementById("enableNotificationsBtn")) return;
+
+    const wrap = document.createElement("div");
+    wrap.style.margin = "0 0 12px 0";
+
+    const btn = document.createElement("button");
+    btn.id = "enableNotificationsBtn";
+    btn.textContent = "Enable Notifications";
+    btn.style.background = "#d21919";
+    btn.style.color = "white";
+    btn.style.border = "none";
+    btn.style.borderRadius = "8px";
+    btn.style.padding = "10px 14px";
+    btn.style.fontWeight = "700";
+
+    btn.onclick = async () => {
+      try {
+        btn.disabled = true;
+        btn.textContent = "Enabling...";
+
+        await registerDriverNotifications(state.employee);
+
+        alert("Notification permission: " + Notification.permission);
+
+        btn.textContent =
+          Notification.permission === "granted"
+            ? "Notifications Enabled"
+            : "Enable Notifications";
+
+        btn.disabled = false;
+      } catch (e) {
+        console.error(e);
+        alert(e.message || "Notification setup failed");
+        btn.disabled = false;
+        btn.textContent = "Enable Notifications";
+      }
+    };
+
+    wrap.appendChild(btn);
+    area.prepend(wrap);
+  }
+
 function render() {
   // My Work page uses the new UI renderer
   if (state.activePage === "myWork") {
@@ -198,6 +248,9 @@ function render() {
         }
       }
     );
+
+  renderEnableNotificationsButton();
+
     return;
   }
 
@@ -1450,6 +1503,12 @@ async function registerDriverNotifications(employee) {
   try {
     if (!employee) return;
 
+    console.log("PWA notification check started");
+    console.log("Notification supported:", "Notification" in window);
+    console.log("Current permission:", window.Notification ? Notification.permission : "not-supported");
+    console.log("Standalone mode:", window.matchMedia("(display-mode: standalone)").matches);
+    console.log("Employee for notification:", employee);
+
     const empNo = String(employee.employeeNumber || "").trim();
     if (notificationRegisteredForEmpNo === empNo) {
   console.log("FCM already registered for driver:", empNo);
@@ -1466,6 +1525,7 @@ async function registerDriverNotifications(employee) {
     }
 
     const permission = await Notification.requestPermission();
+    console.log("Permission result:", permission);
 
     if (permission !== "granted") {
       console.log("Notification permission not granted");
