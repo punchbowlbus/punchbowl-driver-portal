@@ -19,7 +19,7 @@ import {
   deleteTemplateLeg
 } from "./db.js";
 
-console.log("admin_v2.js loaded");
+console.log("admin_v2.js loaded - MULTISTOP TEST 123");
 
 import { els, showError } from "./ui.js";
 import { auth } from "./firebase.js";
@@ -403,24 +403,109 @@ function wireJobGroupDropdownOnly() {
 
 function renderMultiLegRowsContainer() {
   return `
-    <div id="loopWrap" style="display:none; margin-top:12px">
-      <div class="muted" style="margin-bottom:6px">Loop / Multi-leg rows</div>
+    <div id="loopWrap" style="display:none; margin-top:14px; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fafafa;">
+      <div style="font-weight:900; margin-bottom:6px;">Loop / Multi-stop Builder</div>
 
-      <div id="loopRows"></div>
-
-      <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap">
-        <button id="addLoopRow" class="btn">+ Add another leg</button>
-        <button id="dupLastRow" class="btn">Duplicate last</button>
-        <button id="clearLoopRows" class="btn danger">Clear rows</button>
+      <div class="muted" style="font-size:12px; margin-bottom:12px;">
+        Enter the start location once, then add stops in order. The system will generate the legs automatically and save as one draggable block.
       </div>
 
-      <div class="muted" style="margin-top:8px">
-        Each row will be saved as a separate leg (better for rostering later).
+      <div style="display:grid; grid-template-columns:1fr 160px; gap:10px;">
+        <div>
+          <div class="muted" style="margin-bottom:4px;">Start Location</div>
+          <input id="multiStartLocation" placeholder="e.g. Wiley Park Girls High School" />
+        </div>
+
+        <div>
+          <div class="muted" style="margin-bottom:4px;">Start Time</div>
+          <input id="multiStartTime" type="time" />
+        </div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div style="font-weight:800; margin-bottom:8px;">Stops</div>
+        <div id="multiStopRows"></div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+          <button id="addMultiStopBtn" type="button" class="btn">+ Add Stop</button>
+          <button id="clearMultiStopsBtn" type="button" class="btn danger">Clear Stops</button>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; padding-top:12px; border-top:1px solid #e5e7eb;">
+        <div class="muted" style="margin-bottom:4px;">Return Option</div>
+        <select id="multiReturnOption">
+          <option value="NONE">No return</option>
+          <option value="SAME_ROUTE">Return same route</option>
+        </select>
+
+        <div id="multiReturnWrap" style="display:none; margin-top:10px;">
+          <div class="muted" style="font-size:12px; margin-bottom:8px;">
+            First version: return same route is saved as one return summary leg. Later we can expand it into full reverse stop times.
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+            <div>
+              <div class="muted" style="margin-bottom:4px;">Return Start Time</div>
+              <input id="multiReturnStartTime" type="time" />
+            </div>
+
+            <div>
+              <div class="muted" style="margin-bottom:4px;">Return Finish Time</div>
+              <input id="multiReturnFinishTime" type="time" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:14px; padding-top:12px; border-top:1px solid #e5e7eb;">
+        <div style="font-weight:800; margin-bottom:8px;">Generated Legs Preview</div>
+        <div id="multiLegPreview" class="muted">Add start location, stops, and times to preview legs.</div>
       </div>
     </div>
   `;
 }
+function multiStopRowTemplate(idx) {
+  return `
+    <div
+      data-multi-stop-row="${idx}"
+      style="
+        margin-top:8px;
+        padding:10px;
+        border:1px solid #e5e7eb;
+        border-radius:10px;
+        background:#fff;
+      "
+    >
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div style="font-weight:800;">Stop ${idx + 1}</div>
+        <button type="button" class="btn danger" data-remove-multi-stop="${idx}">Remove</button>
+      </div>
 
+      <div style="display:grid; grid-template-columns:1fr 150px 150px; gap:10px; margin-top:8px;">
+        <div>
+          <div class="muted" style="margin-bottom:4px;">Stop Name</div>
+          <input class="multiStopName" placeholder="Stop name / venue" />
+        </div>
+
+        <div>
+          <div class="muted" style="margin-bottom:4px;">Arrival</div>
+          <input class="multiStopArrival" type="time" />
+        </div>
+
+        <div>
+          <div class="muted" style="margin-bottom:4px;">Departure</div>
+          <input class="multiStopDeparture" type="time" />
+        </div>
+      </div>
+
+      <div style="margin-top:8px;">
+        <div class="muted" style="margin-bottom:4px;">Stop Note</div>
+        <input class="multiStopNote" placeholder="Optional note, pickup point, gate, side street, etc." />
+      </div>
+    </div>
+  `;
+}
 function loopRowTemplate(idx) {
   return `
     <div class="card" style="margin-top:10px; padding:12px" data-loop-row="${idx}">
@@ -455,89 +540,226 @@ function loopRowTemplate(idx) {
 }
 
 function wireBlockEntryAdvanced() {
-  const patternEl = document.getElementById("tripPattern");
-  const returnWrap = document.getElementById("returnWrap");
-  const loopWrap = document.getElementById("loopWrap");
-  const loopRowsEl = document.getElementById("loopRows");
+const patternEl = document.getElementById("tripPattern");
+const returnWrap = document.getElementById("returnWrap");
+const loopWrap = document.getElementById("loopWrap");
+const oneWayWrap = document.getElementById("oneWayWrap");
 
-  const addRowBtn = document.getElementById("addLoopRow");
-  const dupBtn = document.getElementById("dupLastRow");
-  const clearBtn = document.getElementById("clearLoopRows");
+  const addStopBtn = document.getElementById("addMultiStopBtn");
+  const clearStopsBtn = document.getElementById("clearMultiStopsBtn");
+  const stopRowsEl = document.getElementById("multiStopRows");
+  const returnOptionEl = document.getElementById("multiReturnOption");
+  const multiReturnWrap = document.getElementById("multiReturnWrap");
 
-  if (!patternEl || !returnWrap || !loopWrap || !loopRowsEl) return;
+  if (!patternEl || !returnWrap || !loopWrap) return;
 
-  function ensureAtLeastOneRow() {
-    if (loopRowsEl.children.length === 0) {
-      loopRowsEl.insertAdjacentHTML("beforeend", loopRowTemplate(0));
-      wireRemoveButtons();
-    }
-  }
+  function reindexStopRows() {
+    const rows = [...(stopRowsEl?.querySelectorAll("[data-multi-stop-row]") || [])];
 
-  function reindexRows() {
-    const rows = [...loopRowsEl.querySelectorAll("[data-loop-row]")];
     rows.forEach((row, i) => {
-      row.setAttribute("data-loop-row", String(i));
-      const title = row.querySelector("div[style*='font-weight:900']");
-      if (title) title.textContent = `Leg ${i + 1}`;
-      const rm = row.querySelector("[data-remove-row]");
-      if (rm) rm.setAttribute("data-remove-row", String(i));
+      row.setAttribute("data-multi-stop-row", String(i));
+
+      const title = row.querySelector("div[style*='font-weight:800']");
+      if (title) title.textContent = `Stop ${i + 1}`;
+
+      const removeBtn = row.querySelector("[data-remove-multi-stop]");
+      if (removeBtn) removeBtn.setAttribute("data-remove-multi-stop", String(i));
     });
   }
 
-  function wireRemoveButtons() {
-    [...loopRowsEl.querySelectorAll("[data-remove-row]")].forEach((btn) => {
+  function wireStopRowEvents() {
+    [...(stopRowsEl?.querySelectorAll("[data-remove-multi-stop]") || [])].forEach((btn) => {
       btn.onclick = () => {
-        const i = Number(btn.getAttribute("data-remove-row"));
-        const row = loopRowsEl.querySelector(`[data-loop-row="${i}"]`);
+        const idx = Number(btn.getAttribute("data-remove-multi-stop"));
+        const row = stopRowsEl.querySelector(`[data-multi-stop-row="${idx}"]`);
         if (row) row.remove();
-        reindexRows();
-        if (loopRowsEl.children.length === 0) ensureAtLeastOneRow();
+        reindexStopRows();
+        renderMultiLegPreview();
       };
     });
+
+    [...(stopRowsEl?.querySelectorAll("input") || [])].forEach((input) => {
+      input.oninput = renderMultiLegPreview;
+      input.onchange = renderMultiLegPreview;
+    });
   }
 
-  function addRow(prefill = null) {
-    const idx = loopRowsEl.children.length;
-    loopRowsEl.insertAdjacentHTML("beforeend", loopRowTemplate(idx));
-    const row = loopRowsEl.querySelector(`[data-loop-row="${idx}"]`);
-    if (prefill && row) {
-      row.querySelector(".lrFrom").value = prefill.from || "";
-      row.querySelector(".lrTo").value = prefill.to || "";
-      row.querySelector(".lrStart").value = prefill.start || "";
-      row.querySelector(".lrEnd").value = prefill.end || "";
-      row.querySelector(".lrType").value = prefill.type || "Loop";
-    }
-    wireRemoveButtons();
+  function addStopRow() {
+    if (!stopRowsEl) return;
+
+    const idx = stopRowsEl.children.length;
+    stopRowsEl.insertAdjacentHTML("beforeend", multiStopRowTemplate(idx));
+    wireStopRowEvents();
+    renderMultiLegPreview();
   }
 
-  patternEl.onchange = () => {
-    const v = patternEl.value;
-    returnWrap.style.display = v === "FR" ? "block" : "none";
-    loopWrap.style.display = v === "LOOP" ? "block" : "none";
-    if (v === "LOOP") ensureAtLeastOneRow();
-  };
+  function ensureAtLeastOneStop() {
+    if (!stopRowsEl) return;
+    if (stopRowsEl.children.length === 0) addStopRow();
+  }
 
-  if (addRowBtn) addRowBtn.onclick = () => addRow();
-  if (dupBtn)
-    dupBtn.onclick = () => {
-      const last = loopRowsEl.querySelector("[data-loop-row]:last-child");
-      if (!last) return addRow();
-      addRow({
-        from: last.querySelector(".lrFrom").value,
-        to: last.querySelector(".lrTo").value,
-        start: last.querySelector(".lrStart").value,
-        end: last.querySelector(".lrEnd").value,
-        type: last.querySelector(".lrType").value
+  function getMultiStopDataForPreview() {
+    const startLocation = (document.getElementById("multiStartLocation")?.value || "").trim();
+    const startTime = document.getElementById("multiStartTime")?.value || "";
+
+    const stops = [...(stopRowsEl?.querySelectorAll("[data-multi-stop-row]") || [])].map((row) => ({
+      name: (row.querySelector(".multiStopName")?.value || "").trim(),
+      arrivalTime: row.querySelector(".multiStopArrival")?.value || "",
+      departureTime: row.querySelector(".multiStopDeparture")?.value || "",
+      note: (row.querySelector(".multiStopNote")?.value || "").trim()
+    }));
+
+    const returnOption = document.getElementById("multiReturnOption")?.value || "NONE";
+    const returnStartTime = document.getElementById("multiReturnStartTime")?.value || "";
+    const returnFinishTime = document.getElementById("multiReturnFinishTime")?.value || "";
+
+    return {
+      startLocation,
+      startTime,
+      stops,
+      returnOption,
+      returnStartTime,
+      returnFinishTime
+    };
+  }
+
+  function buildPreviewLegs(data) {
+    const legs = [];
+
+    if (!data.startLocation || !data.startTime || !data.stops.length) return legs;
+
+    const validStops = data.stops.filter((s) => s.name);
+    if (!validStops.length) return legs;
+
+    legs.push({
+      legNo: 1,
+      legType: "Forward",
+      from: data.startLocation,
+      to: validStops[0].name,
+      startTime: data.startTime,
+      endTime: validStops[0].arrivalTime || ""
+    });
+
+    for (let i = 1; i < validStops.length; i++) {
+      legs.push({
+        legNo: legs.length + 1,
+        legType: "Forward",
+        from: validStops[i - 1].name,
+        to: validStops[i].name,
+        startTime: validStops[i - 1].departureTime || "",
+        endTime: validStops[i].arrivalTime || ""
       });
-    };
-  if (clearBtn)
-    clearBtn.onclick = () => {
-      loopRowsEl.innerHTML = "";
-      ensureAtLeastOneRow();
-    };
+    }
 
-  returnWrap.style.display = "none";
-  loopWrap.style.display = "none";
+    const lastStop = validStops[validStops.length - 1];
+
+    if (data.returnOption === "SAME_ROUTE" && data.returnStartTime && data.returnFinishTime) {
+      legs.push({
+        legNo: legs.length + 1,
+        legType: "Return",
+        from: lastStop.name,
+        to: data.startLocation,
+        startTime: data.returnStartTime,
+        endTime: data.returnFinishTime,
+        note: "Return same route summary"
+      });
+    }
+
+    return legs;
+  }
+
+  function renderMultiLegPreview() {
+    const previewEl = document.getElementById("multiLegPreview");
+    if (!previewEl) return;
+
+    const data = getMultiStopDataForPreview();
+    const legs = buildPreviewLegs(data);
+
+    if (!legs.length) {
+      previewEl.innerHTML = `Add start location, stops, and times to preview legs.`;
+      return;
+    }
+
+    previewEl.innerHTML = `
+      <div style="display:grid; gap:6px;">
+        ${legs
+          .map((leg) => `
+            <div style="
+              padding:8px;
+              border:1px solid #e5e7eb;
+              border-radius:8px;
+              background:#fff;
+              color:#111;
+            ">
+              <div style="font-weight:800;">
+                Leg ${leg.legNo}: ${escapeHtml(leg.from)} → ${escapeHtml(leg.to)}
+              </div>
+              <div class="muted" style="font-size:12px; margin-top:3px;">
+                ${escapeHtml(leg.legType)} · ${escapeHtml(leg.startTime || "--:--")} - ${escapeHtml(leg.endTime || "--:--")}
+                ${leg.note ? ` · ${escapeHtml(leg.note)}` : ""}
+              </div>
+            </div>
+          `)
+          .join("")}
+      </div>
+    `;
+  }
+
+  function updateTripPatternUI() {
+    const v = patternEl.value;
+
+    if (oneWayWrap) {
+      oneWayWrap.hidden = v === "LOOP";
+      oneWayWrap.style.display = v === "LOOP" ? "none" : "block";
+    }
+
+    returnWrap.hidden = v !== "FR";
+    returnWrap.style.display = v === "FR" ? "block" : "none";
+
+    loopWrap.hidden = v !== "LOOP";
+    loopWrap.style.display = v === "LOOP" ? "block" : "none";
+
+    if (v === "LOOP") ensureAtLeastOneStop();
+
+    console.log("Trip pattern UI updated:", v, {
+      oneWayHidden: oneWayWrap?.hidden,
+      loopHidden: loopWrap?.hidden
+    });
+  }
+
+  patternEl.onchange = updateTripPatternUI;
+  if (addStopBtn) addStopBtn.onclick = () => addStopRow();
+
+  if (clearStopsBtn) {
+    clearStopsBtn.onclick = () => {
+      if (!stopRowsEl) return;
+      stopRowsEl.innerHTML = "";
+      ensureAtLeastOneStop();
+      renderMultiLegPreview();
+    };
+  }
+
+
+  if (returnOptionEl && multiReturnWrap) {
+    returnOptionEl.onchange = () => {
+      multiReturnWrap.style.display = returnOptionEl.value === "SAME_ROUTE" ? "block" : "none";
+      renderMultiLegPreview();
+    };
+  }
+
+[
+  "multiStartLocation",
+  "multiStartTime",
+  "multiReturnStartTime",
+  "multiReturnFinishTime"
+].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.oninput = renderMultiLegPreview;
+    el.onchange = renderMultiLegPreview;
+  });
+
+updateTripPatternUI();
 }
 
 export function renderAdminBlocks() {
@@ -615,21 +837,27 @@ export function renderAdminBlocks() {
               </div>
             </div>
 
-            ${renderMultiLegRowsContainer()}
+          </div>
 
-            <textarea id="blockNotes" placeholder="Notes (bus 1/bus 2, pax, changes, school time change etc.)"></textarea>
+          ${renderMultiLegRowsContainer()}
 
-            <button id="createBlock">Save</button>
+          <textarea id="blockNotes" placeholder="Notes (bus 1/bus 2, pax, changes, school time change etc.)"></textarea>
 
-            <div class="muted" style="margin-top:8px">
-              Tip: For 2 buses, create another leg (or duplicate) and put “Bus 1 / Bus 2” in Notes.
-            </div>
+          <button id="createBlock">Save</button>
+
+          <div class="muted" style="margin-top:8px">
+            Tip: For 2 buses, use “How many buses?” above.
           </div>
         </div>
   `;
 
   wireJobGroupDropdownOnly();
   wireBlockEntryAdvanced();
+
+  setTimeout(() => {
+    document.getElementById("tripPattern")?.dispatchEvent(new Event("change"));
+  }, 0);
+
   wireCreateBlockAdvanced();
 }
 
@@ -668,135 +896,290 @@ function wireCreateBlockAdvanced() {
         return null;
       }
 
-      // LOOP
+      // LOOP / MULTI-STOP
       if (pattern === "LOOP") {
-        const loopRowsEl = document.getElementById("loopRows");
-        const rows = [...(loopRowsEl?.querySelectorAll("[data-loop-row]") || [])];
-        if (!rows.length) return showError("Please add at least 1 loop leg.");
+        const startLocation = (document.getElementById("multiStartLocation")?.value || "").trim();
+        const startTime = document.getElementById("multiStartTime")?.value || "";
 
-        const loopId = uid();
-        const legs = [];
+        const returnOption = document.getElementById("multiReturnOption")?.value || "NONE";
+        const returnStartTime = document.getElementById("multiReturnStartTime")?.value || "";
+        const returnFinishTime = document.getElementById("multiReturnFinishTime")?.value || "";
 
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i];
-          const rFrom = (r.querySelector(".lrFrom")?.value || "").trim();
-          const rTo = (r.querySelector(".lrTo")?.value || "").trim();
-          const rStart = r.querySelector(".lrStart")?.value || "";
-          const rEnd = r.querySelector(".lrEnd")?.value || "";
-          const rType = r.querySelector(".lrType")?.value || "Loop";
+        if (!startLocation) return showError("Please enter Start Location.");
+        if (!startTime) return showError("Please enter Start Time.");
 
-          const err = validateLegBasics(rFrom, rTo, rStart, rEnd);
-          if (err) return showError(`Leg ${i + 1}: ${err}`);
+        const startMin = minFromTimeStr(startTime);
+        if (startMin == null) return showError("Invalid Start Time.");
 
-          legs.push({
-            jobGroupId: state.selectedJobGroupId,
-            serviceDate,
-            from: rFrom,
-            to: rTo,
-            startMin: minFromTimeStr(rStart),
-            endMin: minFromTimeStr(rEnd),
-            blockType: rType,
-            notes,
-            createdBy,
-            tripPattern: "LOOP",
-            loopId,
-            legIndex: i + 1
+        const stopRows = [...(document.querySelectorAll("[data-multi-stop-row]") || [])];
+
+        if (!stopRows.length) return showError("Please add at least one stop.");
+
+        const routeStops = [];
+
+        for (let i = 0; i < stopRows.length; i++) {
+          const row = stopRows[i];
+
+          const stopName = (row.querySelector(".multiStopName")?.value || "").trim();
+          const arrivalTime = row.querySelector(".multiStopArrival")?.value || "";
+          const departureTime = row.querySelector(".multiStopDeparture")?.value || "";
+          const stopNote = (row.querySelector(".multiStopNote")?.value || "").trim();
+
+          if (!stopName) return showError(`Stop ${i + 1}: Please enter Stop Name.`);
+          if (!arrivalTime) return showError(`Stop ${i + 1}: Please enter Arrival Time.`);
+          if (!departureTime) return showError(`Stop ${i + 1}: Please enter Departure Time.`);
+
+          const arrivalMin = minFromTimeStr(arrivalTime);
+          const departureMin = minFromTimeStr(departureTime);
+
+          if (arrivalMin == null || departureMin == null) {
+            return showError(`Stop ${i + 1}: Invalid arrival or departure time.`);
+          }
+
+          if (departureMin < arrivalMin) {
+            return showError(`Stop ${i + 1}: Departure cannot be before arrival.`);
+          }
+
+          routeStops.push({
+            stopNo: i + 1,
+            name: stopName,
+            arrivalTime,
+            departureTime,
+            arrivalMin,
+            departureMin,
+            note: stopNote
           });
         }
 
-        for (const leg of legs) await addBlock(leg);
+        const generatedLegs = [];
 
-        alert(`Saved ${legs.length} legs ✅`);
-        document.getElementById("blockNotes").value = "";
-        return;
-      }
+        generatedLegs.push({
+          legNo: 1,
+          legType: "Forward",
+          from: startLocation,
+          to: routeStops[0].name,
+          startTime,
+          endTime: routeStops[0].arrivalTime,
+          startMin,
+          endMin: routeStops[0].arrivalMin
+        });
 
-      // ONE
-      if (pattern === "ONE") {
-        const err = validateLegBasics(from, to, start, end);
-        if (err) return showError(err);
+        for (let i = 1; i < routeStops.length; i++) {
+          generatedLegs.push({
+            legNo: generatedLegs.length + 1,
+            legType: "Forward",
+            from: routeStops[i - 1].name,
+            to: routeStops[i].name,
+            startTime: routeStops[i - 1].departureTime,
+            endTime: routeStops[i].arrivalTime,
+            startMin: routeStops[i - 1].departureMin,
+            endMin: routeStops[i].arrivalMin
+          });
+        }
+
+        const lastStop = routeStops[routeStops.length - 1];
+
+        let overallEndMin = lastStop.arrivalMin;
+        let overallTo = lastStop.name;
+
+        if (returnOption === "SAME_ROUTE") {
+          if (!returnStartTime || !returnFinishTime) {
+            return showError("Please enter Return Start Time and Return Finish Time.");
+          }
+
+          const returnStartMin = minFromTimeStr(returnStartTime);
+          const returnFinishMin = minFromTimeStr(returnFinishTime);
+
+          if (returnStartMin == null || returnFinishMin == null) {
+            return showError("Invalid return times.");
+          }
+
+          if (returnFinishMin <= returnStartMin) {
+            return showError("Return finish time must be after return start time.");
+          }
+
+          if (returnStartMin < lastStop.departureMin) {
+            return showError("Return start time cannot be before the last stop departure time.");
+          }
+
+          generatedLegs.push({
+            legNo: generatedLegs.length + 1,
+            legType: "Return",
+            from: lastStop.name,
+            to: startLocation,
+            startTime: returnStartTime,
+            endTime: returnFinishTime,
+            startMin: returnStartMin,
+            endMin: returnFinishMin,
+            note: "Return same route summary"
+          });
+
+          overallEndMin = returnFinishMin;
+          overallTo = startLocation;
+        }
 
         for (let i = 0; i < busCount; i++) {
+          const routeId = uid();
+
+          const busNote =
+            busCount > 1
+              ? `${notes || ""} | Bus ${i + 1}`
+              : notes;
+
           await addBlock({
             jobGroupId: state.selectedJobGroupId,
             serviceDate,
-            from,
-            to,
-            startMin: minFromTimeStr(start),
-            endMin: minFromTimeStr(end),
-            blockType: baseType,
-            notes: busCount > 1
-              ? `${notes || ""} | Bus ${i + 1}`
-              : notes,
+
+            from: startLocation,
+            to: overallTo,
+            startMin,
+            endMin: overallEndMin,
+
+            blockType: "Loop",
+            notes: busNote,
             createdBy,
-            tripPattern: "ONE"
+
+            tripPattern: "LOOP",
+            blockKind: "parent",
+            routeMode: "multiStop",
+            routeId,
+
+            startLocation,
+            returnOption,
+
+            legCount: generatedLegs.length,
+            stopCount: routeStops.length,
+            routeStops,
+            generatedLegs,
+
+            dispatchStatus: "Pending"
           });
         }
 
-        alert("Block saved ✅");
+        alert(`Saved ${busCount > 1 ? busCount + " multi-stop blocks" : "1 multi-stop block"} ✅`);
+
+        document.getElementById("multiStartLocation").value = "";
+        document.getElementById("multiStartTime").value = "";
+        document.getElementById("multiReturnStartTime").value = "";
+        document.getElementById("multiReturnFinishTime").value = "";
+        document.getElementById("multiReturnOption").value = "NONE";
+        document.getElementById("multiReturnWrap").style.display = "none";
+        document.getElementById("multiStopRows").innerHTML = "";
+        document.getElementById("multiLegPreview").innerHTML = "Add start location, stops, and times to preview legs.";
+        document.getElementById("blockNotes").value = "";
+
+        return;
+      }
+            // One Way / Forward + Return save code goes here
+                  // ONE WAY / FORWARD + RETURN
+      const validationError = validateLegBasics(from, to, start, end);
+      if (validationError) return showError(validationError);
+
+      const startMin = minFromTimeStr(start);
+      const endMin = minFromTimeStr(end);
+
+      if (pattern === "ONE") {
+        for (let i = 0; i < busCount; i++) {
+          const busNote =
+            busCount > 1
+              ? `${notes || ""} | Bus ${i + 1}`
+              : notes;
+
+          await addBlock({
+            jobGroupId: state.selectedJobGroupId,
+            serviceDate,
+
+            from,
+            to,
+            startMin,
+            endMin,
+
+            blockType: baseType || "Forward",
+            notes: busNote,
+            createdBy,
+
+            tripPattern: "ONE",
+            dispatchStatus: "Pending"
+          });
+        }
+
+        alert(`Saved ${busCount > 1 ? busCount + " one-way blocks" : "1 one-way block"} ✅`);
+
         document.getElementById("blockFrom").value = "";
         document.getElementById("blockTo").value = "";
         document.getElementById("blockStart").value = "";
         document.getElementById("blockEnd").value = "";
         document.getElementById("blockNotes").value = "";
+
         return;
       }
 
-      // FR
       if (pattern === "FR") {
-        const err = validateLegBasics(from, to, start, end);
-        if (err) return showError(err);
+        const returnStart = document.getElementById("returnStart")?.value || "";
+        const returnEnd = document.getElementById("returnEnd")?.value || "";
 
-        const rStart = document.getElementById("returnStart").value;
-        const rEnd = document.getElementById("returnEnd").value;
+        if (!returnStart || !returnEnd) {
+          return showError("Please enter Return Start Time and Return End Time.");
+        }
 
-        if (!rStart || !rEnd) return showError("Please enter Return Start Time and Return End Time.");
-        const rs = minFromTimeStr(rStart);
-        const re = minFromTimeStr(rEnd);
-        if (rs == null || re == null) return showError("Invalid return times.");
-        if (re <= rs) return showError("Return end time must be after return start time.");
+        const returnStartMin = minFromTimeStr(returnStart);
+        const returnEndMin = minFromTimeStr(returnEnd);
 
-      for (let i = 0; i < busCount; i++) {
-        const pairId = uid();
+        if (returnStartMin == null || returnEndMin == null) {
+          return showError("Invalid return times.");
+        }
 
-        const busNote = busCount > 1
-          ? `${notes || ""} | Bus ${i + 1}`
-          : notes;
+        if (returnEndMin <= returnStartMin) {
+          return showError("Return end time must be after return start time.");
+        }
 
-        // Forward
-        await addBlock({
-          jobGroupId: state.selectedJobGroupId,
-          serviceDate,
-          from,
-          to,
-          startMin: minFromTimeStr(start),
-          endMin: minFromTimeStr(end),
-          blockType: "Forward",
-          notes: busNote,
-          createdBy,
-          tripPattern: "FR",
-          pairId,
-          legIndex: 1
-        });
+        for (let i = 0; i < busCount; i++) {
+          const pairId = uid();
 
-        // Return
-        await addBlock({
-          jobGroupId: state.selectedJobGroupId,
-          serviceDate,
-          from: to,
-          to: from,
-          startMin: rs,
-          endMin: re,
-          blockType: "Return",
-          notes: busNote,
-          createdBy,
-          tripPattern: "FR",
-          pairId,
-          legIndex: 2
-        });
-      }
+          const busNote =
+            busCount > 1
+              ? `${notes || ""} | Bus ${i + 1}`
+              : notes;
 
-        alert("Forward + Return saved ✅");
+          await addBlock({
+            jobGroupId: state.selectedJobGroupId,
+            serviceDate,
+
+            from,
+            to,
+            startMin,
+            endMin,
+
+            blockType: "Forward",
+            notes: busNote,
+            createdBy,
+
+            tripPattern: "FR",
+            pairId,
+            dispatchStatus: "Pending"
+          });
+
+          await addBlock({
+            jobGroupId: state.selectedJobGroupId,
+            serviceDate,
+
+            from: to,
+            to: from,
+            startMin: returnStartMin,
+            endMin: returnEndMin,
+
+            blockType: "Return",
+            notes: busNote,
+            createdBy,
+
+            tripPattern: "FR",
+            pairId,
+            dispatchStatus: "Pending"
+          });
+        }
+
+        alert(`Saved ${busCount > 1 ? busCount + " forward + return sets" : "1 forward + return set"} ✅`);
+
         document.getElementById("blockFrom").value = "";
         document.getElementById("blockTo").value = "";
         document.getElementById("blockStart").value = "";
@@ -804,6 +1187,7 @@ function wireCreateBlockAdvanced() {
         document.getElementById("returnStart").value = "";
         document.getElementById("returnEnd").value = "";
         document.getElementById("blockNotes").value = "";
+
         return;
       }
     } catch (e) {
@@ -1137,6 +1521,33 @@ function renderBlocks(blocks) {
               <div style="margin-top:8px">
                 <b>${escapeHtml(b.from || "-")} → ${escapeHtml(b.to || "-")}</b>
               </div>
+
+              ${
+                Array.isArray(b.generatedLegs) && b.generatedLegs.length
+                  ? `
+                    <div style="margin-top:10px; display:grid; gap:6px;">
+                      ${b.generatedLegs
+                        .map((leg) => `
+                          <div style="
+                            padding:8px 10px;
+                            border:1px solid #e5e7eb;
+                            border-radius:8px;
+                            background:#fafafa;
+                          ">
+                            <div style="font-weight:800;">
+                              Leg ${escapeHtml(leg.legNo || "")}: ${escapeHtml(leg.from || "-")} → ${escapeHtml(leg.to || "-")}
+                            </div>
+                            <div class="muted" style="font-size:12px; margin-top:2px;">
+                              ${escapeHtml(leg.legType || "Leg")} · ${escapeHtml(leg.startTime || timeStrFromMin(leg.startMin))} - ${escapeHtml(leg.endTime || timeStrFromMin(leg.endMin))}
+                              ${leg.note ? ` · ${escapeHtml(leg.note)}` : ""}
+                            </div>
+                          </div>
+                        `)
+                        .join("")}
+                    </div>
+                  `
+                  : ""
+              }
 
               ${b.notes ? `<div class="muted" style="margin-top:6px">${escapeHtml(b.notes)}</div>` : ``}
 
