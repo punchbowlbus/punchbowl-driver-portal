@@ -612,6 +612,12 @@ const oneWayWrap = document.getElementById("oneWayWrap");
     const returnOption = document.getElementById("multiReturnOption")?.value || "NONE";
     const returnStartTime = document.getElementById("multiReturnStartTime")?.value || "";
     const returnFinishTime = document.getElementById("multiReturnFinishTime")?.value || "";
+    console.log("LOOP SAVE DEBUG:", {
+      returnOption,
+      returnStartTime,
+      returnFinishTime
+    });
+
 
     return {
       startLocation,
@@ -951,9 +957,11 @@ function wireCreateBlockAdvanced() {
           });
         }
 
-        const generatedLegs = [];
+        const lastStop = routeStops[routeStops.length - 1];
 
-        generatedLegs.push({
+        const forwardLegs = [];
+
+        forwardLegs.push({
           legNo: 1,
           legType: "Forward",
           from: startLocation,
@@ -965,8 +973,8 @@ function wireCreateBlockAdvanced() {
         });
 
         for (let i = 1; i < routeStops.length; i++) {
-          generatedLegs.push({
-            legNo: generatedLegs.length + 1,
+          forwardLegs.push({
+            legNo: forwardLegs.length + 1,
             legType: "Forward",
             from: routeStops[i - 1].name,
             to: routeStops[i].name,
@@ -977,18 +985,17 @@ function wireCreateBlockAdvanced() {
           });
         }
 
-        const lastStop = routeStops[routeStops.length - 1];
-
-        let overallEndMin = lastStop.arrivalMin;
-        let overallTo = lastStop.name;
+        let returnStartMin = null;
+        let returnFinishMin = null;
+        let returnLegs = [];
 
         if (returnOption === "SAME_ROUTE") {
           if (!returnStartTime || !returnFinishTime) {
             return showError("Please enter Return Start Time and Return Finish Time.");
           }
 
-          const returnStartMin = minFromTimeStr(returnStartTime);
-          const returnFinishMin = minFromTimeStr(returnFinishTime);
+          returnStartMin = minFromTimeStr(returnStartTime);
+          returnFinishMin = minFromTimeStr(returnFinishTime);
 
           if (returnStartMin == null || returnFinishMin == null) {
             return showError("Invalid return times.");
@@ -1002,24 +1009,63 @@ function wireCreateBlockAdvanced() {
             return showError("Return start time cannot be before the last stop departure time.");
           }
 
-          generatedLegs.push({
-            legNo: generatedLegs.length + 1,
-            legType: "Return",
-            from: lastStop.name,
-            to: startLocation,
-            startTime: returnStartTime,
-            endTime: returnFinishTime,
-            startMin: returnStartMin,
-            endMin: returnFinishMin,
-            note: "Return same route summary"
-          });
+          const reverseStops = routeStops.slice().reverse();
 
-          overallEndMin = returnFinishMin;
-          overallTo = startLocation;
+          if (reverseStops.length > 1) {
+            returnLegs.push({
+              legNo: 1,
+              legType: "Return",
+              from: reverseStops[0].name,
+              to: reverseStops[1].name,
+              startTime: returnStartTime,
+              endTime: "",
+              startMin: returnStartMin,
+              endMin: null,
+              note: "Return same route"
+            });
+
+            for (let r = 1; r < reverseStops.length - 1; r++) {
+              returnLegs.push({
+                legNo: returnLegs.length + 1,
+                legType: "Return",
+                from: reverseStops[r].name,
+                to: reverseStops[r + 1].name,
+                startTime: "",
+                endTime: "",
+                startMin: null,
+                endMin: null,
+                note: "Return same route"
+              });
+            }
+
+            returnLegs.push({
+              legNo: returnLegs.length + 1,
+              legType: "Return",
+              from: reverseStops[reverseStops.length - 1].name,
+              to: startLocation,
+              startTime: "",
+              endTime: returnFinishTime,
+              startMin: null,
+              endMin: returnFinishMin,
+              note: "Return same route finish"
+            });
+          } else {
+            returnLegs.push({
+              legNo: 1,
+              legType: "Return",
+              from: lastStop.name,
+              to: startLocation,
+              startTime: returnStartTime,
+              endTime: returnFinishTime,
+              startMin: returnStartMin,
+              endMin: returnFinishMin,
+              note: "Return same route summary"
+            });
+          }
         }
 
         for (let i = 0; i < busCount; i++) {
-          const routeId = uid();
+          const routePairId = uid();
 
           const busNote =
             busCount > 1
@@ -1031,32 +1077,72 @@ function wireCreateBlockAdvanced() {
             serviceDate,
 
             from: startLocation,
-            to: overallTo,
+            to: lastStop.name,
             startMin,
-            endMin: overallEndMin,
+            endMin: lastStop.arrivalMin,
 
-            blockType: "Loop",
+            blockType: "Forward",
             notes: busNote,
             createdBy,
 
             tripPattern: "LOOP",
             blockKind: "parent",
             routeMode: "multiStop",
-            routeId,
+            routeDirection: "Forward",
+            routePairId,
 
             startLocation,
             returnOption,
 
-            legCount: generatedLegs.length,
+            legCount: forwardLegs.length,
             stopCount: routeStops.length,
             routeStops,
-            generatedLegs,
+            generatedLegs: forwardLegs,
 
             dispatchStatus: "Pending"
           });
+
+          if (returnOption === "SAME_ROUTE") {
+            await addBlock({
+              jobGroupId: state.selectedJobGroupId,
+              serviceDate,
+
+              from: lastStop.name,
+              to: startLocation,
+              startMin: returnStartMin,
+              endMin: returnFinishMin,
+
+              blockType: "Return",
+              notes: busNote,
+              createdBy,
+
+              tripPattern: "LOOP",
+              blockKind: "parent",
+              routeMode: "multiStop",
+              routeDirection: "Return",
+              routePairId,
+
+              startLocation,
+              returnOption,
+
+              legCount: returnLegs.length,
+              stopCount: routeStops.length,
+              routeStops,
+              generatedLegs: returnLegs,
+
+              dispatchStatus: "Pending"
+            });
+          }
         }
 
-        alert(`Saved ${busCount > 1 ? busCount + " multi-stop blocks" : "1 multi-stop block"} ✅`);
+        const savedCount = returnOption === "SAME_ROUTE" ? busCount * 2 : busCount;
+        console.log("LOOP SAVED COUNT DEBUG:", {
+          busCount,
+          returnOption,
+          savedCount
+        });
+
+        alert(`Saved ${savedCount} multi-stop block${savedCount === 1 ? "" : "s"} ✅`);
 
         document.getElementById("multiStartLocation").value = "";
         document.getElementById("multiStartTime").value = "";
