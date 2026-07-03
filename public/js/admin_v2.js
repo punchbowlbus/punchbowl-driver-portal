@@ -1156,7 +1156,7 @@ function wireCreateBlockAdvanced() {
 
         return;
       }
-            // One Way / Forward + Return save code goes here
+
                   // ONE WAY / FORWARD + RETURN
       const validationError = validateLegBasics(from, to, start, end);
       if (validationError) return showError(validationError);
@@ -1508,7 +1508,27 @@ function wireBlocksBrowser() {
         border-radius:12px;
         background:#fafafa;
       ">
-        <div style="font-weight:900; margin-bottom:10px;">Edit Block</div>
+        <div style="font-weight:900; margin-bottom:10px;">
+          ${Array.isArray(b.generatedLegs) && b.generatedLegs.length ? "Edit Multi-stop Block" : "Edit Block"}
+        </div>
+
+        ${
+          Array.isArray(b.generatedLegs) && b.generatedLegs.length
+            ? `
+              <div style="
+                padding:10px;
+                border:1px solid #fde68a;
+                background:#fffbeb;
+                border-radius:10px;
+                margin-bottom:12px;
+                color:#92400e;
+              ">
+                This is a multi-stop parent block. The fields below edit the dispatch summary only.
+                The detailed generated legs are shown below for checking.
+              </div>
+            `
+            : ""
+        }
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <div style="flex:1; min-width:180px;">
@@ -1562,8 +1582,39 @@ function wireBlocksBrowser() {
           </div>
         </div>
 
+        ${
+          Array.isArray(b.generatedLegs) && b.generatedLegs.length
+            ? `
+              <div style="margin-top:14px;">
+                <div style="font-weight:900; margin-bottom:8px;">Generated Legs</div>
+
+                <div style="display:grid; gap:6px;">
+                  ${b.generatedLegs
+                    .map((leg) => `
+                      <div style="
+                        padding:8px 10px;
+                        border:1px solid #e5e7eb;
+                        border-radius:8px;
+                        background:#fff;
+                      ">
+                        <div style="font-weight:800;">
+                          Leg ${escapeHtml(leg.legNo || "")}: ${escapeHtml(leg.from || "-")} → ${escapeHtml(leg.to || "-")}
+                        </div>
+                        <div class="muted" style="font-size:12px; margin-top:2px;">
+                          ${escapeHtml(leg.legType || "Leg")} · ${escapeHtml(leg.startTime || timeStrFromMin(leg.startMin))} - ${escapeHtml(leg.endTime || timeStrFromMin(leg.endMin))}
+                          ${leg.note ? ` · ${escapeHtml(leg.note)}` : ""}
+                        </div>
+                      </div>
+                    `)
+                    .join("")}
+                </div>
+              </div>
+            `
+            : ""
+        }
+
         <div style="display:flex; gap:10px; margin-top:12px;">
-          <button class="btn" data-block-save="${b.id}">Save Changes</button>
+          <button class="btn" data-block-save="${b.id}">Save Summary Changes</button>
           <button class="btn" data-block-cancel="${b.id}">Cancel</button>
         </div>
       </div>
