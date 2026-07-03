@@ -976,10 +976,27 @@ if (pageId === "adminAllJobs") {
                       `;
                     }
 
+                    const isArrival = String(r.label || "").trim().startsWith("Arrive ");
+
                     return `
-                      <div style="margin-top:8px; display:flex; justify-content:space-between; gap:12px;">
-                        <div style="flex:1; min-width:0;">${r.label}</div>
-                        <div style="font-weight:600; white-space:nowrap;">${escapeHtml(r.time)}</div>
+                      <div style="
+                        margin-top:8px;
+                        display:flex;
+                        justify-content:space-between;
+                        gap:12px;
+                        ${isArrival ? "background:#eef8ee; border-left:4px solid #2e7d32; padding:6px 8px; border-radius:6px;" : ""}
+                      ">
+                        <div style="
+                          flex:1;
+                          min-width:0;
+                          ${isArrival ? "font-weight:700;" : ""}
+                        ">${r.label}</div>
+
+                        <div style="
+                          font-weight:700;
+                          white-space:nowrap;
+                          ${isArrival ? "color:#2e7d32;" : ""}
+                        ">${escapeHtml(r.time)}</div>
                       </div>
                     `;
                   })
