@@ -867,26 +867,64 @@ if (pageId === "adminAllJobs") {
                     return sameDate && sameDriver && insideDuty;
                   });
 
-                jobs.forEach((b) => {
-                  const from = b.fromName || b.from || b.startLocation || "Start";
-                  const to = b.toName || b.to || b.endLocation || "Destination";
+                    jobs.forEach((b) => {
+                      if (Array.isArray(b.generatedLegs) && b.generatedLegs.length) {
+                        b.generatedLegs.forEach((leg, idx) => {
+                          const legFrom = leg.from || "Start";
+                          const legTo = leg.to || "Destination";
 
-                  const startMin = Number(b.startMin ?? b.startMinutes ?? 0);
-                  const endMin = Number(b.endMin ?? b.endMinutes ?? 0);
+                          const legStartMin =
+                            typeof leg.startMin === "number" ? leg.startMin : null;
 
-                  rows.push({
-                    label: `Depart ${from}`,
-                    time: formatMinutes(startMin),
-                    sortMin: startMin
-                  });
+                          const legEndMin =
+                            typeof leg.endMin === "number" ? leg.endMin : null;
 
-                  rows.push({
-                    label: `Arrive ${to}`,
-                    time: formatMinutes(endMin),
-                    sortMin: endMin
-                  });
-                });
+                          if (legStartMin != null) {
+                            rows.push({
+                              label: `Depart ${legFrom}`,
+                              time: formatMinutes(legStartMin),
+                              sortMin: legStartMin
+                            });
+                          }
 
+                          if (legEndMin != null) {
+                            rows.push({
+                              label: `Arrive ${legTo}`,
+                              time: formatMinutes(legEndMin),
+                              sortMin: legEndMin
+                            });
+                          }
+
+                          if (legStartMin == null && legEndMin == null) {
+                            rows.push({
+                              label: `Via ${legFrom} → ${legTo}`,
+                              time: "",
+                              sortMin: Number(b.startMin ?? b.startMinutes ?? 0) + idx
+                            });
+                          }
+                        });
+
+                        return;
+                      }
+
+                      const from = b.fromName || b.from || b.startLocation || "Start";
+                      const to = b.toName || b.to || b.endLocation || "Destination";
+
+                      const startMin = Number(b.startMin ?? b.startMinutes ?? 0);
+                      const endMin = Number(b.endMin ?? b.endMinutes ?? 0);
+
+                      rows.push({
+                        label: `Depart ${from}`,
+                        time: formatMinutes(startMin),
+                        sortMin: startMin
+                      });
+
+                      rows.push({
+                        label: `Arrive ${to}`,
+                        time: formatMinutes(endMin),
+                        sortMin: endMin
+                      });
+                    });
                   if (Array.isArray(job.breaks)) {
                     job.breaks.forEach((b) => {
                       const breakStart = Number(b.startMin || 0);
