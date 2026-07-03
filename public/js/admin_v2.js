@@ -1588,21 +1588,73 @@ function wireBlocksBrowser() {
               <div style="margin-top:14px;">
                 <div style="font-weight:900; margin-bottom:8px;">Generated Legs</div>
 
-                <div style="display:grid; gap:6px;">
+                <div style="display:grid; gap:10px;">
                   ${b.generatedLegs
-                    .map((leg) => `
+                    .map((leg, idx) => `
                       <div style="
-                        padding:8px 10px;
+                        padding:10px;
                         border:1px solid #e5e7eb;
-                        border-radius:8px;
+                        border-radius:10px;
                         background:#fff;
                       ">
-                        <div style="font-weight:800;">
-                          Leg ${escapeHtml(leg.legNo || "")}: ${escapeHtml(leg.from || "-")} → ${escapeHtml(leg.to || "-")}
+                        <div style="font-weight:900; margin-bottom:8px;">
+                          Leg ${escapeHtml(leg.legNo || idx + 1)}
                         </div>
-                        <div class="muted" style="font-size:12px; margin-top:2px;">
-                          ${escapeHtml(leg.legType || "Leg")} · ${escapeHtml(leg.startTime || timeStrFromMin(leg.startMin))} - ${escapeHtml(leg.endTime || timeStrFromMin(leg.endMin))}
-                          ${leg.note ? ` · ${escapeHtml(leg.note)}` : ""}
+
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">From</div>
+                            <input
+                              id="editLegFrom_${b.id}_${idx}"
+                              value="${escapeHtml(leg.from || "")}"
+                            />
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">To</div>
+                            <input
+                              id="editLegTo_${b.id}_${idx}"
+                              value="${escapeHtml(leg.to || "")}"
+                            />
+                          </div>
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:160px 160px 180px 1fr; gap:10px; margin-top:8px;">
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">Start Time</div>
+                            <input
+                              id="editLegStart_${b.id}_${idx}"
+                              type="time"
+                              value="${escapeHtml(leg.startTime || timeStrFromMin(leg.startMin))}"
+                            />
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">End Time</div>
+                            <input
+                              id="editLegEnd_${b.id}_${idx}"
+                              type="time"
+                              value="${escapeHtml(leg.endTime || timeStrFromMin(leg.endMin))}"
+                            />
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">Leg Type</div>
+                            <select id="editLegType_${b.id}_${idx}">
+                              <option value="Forward" ${leg.legType === "Forward" ? "selected" : ""}>Forward</option>
+                              <option value="Return" ${leg.legType === "Return" ? "selected" : ""}>Return</option>
+                              <option value="Loop" ${leg.legType === "Loop" ? "selected" : ""}>Loop</option>
+                              <option value="Extra" ${leg.legType === "Extra" ? "selected" : ""}>Extra</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">Note</div>
+                            <input
+                              id="editLegNote_${b.id}_${idx}"
+                              value="${escapeHtml(leg.note || "")}"
+                            />
+                          </div>
                         </div>
                       </div>
                     `)
@@ -1614,7 +1666,7 @@ function wireBlocksBrowser() {
         }
 
         <div style="display:flex; gap:10px; margin-top:12px;">
-          <button class="btn" data-block-save="${b.id}">Save Summary Changes</button>
+          <button class="btn" data-block-save="${b.id}">Save Changes</button>
           <button class="btn" data-block-cancel="${b.id}">Cancel</button>
         </div>
       </div>
@@ -1768,7 +1820,11 @@ function renderBlocks(blocks) {
         if (startMin == null || endMin == null) return showError("Invalid time.");
         if (endMin <= startMin) return showError("End time must be after start time.");
 
-        await updateBlock(id, {
+        const originalBlock = [...allBlocks, ...dateBlocks].find((x) => x.id === id);
+        const hasGeneratedLegs =
+          Array.isArray(originalBlock?.generatedLegs) && originalBlock.generatedLegs.length;
+
+        const updateData = {
           serviceDate,
           startMin,
           endMin,
@@ -1776,9 +1832,63 @@ function renderBlocks(blocks) {
           to,
           blockType,
           notes
-        });
+        };
+
+        if (hasGeneratedLegs) {
+          const generatedLegs = originalBlock.generatedLegs.map((oldLeg, idx) => {
+            const legFrom = document.getElementById(`editLegFrom_${id}_${idx}`)?.value.trim() || "";
+            const legTo = document.getElementById(`editLegTo_${id}_${idx}`)?.value.trim() || "";
+            const legStart = document.getElementById(`editLegStart_${id}_${idx}`)?.value || "";
+            const legEnd = document.getElementById(`editLegEnd_${id}_${idx}`)?.value || "";
+            const legType = document.getElementById(`editLegType_${id}_${idx}`)?.value || oldLeg.legType || "Forward";
+            const legNote = document.getElementById(`editLegNote_${id}_${idx}`)?.value.trim() || "";
+
+            const legStartMin = legStart ? minFromTimeStr(legStart) : null;
+            const legEndMin = legEnd ? minFromTimeStr(legEnd) : null;
+
+            return {
+              ...oldLeg,
+              legNo: idx + 1,
+              from: legFrom,
+              to: legTo,
+              startTime: legStart,
+              endTime: legEnd,
+              startMin: legStartMin,
+              endMin: legEndMin,
+              legType,
+              note: legNote
+            };
+          });
+
+          for (const leg of generatedLegs) {
+            if (!leg.from) return showError(`Leg ${leg.legNo}: From is required.`);
+            if (!leg.to) return showError(`Leg ${leg.legNo}: To is required.`);
+
+            if (leg.startTime && leg.startMin == null) {
+              return showError(`Leg ${leg.legNo}: Invalid start time.`);
+            }
+
+            if (leg.endTime && leg.endMin == null) {
+              return showError(`Leg ${leg.legNo}: Invalid end time.`);
+            }
+
+            if (
+              leg.startMin != null &&
+              leg.endMin != null &&
+              leg.endMin <= leg.startMin
+            ) {
+              return showError(`Leg ${leg.legNo}: End time must be after start time.`);
+            }
+          }
+
+          updateData.generatedLegs = generatedLegs;
+          updateData.legCount = generatedLegs.length;
+        }
+
+        await updateBlock(id, updateData);
 
         editingBlockId = null;
+        
       } catch (e) {
         showError(e?.message || "Failed to update block");
       }
