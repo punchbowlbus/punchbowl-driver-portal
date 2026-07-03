@@ -867,9 +867,22 @@ if (pageId === "adminAllJobs") {
                     return sameDate && sameDriver && insideDuty;
                   });
 
-                    jobs.forEach((b) => {
-                      if (Array.isArray(b.generatedLegs) && b.generatedLegs.length) {
-                        b.generatedLegs.forEach((leg, idx) => {
+                          jobs.forEach((b) => {
+                            if (Array.isArray(b.generatedLegs) && b.generatedLegs.length) {
+                              const direction = String(
+                                b.routeDirection || b.blockType || b.direction || ""
+                              ).trim().toLowerCase();
+
+                              if (direction === "return") {
+                                rows.push({
+                                  label: "Return Trip",
+                                  time: "",
+                                  sortMin: Number(b.startMin ?? b.startMinutes ?? 0) - 0.1,
+                                  isSection: true
+                                });
+                              }
+
+                              b.generatedLegs.forEach((leg, idx) => {
                           const legFrom = leg.from || "Start";
                           const legTo = leg.to || "Destination";
 
@@ -948,14 +961,28 @@ if (pageId === "adminAllJobs") {
                 rows.sort((a, b) => a.sortMin - b.sortMin);
 
                 return rows
-                  .map(
-                    (r) => `
+                  .map((r) => {
+                    if (r.isSection) {
+                      return `
+                        <div style="
+                          margin-top:18px;
+                          margin-bottom:6px;
+                          padding-top:10px;
+                          border-top:1px solid #d1d5db;
+                          font-weight:900;
+                        ">
+                          ${escapeHtml(r.label)}
+                        </div>
+                      `;
+                    }
+
+                    return `
                       <div style="margin-top:8px; display:flex; justify-content:space-between; gap:12px;">
                         <div style="flex:1; min-width:0;">${r.label}</div>
                         <div style="font-weight:600; white-space:nowrap;">${escapeHtml(r.time)}</div>
                       </div>
-                    `
-                  )
+                    `;
+                  })
                   .join("");
               })()}
               <div style="margin-top:20px; display:flex; gap:8px;">
