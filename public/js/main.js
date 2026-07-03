@@ -333,7 +333,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./admin_v2.js");
+    const mod = await import("./admin_v2.js?v=multistop123");
 
     if (pageId === "adminEmployees") {
       mod.renderEmployeesPage();
