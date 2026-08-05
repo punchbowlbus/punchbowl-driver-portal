@@ -75,7 +75,7 @@ els.contentArea.innerHTML = `
     </div>
 
     <!-- Main Work Area -->
-    <div id="dispatchMainWorkArea" style="flex:1; display:grid; grid-template-columns:220px minmax(0, 1fr) 300px; gap:12px; overflow:hidden; min-height:0;">
+    <div id="dispatchMainWorkArea" style="flex:1; display:grid; grid-template-columns:220px minmax(0, 1fr) 340px; gap:12px; overflow:hidden; min-height:0;">
 
       <!-- Left -->
       <div style="border:1px solid #ddd; border-radius:12px; background:#fff; display:flex; flex-direction:column; overflow:hidden; min-height:0;">
@@ -210,7 +210,7 @@ toggleDetailPanelBtn.onclick = () => {
     detailPanelEl.style.display = "block";
     rightPanel.style.width = "";
     rightPanel.style.minWidth = "";
-    mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 300px";
+    mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 340px";
     if (rightHeaderLabel) rightHeaderLabel.style.display = "";
     toggleDetailPanelBtn.textContent = "Hide";
   } else {
@@ -288,7 +288,7 @@ let draggedBlockId = "";
       if (rightPanel) rightPanel.style.display = "";
       if (sidebar) sidebar.style.display = "";
 
-      mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 300px";
+      mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 340px";
 
       if (card) {
         card.style.position = "";
@@ -785,31 +785,43 @@ function renderDriverDetail(driver) {
                       block.toName || block.to || block.dropoff || block.endLocation || ""
                     ).trim();
 
+                    const serviceDateText = String(
+                      block.serviceDate || block.date || getSelectedDate() || ""
+                    ).trim();
+
                     return `
-                      <div style="padding:8px; border:1px solid #bfdbfe; border-radius:8px; background:#fff; position:relative;">
-                        <div style="position:absolute; top:8px; right:8px; display:flex; gap:6px;">
-                          <button
-                            type="button"
-                            data-edit-assigned-block="${block.id}"
-                            style="font-size:10px; padding:2px 6px;"
-                          >
-                            Edit
-                          </button>
+                      <div style="padding:8px; border:1px solid #bfdbfe; border-radius:8px; background:#fff;">
+                        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+                          <div style="flex:1; min-width:0;">
+                            <div class="muted" style="font-size:10px; line-height:1.2; font-weight:700;">
+                              Date: ${escapeHtml(serviceDateText)}
+                            </div>
 
-                          <button
-                            type="button"
-                            data-unassign-block="${block.id}"
-                            style="font-size:10px; padding:2px 6px;"
-                          >
-                            Unassign
-                          </button>
+                            <div style="font-weight:700; font-size:13px; margin-top:2px;">
+                              ${minToTimeStr(startMin)} - ${minToTimeStr(endMin)}
+                            </div>
+                          </div>
+
+                          <div style="display:flex; gap:4px; flex:0 0 auto;">
+                            <button
+                              type="button"
+                              data-edit-assigned-block="${block.id}"
+                              style="min-height:22px; height:22px; font-size:9px; line-height:1; padding:1px 5px; border-radius:6px;"
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              data-unassign-block="${block.id}"
+                              style="min-height:22px; height:22px; font-size:9px; line-height:1; padding:1px 5px; border-radius:6px;"
+                            >
+                              Unassign
+                            </button>
+                          </div>
                         </div>
 
-                        <div style="font-weight:700; font-size:13px; padding-right:92px;">
-                          ${minToTimeStr(startMin)} - ${minToTimeStr(endMin)}
-                        </div>
-
-                        <div class="muted" style="font-size:12px; margin-top:3px;">
+                        <div class="muted" style="font-size:11px; line-height:1.3; margin-top:5px; overflow-wrap:anywhere;">
                           ${escapeHtml(fromText)} → ${escapeHtml(toText)}
                         </div>
                       </div>
@@ -1714,13 +1726,13 @@ function renderDrivers() {
                 ${hasSpan ? "" : "disabled"}
                 style="
                   height:16px;
-                  width:68px;
-                  min-width:68px;
-                  max-width:68px;
-                  font-size:8px;
+                  width:52px;
+                  min-width:52px;
+                  max-width:52px;
+                  font-size:7px;
                   line-height:1;
                   border-radius:999px;
-                  padding:0 16px 0 6px;
+                  padding:0 12px 0 4px;
                   border:1px solid #d1d5db;
                   background:${hasSpan ? getDispatchStatusBg(dispatchStatus) : "#f3f4f6"};
                   color:${hasSpan ? "#fff" : "#9ca3af"};
