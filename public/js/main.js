@@ -556,345 +556,61 @@ if (pageId === "adminAllJobs") {
   }
 
         if (pageId === "jobDetails") {
-          const job = (state.driverDutySpans || []).find(j => j.id === state.selectedJobId);
-          const dutyDate = String(job?.serviceDate || job?.date || "").trim();
-          console.log("jobDetails state.blocks:", state.blocks);
+          const dutySpan = (state.driverDutySpans || []).find(
+            (item) => item.id === state.selectedJobId
+          );
 
-          if (!job) {
+          if (!dutySpan) {
             renderPlaceholder("Duty Sheet", "Duty not found");
             return;
           }
 
+          const dutyDate = String(dutySpan.serviceDate || dutySpan.date || "").trim();
           if (String(state.blocksDate || "") !== dutyDate) {
             state.blocks = null;
             state.blocksDate = dutyDate;
           }
 
-          els.contentArea.innerHTML = `
-            <div class="card">
-              <h3>Duty Sheet</h3>
-
-              <div style="margin-top:10px">
-                <b>Driver:</b> ${escapeHtml(String(job.driverName || job.driverEmployeeNumber || "Unassigned Driver"))}
+          if (!state.blocks && dutyDate) {
+            els.contentArea.innerHTML = `
+              <div class="driver-duty-loading card">
+                <div class="driver-duty-loading-spinner"></div>
+                <strong>Preparing your complete shift…</strong>
+                <span>Loading assigned jobs and route details.</span>
               </div>
+            `;
 
-              <div style="margin-top:10px">
-                <b>Duty Date:</b> ${formatDutyDate(job.serviceDate)}
-              </div>
-
-              <div style="margin-top:10px">
-                <b>Duty Number:</b> ${escapeHtml(String(job.dutyNumber || "-"))}
-              </div>
-
-              <div style="margin-top:10px">
-                <b>Duty Type:</b> ${escapeHtml(String(job.dutyType || "Charter"))}
-              </div>
-
-              ${
-                job.dutyType === "Rail Replacement"
-                  ? `
-                    <div style="margin-top:10px">
-                      <b>Route Number:</b> ${escapeHtml(String(job.routeNumber || "-"))}
-                    </div>
-
-                    ${
-                      job.routePdfUrl
-                        ? `
-                          <div style="margin-top:10px">
-                            <b>Route Description:</b>
-                            <a href="${escapeHtml(String(job.routePdfUrl))}" target="_blank">
-                              Route Description
-                            </a>
-                          </div>
-                        `
-                        : ""
-                    }
-                  `
-                  : ""
-              }
-
-              <div style="margin-top:10px">
-                <b>Duty Time:</b> ${formatMinutes(job.startMin)} → ${formatMinutes(job.endMin)}
-              </div>
-
-              <div style="margin-top:10px">
-                <b>Status:</b> ${job.dispatchStatus === "Cancelled" ? "Cancelled" : "Confirmed"}
-              </div>
-
-              <div style="margin-top:16px; font-weight:700;">
-                Assigned Jobs
-              </div>
-
-              ${(() => {
-                const rows = [];
-
-                rows.push({
-                  label: "Sign on",
-                  time: formatMinutes(job.startMin),
-                  sortMin: Number(job.startMin || 0)
-                });
-
-                if (String(job.dutyType || "Charter").trim() === "Yard") {
-                  rows.push({
-                    label: "Yard duties start",
-                    time: formatMinutes(job.startMin),
-                    sortMin: Number(job.startMin || 0)
-                  });
-                } else {
-                  rows.push({
-                    label: "Depart depot",
-                    time: formatMinutes(Number(job.startMin || 0) + 5),
-                    sortMin: Number(job.startMin || 0) + 5
-                  });
-                }
-
-                const jobs = (state.blocks || [])
-                  .filter((b) => {
-                    const blockDutySpanId = String(b.dutySpanId || "").trim();
-
-                    if (blockDutySpanId) {
-                      return blockDutySpanId === String(job.id || "").trim();
-                    }
-
-                    const sameDate =
-                      String(b.serviceDate || b.date || "").trim() ===
-                      String(job.serviceDate || job.date || "").trim();
-
-                    const assignedDriver =
-                      String(
-                        b.assignedDriverEmployeeNumber ||
-                        b.assignedDriverId ||
-                        b.driverId ||
-                        ""
-                      ).trim();
-
-                    const sameDriver =
-                      assignedDriver === String(job.driverEmployeeNumber || "").trim();
-
-                    const start = Number(b.startMin ?? b.startMinutes ?? 0);
-                    const end = Number(b.endMin ?? b.endMinutes ?? 0);
-
-                    const insideDuty =
-                      start >= Number(job.startMin || 0) &&
-                      end <= Number(job.endMin || 0);
-
-                    return sameDate && sameDriver && insideDuty;
-                  });
-
-                          jobs.forEach((b) => {
-                            if (Array.isArray(b.generatedLegs) && b.generatedLegs.length) {
-                              const direction = String(
-                                b.routeDirection || b.blockType || b.direction || ""
-                              ).trim().toLowerCase();
-
-                              if (direction === "return") {
-                                rows.push({
-                                  label: "Return Trip",
-                                  time: "",
-                                  sortMin: Number(b.startMin ?? b.startMinutes ?? 0) - 0.1,
-                                  isSection: true
-                                });
-                              }
-
-                              b.generatedLegs.forEach((leg, idx) => {
-                          const legFrom = leg.from || "Start";
-                          const legTo = leg.to || "Destination";
-
-                          const legStartMin =
-                            typeof leg.startMin === "number" ? leg.startMin : null;
-
-                          const legEndMin =
-                            typeof leg.endMin === "number" ? leg.endMin : null;
-
-                          if (legStartMin != null) {
-                            rows.push({
-                              label: `Depart ${legFrom}`,
-                              time: formatMinutes(legStartMin),
-                              sortMin: legStartMin
-                            });
-                          }
-
-                          if (legEndMin != null) {
-                            rows.push({
-                              label: `Arrive ${legTo}`,
-                              time: formatMinutes(legEndMin),
-                              sortMin: legEndMin
-                            });
-                          }
-
-                          if (legStartMin == null && legEndMin == null) {
-                            rows.push({
-                              label: `Via ${legFrom} → ${legTo}`,
-                              time: "",
-                              sortMin: Number(b.startMin ?? b.startMinutes ?? 0) + idx
-                            });
-                          }
-                        });
-
-                        return;
-                      }
-
-                      const from = b.fromName || b.from || b.startLocation || "Start";
-                      const to = b.toName || b.to || b.endLocation || "Destination";
-
-                      const startMin = Number(b.startMin ?? b.startMinutes ?? 0);
-                      const endMin = Number(b.endMin ?? b.endMinutes ?? 0);
-
-                      rows.push({
-                        label: `Depart ${from}`,
-                        time: formatMinutes(startMin),
-                        sortMin: startMin
-                      });
-
-                      rows.push({
-                        label: `Arrive ${to}`,
-                        time: formatMinutes(endMin),
-                        sortMin: endMin
-                      });
-                    });
-                  if (Array.isArray(job.breaks)) {
-                    job.breaks.forEach((b) => {
-                      const breakStart = Number(b.startMin || 0);
-                      const breakEnd = Number(b.endMin || 0);
-                      const breakType = String(b.type || "").trim().toLowerCase();
-
-                      rows.push({
-                        label: breakType === "crib" ? "Crib break" : "Meal break",
-                        time: `${formatMinutes(breakStart)} – ${formatMinutes(breakEnd)}`,
-                        sortMin: breakStart
-                      });
-                    });
-                  }
-
-                  rows.push({
-                    label: "Estimated duty end<br><span style='font-size:12px;color:#666'>(subject to change)</span>",
-                    time: formatMinutes(job.endMin),
-                    sortMin: Number(job.endMin || 0)
-                  });
-
-                rows.sort((a, b) => a.sortMin - b.sortMin);
-
-                return rows
-                  .map((r) => {
-                    if (r.isSection) {
-                      return `
-                        <div style="
-                          margin-top:18px;
-                          margin-bottom:6px;
-                          padding-top:10px;
-                          border-top:1px solid #d1d5db;
-                          font-weight:900;
-                        ">
-                          ${escapeHtml(r.label)}
-                        </div>
-                      `;
-                    }
-
-                    const isArrival = String(r.label || "").trim().startsWith("Arrive ");
-
-                    return `
-                      <div style="
-                        margin-top:8px;
-                        display:flex;
-                        justify-content:space-between;
-                        gap:12px;
-                        ${isArrival ? "background:#eef8ee; border-left:4px solid #2e7d32; padding:6px 8px; border-radius:6px;" : ""}
-                      ">
-                        <div style="
-                          flex:1;
-                          min-width:0;
-                          ${isArrival ? "font-weight:700;" : ""}
-                        ">${r.label}</div>
-
-                        <div style="
-                          font-weight:700;
-                          white-space:nowrap;
-                          ${isArrival ? "color:#2e7d32;" : ""}
-                        ">${escapeHtml(r.time)}</div>
-                      </div>
-                    `;
-                  })
-                  .join("");
-              })()}
-              <div style="margin-top:20px; display:flex; gap:8px;">
-                <button 
-                  id="yesBtn"
-                  style="
-                    ${job.driverAcknowledgment === "Yes" ? "background:#2e7d32; color:white; border:1px solid #2e7d32;" : ""}
-                  "
-                >
-                  Yes
-                </button>
-
-                <button 
-                  id="noBtn"
-                  style="
-                    ${job.driverAcknowledgment === "No" ? "background:#c62828; color:white; border:1px solid #c62828;" : ""}
-                  "
-                >
-                  No
-                </button>
-              </div>
-              <div style="
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                z-index: 1000;
-              ">
-                <button id="backBtn" style="
-                  padding: 10px 14px;
-                  border-radius: 20px;
-                  border: none;
-                  background: #d21919;
-                  color: white;
-                  font-weight: 600;
-                  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
-                ">
-                  ← Back
-                </button>
-              </div>
-            </div>
-          `;
-
-            document.getElementById("yesBtn").onclick = () => {
-              updateDutySpanDriverAcknowledgment(job.id, "Yes");
-            };
-
-            document.getElementById("noBtn").onclick = () => {
-              updateDutySpanDriverAcknowledgment(job.id, "No");
-            };
-            document.getElementById("backBtn").onclick = () => {
-              if (state.isAdmin) {
-                go("adminAllJobs");
-              } else {
-                go("myWork");
-              }
-            };
-
-            if (!state.blocks && dutyDate) {
-              if (state.unsubscribeJobDetailsBlocks) {
-                state.unsubscribeJobDetailsBlocks();
-                state.unsubscribeJobDetailsBlocks = null;
-              }
-
-              const currentJobId = String(job.id || "");
-
-              state.unsubscribeJobDetailsBlocks = listenBlocksByDate(
-                dutyDate,
-                (blocks) => {
-                  state.blocks = blocks || [];
-
-                  if (
-                    state.activePage === "jobDetails" &&
-                    String(state.selectedJobId || "") === currentJobId
-                  ) {
-                    go("jobDetails");
-                  }
-                },
-                (e) => showError(e?.message || "Failed to load blocks")
-              );
+            if (state.unsubscribeJobDetailsBlocks) {
+              state.unsubscribeJobDetailsBlocks();
+              state.unsubscribeJobDetailsBlocks = null;
             }
 
+            const currentDutySpanId = String(dutySpan.id || "");
+            state.unsubscribeJobDetailsBlocks = listenBlocksByDate(
+              dutyDate,
+              (blocks) => {
+                state.blocks = blocks || [];
+                if (
+                  state.activePage === "jobDetails" &&
+                  String(state.selectedJobId || "") === currentDutySpanId
+                ) {
+                  go("jobDetails");
+                }
+              },
+              (error) => showError(error?.message || "Failed to load assigned jobs")
+            );
+            return;
+          }
+
+          const dutySheetModule = await import("./driver_duty_sheet.js?v=6");
+          await dutySheetModule.renderDriverDutySheet({
+            dutySpan,
+            blocks: state.blocks || [],
+            isAdmin: state.isAdmin,
+            onYes: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "Yes"),
+            onNo: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "No"),
+            onBack: (adminView) => go(adminView ? "adminAllJobs" : "myWork")
+          });
           return;
         }
 
