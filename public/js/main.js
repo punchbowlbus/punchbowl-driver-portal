@@ -209,7 +209,7 @@ function loadShifts({ mode } = { mode: "driver" }) {
         btn.disabled = true;
         btn.textContent = "Enabling...";
 
-        await registerDriverNotifications(state.employee);
+        await registerPortalNotifications(state.employee);
 
         alert("Notification permission: " + Notification.permission);
 
@@ -319,6 +319,15 @@ export async function go(pageId) {
     return;
   }
 
+  if (pageId === "settings") {
+    if (!state.isAdmin) return showError("No admin access");
+
+    stopAllListeners();
+    const mod = await import("./settings.js?v=4");
+    await mod.renderSettingsPage();
+    return;
+  }
+
   // Admin pages
   if (
     pageId === "adminEmployees" ||
@@ -333,7 +342,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./admin_v2.js?v=multistop123");
+    const mod = await import("./admin_v2.js?v=blocks-by-date-modern-1");
 
     if (pageId === "adminEmployees") {
       mod.renderEmployeesPage();
@@ -1454,12 +1463,17 @@ onSnapshot(
 }
 
   if (pageId === "defectReport") {
-    renderPlaceholder("Defect Report", "Coming soon...");
+    stopAllListeners();
+
+    const mod = await import("./defect_reports.js?v=8");
+    await mod.renderDefectReportPage();
     return;
   }
 
   if (pageId === "lostProperty") {
-    renderPlaceholder("Lost Property", "Coming soon...");
+    stopAllListeners();
+    const mod = await import("./lost_property.js?v=5");
+    await mod.renderLostPropertyPage();
     return;
   }
 
@@ -1581,7 +1595,7 @@ function setupMobileMenu() {
   window.closeMobileMenu = closeMenu;
 }
 
-async function registerDriverNotifications(employee) {
+async function registerPortalNotifications(employee) {
   try {
     if (!employee) return;
 
@@ -1593,13 +1607,24 @@ async function registerDriverNotifications(employee) {
 
     const empNo = String(employee.employeeNumber || "").trim();
     if (notificationRegisteredForEmpNo === empNo) {
-  console.log("FCM already registered for driver:", empNo);
+  console.log("FCM already registered for portal user:", empNo);
   return;
 }
     const role = String(employee.role || "").trim().toLowerCase();
+    const accessLevel = String(employee.accessLevel || "").trim().toLowerCase();
+    const department = String(employee.department || "").trim().toLowerCase();
     const status = String(employee.status || "").trim().toLowerCase();
 
-    if (!empNo || role !== "driver" || status !== "active") return;
+    const canReceivePortalNotifications =
+      role === "driver" ||
+      role === "dispatcher" ||
+      role === "manager" ||
+      role === "supervisor" ||
+      accessLevel.includes("admin") ||
+      department.includes("operation") ||
+      department.includes("management");
+
+    if (!empNo || !canReceivePortalNotifications || status !== "active") return;
 
     if (!("Notification" in window)) {
       console.log("Notifications not supported in this browser");
@@ -1632,12 +1657,14 @@ async function registerDriverNotifications(employee) {
       { merge: true }
     );
 
-    console.log("FCM token saved for driver:", empNo);
+    console.log("FCM token saved for portal user:", empNo);
     notificationRegisteredForEmpNo = empNo;
   } catch (err) {
     console.error("Notification registration failed:", err);
   }
 }
+
+window.enablePortalNotifications = () => registerPortalNotifications(state.employee);
 
 /* =========================================================
    Auth Boot
@@ -1704,6 +1731,7 @@ state.isDriver =
 
 // ✅ KEEP THIS
 if (state.isAdmin) {
+  await registerPortalNotifications(state.employee);
   state.activePage = "adminBookings";
   go(state.activePage);
   return;
@@ -1711,7 +1739,7 @@ if (state.isAdmin) {
 
 // ✅ KEEP THIS
 if (state.isDriver) {
-  await registerDriverNotifications(state.employee);
+  await registerPortalNotifications(state.employee);
 
   state.activePage = "myWork";
   go(state.activePage);
