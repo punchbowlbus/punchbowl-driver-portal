@@ -1,6 +1,6 @@
 /* eslint-disable require-jsdoc, max-len */
 const {setGlobalOptions} = require("firebase-functions");
-const {onRequest} = require("firebase-functions/v2/https");
+const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {
   onDocumentCreated,
   onDocumentUpdated,
@@ -17,6 +17,13 @@ setGlobalOptions({maxInstances: 10});
 
 admin.initializeApp();
 
+const portalAdminEmails = new Set([
+  "info@punchbowlbus.com",
+  "nalin.rajapaksha82@gmail.com",
+  "nalin@punchbowlbus.com.au",
+  "christine@punchbowlbus.com.au",
+]);
+
 function minToTime(min) {
   const safeMin = Number(min || 0);
   const h = String(Math.floor(safeMin / 60)).padStart(2, "0");
@@ -27,6 +34,112 @@ function minToTime(min) {
 function normalized(value) {
   return String(value || "").trim().toLowerCase();
 }
+
+async function requirePortalAdmin(request) {
+  if (!request.auth) {
+    throw new HttpsError("unauthenticated", "Please sign in before sending notifications.");
+  }
+
+  const email = normalized(request.auth.token.email);
+  if (portalAdminEmails.has(email)) return email;
+
+  const employeeSnap = await admin.firestore()
+      .collection("employees")
+      .where("email", "==", email)
+      .limit(1)
+      .get();
+  const employee = employeeSnap.empty ? {} : employeeSnap.docs[0].data() || {};
+  const accessLevel = normalized(employee.accessLevel);
+  const role = normalized(employee.role);
+  const active = normalized(employee.status) === "active";
+
+  if (!active || (role !== "admin" && !accessLevel.includes("admin"))) {
+    throw new HttpsError("permission-denied", "Only portal administrators can send general notifications.");
+  }
+
+  return email;
+}
+
+exports.sendGeneralPushNotification = onCall(async (request) => {
+  const sentByEmail = await requirePortalAdmin(request);
+  const requestData = request.data || {};
+  const title = String(requestData.title || "").trim();
+  const message = String(requestData.message || "").trim();
+
+  if (!title || !message) {
+    throw new HttpsError("invalid-argument", "A title and message are required.");
+  }
+  if (title.length > 60 || message.length > 240) {
+    throw new HttpsError("invalid-argument", "The notification title or message is too long.");
+  }
+
+  const employeeSnap = await admin.firestore().collection("employees").get();
+  const activeEmployees = employeeSnap.docs
+      .map((employeeDoc) => ({id: employeeDoc.id, ...employeeDoc.data()}))
+      .filter((employee) => normalized(employee.status) === "active");
+  const tokens = [...new Set(activeEmployees
+      .map((employee) => String(employee.fcmToken || "").trim())
+      .filter(Boolean))];
+  const noDeviceCount = activeEmployees.filter(
+      (employee) => !String(employee.fcmToken || "").trim(),
+  ).length;
+
+  let successCount = 0;
+  let failureCount = 0;
+  const failureCodes = [];
+
+  for (let start = 0; start < tokens.length; start += 500) {
+    const tokenBatch = tokens.slice(start, start + 500);
+    const response = await admin.messaging().sendEachForMulticast({
+      tokens: tokenBatch,
+      data: {type: "generalNotification"},
+      webpush: {
+        notification: {
+          title,
+          body: message,
+          icon: "https://punchbowl-driver-portal.web.app/icons/icon-192.png",
+          badge: "https://punchbowl-driver-portal.web.app/icons/icon-192.png",
+          requireInteraction: true,
+          tag: `general-${Date.now()}`,
+        },
+        fcmOptions: {link: "https://punchbowl-driver-portal.web.app"},
+      },
+    });
+
+    successCount += response.successCount;
+    failureCount += response.failureCount;
+    response.responses.forEach((result) => {
+      if (!result.success) {
+        failureCodes.push((result.error && result.error.code) || "unknown");
+      }
+    });
+  }
+
+  const logRef = await admin.firestore().collection("generalNotifications").add({
+    title,
+    message,
+    audience: "allActiveUsers",
+    activeUserCount: activeEmployees.length,
+    tokenCount: tokens.length,
+    noDeviceCount,
+    successCount,
+    failureCount,
+    failureCodes: [...new Set(failureCodes)],
+    sentByUid: request.auth.uid,
+    sentByEmail,
+    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  console.log("General push notification completed", {
+    notificationId: logRef.id,
+    sentByEmail,
+    successCount,
+    failureCount,
+    noDeviceCount,
+  });
+
+  return {notificationId: logRef.id, successCount, failureCount, noDeviceCount};
+});
 
 function defectNotificationGroups(employee) {
   const status = normalized(employee.status);
@@ -55,7 +168,7 @@ function escapeEmailHtml(value) {
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
+      .replaceAll("\"", "&quot;")
       .replaceAll("'", "&#039;");
 }
 
@@ -124,7 +237,7 @@ async function sendMicrosoftGraphEmail({to, subject, report, unsafe}) {
       {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${tokenData.access_token}`,
+          "Authorization": `Bearer ${tokenData.access_token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -296,7 +409,7 @@ exports.notifyOperationsOnDefectCreated = onDocumentCreated(
       ],
     },
     async (event) => {
-      const report = event.data?.data() || {};
+      const report = event.data ? event.data.data() || {} : {};
       const reportId = event.params.reportId;
       const unsafe = String(report.safeToDrive || "") === "No";
       const priority = unsafe ? "Critical" : "Medium";
@@ -321,10 +434,10 @@ exports.notifyOperationsOnDefectCreated = onDocumentCreated(
           .get();
 
       const occRecipientIds = new Set(
-          (settings?.occRecipientIds || []).map(String),
+          ((settings && settings.occRecipientIds) || []).map(String),
       );
       const supervisorRecipientIds = new Set(
-          (settings?.supervisorRecipientIds || []).map(String),
+          ((settings && settings.supervisorRecipientIds) || []).map(String),
       );
 
       const recipients = employeesSnap.docs
@@ -354,14 +467,14 @@ exports.notifyOperationsOnDefectCreated = onDocumentCreated(
           });
 
       const tokens = [...new Set(
-        recipients
-            .map((employee) => String(employee.fcmToken || "").trim())
-            .filter(Boolean),
+          recipients
+              .map((employee) => String(employee.fcmToken || "").trim())
+              .filter(Boolean),
       )];
       const emailRecipients = [...new Set(
-        recipients
-            .map((employee) => normalized(employee.email))
-            .filter((email) => email.includes("@")),
+          recipients
+              .map((employee) => normalized(employee.email))
+              .filter((email) => email.includes("@")),
       )];
 
       const reportNumber = String(report.reportNumber || reportId).trim();
@@ -409,7 +522,9 @@ exports.notifyOperationsOnDefectCreated = onDocumentCreated(
         const failures = response.responses
             .map((result, index) => ({result, token: tokens[index]}))
             .filter(({result}) => !result.success)
-            .map(({result}) => result.error?.code || "unknown");
+            .map(({result}) =>
+              (result.error && result.error.code) || "unknown",
+            );
 
         pushResult = {
           status: failures.length ? "Partially sent" : "Sent",
@@ -420,7 +535,7 @@ exports.notifyOperationsOnDefectCreated = onDocumentCreated(
       }
 
       let emailResult = {status: "Disabled", recipientCount: 0};
-      if (settings?.emailEnabled === true) {
+      if (settings && settings.emailEnabled === true) {
         try {
           emailResult = await sendMicrosoftGraphEmail({
             to: emailRecipients,

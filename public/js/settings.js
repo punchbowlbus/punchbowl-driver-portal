@@ -6,8 +6,9 @@ import {
   serverTimestamp,
   setDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-functions.js";
 
-import { auth, db } from "./firebase.js";
+import { auth, db, functions } from "./firebase.js";
 import { els, showError } from "./ui.js";
 import { escapeHtml } from "./utils.js";
 
@@ -133,6 +134,41 @@ export async function renderSettingsPage() {
           <button id="saveDefectNotificationSettings" type="button">Save notification settings</button>
         </div>
       </section>
+
+      <section class="card settings-panel settings-broadcast-panel">
+        <div class="settings-panel-heading">
+          <div class="settings-heading-icon"><i data-lucide="send"></i></div>
+          <div>
+            <h3>Send General Push Notification</h3>
+            <p>Send an operational message to all active portal users with notifications enabled.</p>
+          </div>
+          <span class="settings-audience-badge">All active users</span>
+        </div>
+
+        <div class="settings-broadcast-form">
+          <label>
+            <span>Notification title <strong>*</strong></span>
+            <input id="generalPushTitle" type="text" maxlength="60" placeholder="Example: Important operations update" />
+            <small><span id="generalPushTitleCount">0</span>/60 characters</small>
+          </label>
+
+          <label>
+            <span>Message <strong>*</strong></span>
+            <textarea id="generalPushMessage" maxlength="240" rows="4" placeholder="Enter the message drivers and staff should receive."></textarea>
+            <small><span id="generalPushMessageCount">0</span>/240 characters</small>
+          </label>
+        </div>
+
+        <div class="settings-broadcast-note">
+          <i data-lucide="info"></i>
+          <span>Users must have allowed notifications on at least one device to receive this message.</span>
+        </div>
+
+        <div class="settings-save-row">
+          <div id="generalPushResult" class="settings-save-message" role="status" aria-live="polite"></div>
+          <button id="sendGeneralPush" type="button">Review and send</button>
+        </div>
+      </section>
     </div>
   `;
 
@@ -149,9 +185,81 @@ export async function renderSettingsPage() {
   const messageEl = document.getElementById("settingsSaveMessage");
   const lastUpdatedEl = document.getElementById("settingsLastUpdated");
   const enableAlertsBtn = document.getElementById("enableSettingsAlerts");
+  const generalTitleEl = document.getElementById("generalPushTitle");
+  const generalMessageEl = document.getElementById("generalPushMessage");
+  const generalTitleCountEl = document.getElementById("generalPushTitleCount");
+  const generalMessageCountEl = document.getElementById("generalPushMessageCount");
+  const generalSendBtn = document.getElementById("sendGeneralPush");
+  const generalResultEl = document.getElementById("generalPushResult");
 
   let employees = [];
   let settings = {};
+  let generalPushSending = false;
+
+  function updateGeneralPushCounts() {
+    if (generalTitleCountEl) generalTitleCountEl.textContent = String(generalTitleEl?.value.length || 0);
+    if (generalMessageCountEl) generalMessageCountEl.textContent = String(generalMessageEl?.value.length || 0);
+  }
+
+  generalTitleEl?.addEventListener("input", updateGeneralPushCounts);
+  generalMessageEl?.addEventListener("input", updateGeneralPushCounts);
+
+  generalSendBtn?.addEventListener("click", async () => {
+    if (generalPushSending) return;
+
+    const title = String(generalTitleEl?.value || "").trim();
+    const message = String(generalMessageEl?.value || "").trim();
+
+    if (!title || !message) {
+      if (generalResultEl) {
+        generalResultEl.textContent = "Enter both a notification title and message.";
+        generalResultEl.className = "settings-save-message error";
+      }
+      (!title ? generalTitleEl : generalMessageEl)?.focus();
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Send this notification to all active portal users?\n\n${title}\n${message}`
+    );
+    if (!confirmed) return;
+
+    generalPushSending = true;
+    generalSendBtn.disabled = true;
+    generalSendBtn.textContent = "Sending…";
+    if (generalResultEl) {
+      generalResultEl.textContent = "Sending notification. Please wait…";
+      generalResultEl.className = "settings-save-message";
+    }
+
+    try {
+      const sendGeneralNotification = httpsCallable(functions, "sendGeneralPushNotification");
+      const response = await sendGeneralNotification({ title, message });
+      const result = response.data || {};
+
+      if (generalResultEl) {
+        generalResultEl.textContent =
+          `Notification sent to ${result.successCount || 0} device${result.successCount === 1 ? "" : "s"}. ` +
+          `${result.noDeviceCount || 0} active user${result.noDeviceCount === 1 ? " has" : "s have"} no registered device` +
+          `${result.failureCount ? `; ${result.failureCount} delivery failed` : ""}.`;
+        generalResultEl.className = "settings-save-message success";
+      }
+
+      generalTitleEl.value = "";
+      generalMessageEl.value = "";
+      updateGeneralPushCounts();
+    } catch (error) {
+      console.error("General push notification failed", error);
+      if (generalResultEl) {
+        generalResultEl.textContent = error?.message || "Unable to send the notification.";
+        generalResultEl.className = "settings-save-message error";
+      }
+    } finally {
+      generalPushSending = false;
+      generalSendBtn.disabled = false;
+      generalSendBtn.textContent = "Review and send";
+    }
+  });
 
   function selectedIds(group) {
     return [...document.querySelectorAll(`[data-defect-recipient="${group}"]:checked`)]
