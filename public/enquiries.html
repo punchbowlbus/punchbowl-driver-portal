@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PBC Charters | Enquiries</title>
+  <meta name="description" content="Punchbowl Bus omnichannel charter enquiry workspace" />
+  <link rel="icon" type="image/png" href="./icons/icon-192.png" />
+  <style>
+    :root {
+      --red:#c62828;
+      --red-dark:#9f1f1f;
+      --bg:#f4f6f8;
+      --card:#fff;
+      --border:#dfe3e8;
+      --text:#1f2933;
+      --muted:#637381;
+      --success:#087f5b;
+      --danger:#b42318;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Arial,sans-serif; background:var(--bg); color:var(--text); }
+    .topbar { background:var(--red); color:#fff; padding:14px 20px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .brand-title { font-size:20px; font-weight:900; }
+    .brand-sub { font-size:12px; opacity:.9; margin-top:2px; }
+    .top-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .shell { max-width:1440px; margin:0 auto; padding:20px; }
+    .page-head { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:16px; }
+    h1 { margin:0; font-size:28px; }
+    .muted { color:var(--muted); font-size:13px; }
+    .grid { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr); gap:18px; align-items:start; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:18px; box-shadow:0 4px 18px rgba(16,24,40,.04); }
+    .card h2 { margin:0 0 14px; font-size:18px; }
+    .section-title { margin:22px 0 10px; font-weight:800; font-size:14px; }
+    .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .full { grid-column:1/-1; }
+    label { display:block; font-size:12px; color:var(--muted); margin-bottom:6px; font-weight:700; }
+    input, select, textarea { width:100%; border:1px solid #cfd6dd; border-radius:10px; padding:11px 12px; background:#fff; font:inherit; }
+    textarea { min-height:88px; resize:vertical; }
+    input:focus, select:focus, textarea:focus { outline:3px solid rgba(198,40,40,.12); border-color:var(--red); }
+    button, .button-link { border:1px solid #cfd6dd; border-radius:10px; background:#fff; padding:10px 14px; cursor:pointer; font-weight:700; text-decoration:none; color:inherit; display:inline-flex; align-items:center; justify-content:center; }
+    button.primary { background:var(--red); border-color:var(--red); color:#fff; }
+    button.primary:hover { background:var(--red-dark); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:18px; }
+    .status { display:none; margin-bottom:14px; padding:12px; border-radius:10px; font-size:14px; }
+    .status.success { display:block; background:#e8f7f0; color:var(--success); border:1px solid #a9dfca; }
+    .status.error { display:block; background:#fff0ef; color:var(--danger); border:1px solid #f3b7b2; }
+    .queue { display:grid; gap:10px; }
+    .enquiry { border:1px solid var(--border); border-radius:12px; padding:12px; }
+    .enquiry-top { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+    .enquiry-name { font-weight:900; }
+    .badge { display:inline-flex; align-items:center; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:800; background:#f1f3f5; }
+    .badge.phone { background:#e7f0ff; color:#1d4ed8; }
+    .badge.email { background:#fff4e5; color:#a15c00; }
+    .badge.website { background:#ece8ff; color:#5b3cc4; }
+    .enquiry-meta { margin-top:8px; font-size:13px; line-height:1.55; }
+    .empty { padding:24px; text-align:center; color:var(--muted); border:1px dashed var(--border); border-radius:12px; }
+    .required::after { content:" *"; color:var(--red); }
+    @media (max-width:960px) { .grid { grid-template-columns:1fr; } }
+    @media (max-width:640px) { .shell { padding:12px; } .form-grid { grid-template-columns:1fr; } .full { grid-column:auto; } .page-head { flex-direction:column; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="brand-title">PBC Charters</div>
+      <div class="brand-sub">Omnichannel Enquiry Workspace</div>
+    </div>
+    <div class="top-actions">
+      <span id="authText">Checking access...</span>
+      <a class="button-link" href="./index.html">Back to Portal</a>
+      <button id="loginBtn" type="button" style="display:none">Sign in</button>
+      <button id="logoutBtn" type="button" style="display:none">Sign out</button>
+    </div>
+  </header>
+
+  <main class="shell">
+    <div class="page-head">
+      <div>
+        <h1>New Enquiry</h1>
+        <div class="muted">Capture phone, email, website, repeat-customer and walk-in charter requests in one workflow.</div>
+      </div>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Enquiry details</h2>
+        <form id="enquiryForm">
+          <div class="form-grid">
+            <div>
+              <label class="required" for="source">Enquiry source</label>
+              <select id="source" required>
+                <option value="Phone">Phone</option>
+                <option value="Email">Email</option>
+                <option value="Website">Website</option>
+                <option value="Repeat customer">Repeat customer</option>
+                <option value="Walk-in">Walk-in</option>
+                <option value="Referral">Referral</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label for="priority">Priority</label>
+              <select id="priority">
+                <option value="Normal">Normal</option>
+                <option value="Urgent">Urgent</option>
+                <option value="High value">High value</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="section-title">Customer</div>
+          <div class="form-grid">
+            <div>
+              <label for="organisationName">Organisation</label>
+              <input id="organisationName" placeholder="School, company or group" />
+            </div>
+            <div>
+              <label class="required" for="contactName">Contact name</label>
+              <input id="contactName" required placeholder="Customer contact" />
+            </div>
+            <div>
+              <label for="phone">Phone</label>
+              <input id="phone" type="tel" placeholder="Phone number" />
+            </div>
+            <div>
+              <label for="email">Email</label>
+              <input id="email" type="email" placeholder="Email address" />
+            </div>
+          </div>
+
+          <div class="section-title">Trip</div>
+          <div class="form-grid">
+            <div>
+              <label class="required" for="serviceDate">Service date</label>
+              <input id="serviceDate" type="date" required />
+            </div>
+            <div>
+              <label for="returnDate">Return date</label>
+              <input id="returnDate" type="date" />
+            </div>
+            <div>
+              <label for="pickupTime">Pickup time</label>
+              <input id="pickupTime" type="time" />
+            </div>
+            <div>
+              <label for="passengerCount">Passengers</label>
+              <input id="passengerCount" type="number" min="1" step="1" placeholder="Estimated number" />
+            </div>
+            <div class="full">
+              <label class="required" for="pickupLocation">Pickup location</label>
+              <input id="pickupLocation" required placeholder="Address or known location" />
+            </div>
+            <div class="full">
+              <label class="required" for="destination">Destination</label>
+              <input id="destination" required placeholder="Address or destination" />
+            </div>
+            <div class="full">
+              <label for="stops">Intermediate stops</label>
+              <textarea id="stops" placeholder="One stop per line"></textarea>
+            </div>
+            <div>
+              <label for="vehiclePreference">Vehicle preference</label>
+              <select id="vehiclePreference">
+                <option value="">To be recommended</option>
+                <option value="Mini bus">Mini bus</option>
+                <option value="Standard bus">Standard bus</option>
+                <option value="Coach">Coach</option>
+                <option value="Accessible vehicle">Accessible vehicle</option>
+                <option value="Multiple vehicles">Multiple vehicles</option>
+              </select>
+            </div>
+            <div>
+              <label for="journeyType">Journey type</label>
+              <select id="journeyType">
+                <option value="One way">One way</option>
+                <option value="Return">Return</option>
+                <option value="Multi-day">Multi-day</option>
+                <option value="Recurring">Recurring</option>
+              </select>
+            </div>
+            <div class="full">
+              <label for="specialRequirements">Special requirements</label>
+              <textarea id="specialRequirements" placeholder="Accessibility, luggage, child restraints, permits, group requirements"></textarea>
+            </div>
+            <div class="full">
+              <label for="notes">Call or enquiry notes</label>
+              <textarea id="notes" placeholder="Record what the customer asked for and any follow-up required"></textarea>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="saveBtn" class="primary" type="submit">Save enquiry</button>
+            <button id="resetBtn" type="button">Clear form</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="card">
+        <h2>Recent enquiries</h2>
+        <div class="muted" style="margin-bottom:12px">Newest active enquiries across all channels.</div>
+        <div id="queue" class="queue"><div class="empty">Sign in to load enquiries.</div></div>
+      </aside>
+    </div>
+  </main>
+
+  <script type="module" src="./js/enquiries.js"></script>
+</body>
+</html>
