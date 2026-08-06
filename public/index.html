@@ -26,6 +26,13 @@
     .brand{ display:flex; align-items:center; gap:10px; }
     .brandTitle{ font-weight:900; font-size:20px; }
     .brandSub{ opacity:.9; font-size:12px; margin-top:2px; }
+    .topbarActions{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .topbarLink{
+      display:inline-flex; align-items:center; justify-content:center;
+      padding:9px 12px; border-radius:10px; text-decoration:none;
+      background:#fff; color:var(--red); border:1px solid rgba(255,255,255,.65);
+      font-weight:800; font-size:13px;
+    }
 
     .app { display:flex; min-height: calc(100vh - 52px); }
     .sidebar{
@@ -102,6 +109,8 @@
     @media (max-width: 650px){
       .app{ flex-direction:column; }
       .sidebar{ width:auto; border-right:none; border-bottom:1px solid var(--border); }
+      .topbar{ align-items:flex-start; }
+      .topbarActions{ justify-content:flex-end; }
     }
   </style>
 </head>
@@ -115,7 +124,10 @@
         <div class="brandSub">Punchbowl Bus – Driver & Admin Portal</div>
       </div>
     </div>
-    <div id="authArea"></div>
+    <div class="topbarActions">
+      <a class="topbarLink" href="./enquiries.html">New Enquiry</a>
+      <div id="authArea"></div>
+    </div>
   </div>
 
   <div class="app">
