@@ -1,3 +1,5 @@
+import "./customer_search.js";
+
 import {
   collection,
   addDoc,
