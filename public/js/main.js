@@ -308,6 +308,13 @@ export async function go(pageId) {
 
   showError("");
 
+  if (pageId === "newEnquiry") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    window.location.href = "./enquiries.html";
+    return;
+  }
+
   // Dispatch Board
   if (pageId === "adminDispatchBoard") {
     if (!state.isAdmin) return showError("No admin access");

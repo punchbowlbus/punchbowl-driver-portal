@@ -5,242 +5,158 @@ import {
   limit,
   onSnapshot
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
 
-import { auth, db } from "./firebase.js";
-import { ADMIN_EMAILS } from "./config.js";
-import { normalizeEmail, escapeHtml } from "./utils.js";
+import { db } from "./firebase.js";
+import { escapeHtml } from "./utils.js";
 
-const CUSTOMER_FIELDS = [
-  "organisationName",
-  "contactName",
-  "phone",
-  "email"
-];
+const state = {
+  organisations: [],
+  contacts: [],
+  enquiries: [],
+  unsubscribers: [],
+  onSelect: null
+};
 
-const TRIP_FIELDS = [
-  "journeyType",
-  "pickupTime",
-  "pickupLocation",
-  "destination",
-  "passengerCount",
-  "vehiclePreference",
-  "specialRequirements"
-];
-
-let enquiryHistory = [];
-let unsubscribe = null;
-
-function isAdmin(email) {
-  const normalized = normalizeEmail(email || "");
-  return ADMIN_EMAILS.map(normalizeEmail).includes(normalized);
+function normalise(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9@+]+/g, " ").trim();
 }
 
-function normalizeSearch(value) {
-  return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-function setField(id, value) {
-  const input = document.getElementById(id);
-  if (!input) return;
-  input.value = value ?? "";
-  input.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
-function applyCustomer(enquiry) {
-  CUSTOMER_FIELDS.forEach((field) => setField(field, enquiry[field]));
-  setField("source", "Repeat customer");
-  document.getElementById("contactName")?.focus();
-}
-
-function applyTrip(enquiry) {
-  applyCustomer(enquiry);
-  TRIP_FIELDS.forEach((field) => setField(field, enquiry[field]));
-  setField("stops", Array.isArray(enquiry.stops) ? enquiry.stops.join("\n") : enquiry.stops);
-  setField("returnDate", "");
-  setField("serviceDate", "");
-}
-
-function formatDate(value) {
-  if (!value) return "Date not recorded";
+function dateLabel(value) {
+  if (!value) return "No previous trip date";
   const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-AU", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  }).format(date);
+  return Number.isNaN(date.getTime())
+    ? value
+    : new Intl.DateTimeFormat("en-AU", {day: "2-digit", month: "short", year: "numeric"}).format(date);
 }
 
-function buildCustomerGroups(items) {
-  const groups = new Map();
+function enquiryCustomerKey(item) {
+  return normalise(item.organisationName || item.email || item.phone || item.contactName || item.id);
+}
 
-  items.forEach((item) => {
-    if (item.deleted) return;
-
-    const key = normalizeSearch(
-      item.organisationName || item.email || item.phone || item.contactName || item.id
-    );
-    if (!key) return;
-
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(item);
+function buildResults() {
+  const contactByOrganisation = new Map();
+  state.contacts.forEach((contact) => {
+    const id = contact.organisationId || "unlinked";
+    if (!contactByOrganisation.has(id)) contactByOrganisation.set(id, []);
+    contactByOrganisation.get(id).push(contact);
   });
 
-  return [...groups.values()].map((history) => {
-    history.sort((a, b) => String(b.serviceDate || "").localeCompare(String(a.serviceDate || "")));
+  const records = state.organisations.map((organisation) => {
+    const contacts = contactByOrganisation.get(organisation.id) || [];
+    const related = state.enquiries.filter((item) => item.organisationId === organisation.id);
+    const primary = contacts.find((item) => item.isPrimary) || contacts[0] || {};
     return {
-      latest: history[0],
-      history,
-      searchText: normalizeSearch(
-        history
-          .flatMap((item) => [
-            item.organisationName,
-            item.contactName,
-            item.phone,
-            item.email,
-            item.pickupLocation,
-            item.destination
-          ])
-          .filter(Boolean)
-          .join(" ")
-      )
+      key: `org:${organisation.id}`,
+      organisationId: organisation.id,
+      contactId: primary.id || null,
+      organisationName: organisation.name || organisation.organisationName || "",
+      contactName: primary.displayName || primary.contactName || "",
+      phone: primary.phone || organisation.phone || "",
+      email: primary.email || organisation.email || "",
+      billingEmail: organisation.billingEmail || "",
+      paymentTerms: organisation.paymentTerms || "",
+      accountManagerEmail: organisation.accountManagerEmail || "",
+      internalNotes: organisation.internalNotes || "",
+      history: related,
+      source: "customer"
     };
   });
+
+  const knownKeys = new Set(records.map((item) => normalise(item.organisationName || item.email || item.phone)));
+  const legacyGroups = new Map();
+  state.enquiries.forEach((item) => {
+    const key = enquiryCustomerKey(item);
+    if (!key || knownKeys.has(key)) return;
+    if (!legacyGroups.has(key)) legacyGroups.set(key, []);
+    legacyGroups.get(key).push(item);
+  });
+
+  legacyGroups.forEach((history, key) => {
+    const latest = history[0] || {};
+    records.push({
+      key: `history:${key}`,
+      organisationId: null,
+      contactId: null,
+      organisationName: latest.organisationName || "",
+      contactName: latest.contactName || "",
+      phone: latest.phone || "",
+      email: latest.email || "",
+      history,
+      source: "history"
+    });
+  });
+
+  return records;
 }
 
-function renderResults(searchTerm = "") {
-  const results = document.getElementById("customerSearchResults");
-  if (!results) return;
-
-  const term = normalizeSearch(searchTerm);
-  if (term.length < 2) {
-    results.innerHTML = `<div class="customer-search-empty">Enter at least two characters to search previous enquiries.</div>`;
+function render(term) {
+  const container = document.getElementById("customerSearchResults");
+  if (!container) return;
+  const search = normalise(term);
+  if (search.length < 2) {
+    container.innerHTML = `<div class="search-empty">Type at least two characters to find an organisation, contact, phone or email.</div>`;
     return;
   }
 
-  const matches = buildCustomerGroups(enquiryHistory)
-    .filter((group) => group.searchText.includes(term))
+  const results = buildResults()
+    .map((record) => ({
+      ...record,
+      searchText: normalise([record.organisationName, record.contactName, record.phone, record.email].join(" "))
+    }))
+    .filter((record) => record.searchText.includes(search))
     .slice(0, 8);
 
-  if (!matches.length) {
-    results.innerHTML = `<div class="customer-search-empty">No previous customer found. Continue entering this as a new customer.</div>`;
+  if (!results.length) {
+    container.innerHTML = `<div class="search-empty">No customer found. Continue below to create a new customer with this enquiry.</div>`;
     return;
   }
 
-  results.innerHTML = matches
-    .map(({ latest, history }) => {
-      const customer = latest.organisationName || latest.contactName || "Unnamed customer";
-      const route = [latest.pickupLocation, latest.destination].filter(Boolean).join(" → ");
+  container.innerHTML = results.map((record) => {
+    const latest = record.history?.[0] || {};
+    const route = [latest.pickupLocation, latest.destination].filter(Boolean).join(" → ");
+    return `
+      <button class="customer-match" type="button" data-customer-key="${escapeHtml(record.key)}">
+        <span><strong>${escapeHtml(record.organisationName || record.contactName || "Unnamed customer")}</strong>
+          <small>${escapeHtml(record.contactName || "No contact name")} · ${escapeHtml(record.phone || record.email || "No contact method")}</small>
+          <small>${record.history?.length || 0} previous enquir${record.history?.length === 1 ? "y" : "ies"}${route ? ` · ${escapeHtml(dateLabel(latest.serviceDate))} · ${escapeHtml(route)}` : ""}</small>
+        </span>
+        <b>Use customer</b>
+      </button>`;
+  }).join("");
 
-      return `
-        <article class="customer-result">
-          <div class="customer-result-main">
-            <div class="customer-result-name">${escapeHtml(customer)}</div>
-            <div>${escapeHtml(latest.contactName || "")}</div>
-            <div>${escapeHtml(latest.phone || latest.email || "No contact recorded")}</div>
-            <div class="customer-result-muted">${history.length} previous ${history.length === 1 ? "enquiry" : "enquiries"}</div>
-            <div class="customer-result-muted">Latest: ${escapeHtml(formatDate(latest.serviceDate))}${route ? ` · ${escapeHtml(route)}` : ""}</div>
-          </div>
-          <div class="customer-result-actions">
-            <button type="button" data-use-customer="${escapeHtml(latest.id)}">Use customer</button>
-            <button type="button" data-use-trip="${escapeHtml(latest.id)}">Duplicate trip</button>
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-
-  results.querySelectorAll("[data-use-customer]").forEach((button) => {
+  container.querySelectorAll("[data-customer-key]").forEach((button) => {
     button.addEventListener("click", () => {
-      const enquiry = enquiryHistory.find((item) => item.id === button.dataset.useCustomer);
-      if (enquiry) applyCustomer(enquiry);
-    });
-  });
-
-  results.querySelectorAll("[data-use-trip]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const enquiry = enquiryHistory.find((item) => item.id === button.dataset.useTrip);
-      if (enquiry) applyTrip(enquiry);
+      const selected = results.find((record) => record.key === button.dataset.customerKey);
+      if (selected) state.onSelect?.(selected);
     });
   });
 }
 
-function installSearchUi() {
-  if (document.getElementById("customerSearchPanel")) return;
+function listenSafely(collectionName, apply, options = {}) {
+  const reference = options.ordered
+    ? query(collection(db, collectionName), orderBy(options.ordered, "desc"), limit(options.limit || 250))
+    : query(collection(db, collectionName), limit(options.limit || 250));
+  return onSnapshot(reference, (snapshot) => {
+    apply(snapshot.docs.map((item) => ({id: item.id, ...item.data()})));
+    const input = document.getElementById("customerSearchInput");
+    if (input?.value) render(input.value);
+  }, () => apply([]));
+}
 
-  const customerTitle = [...document.querySelectorAll(".section-title")]
-    .find((element) => element.textContent.trim() === "Customer");
-  if (!customerTitle) return;
-
-  const panel = document.createElement("section");
-  panel.id = "customerSearchPanel";
-  panel.className = "customer-search-panel";
-  panel.innerHTML = `
-    <div class="customer-search-heading">Find repeat customer</div>
-    <div class="customer-search-help">Search organisation, contact, phone or email. Select a match to reuse customer details or duplicate the previous trip.</div>
-    <input id="customerSearchInput" type="search" autocomplete="off" placeholder="Search previous customers" />
-    <div id="customerSearchResults" class="customer-search-results">
-      <div class="customer-search-empty">Enter at least two characters to search previous enquiries.</div>
-    </div>
-  `;
-
-  customerTitle.insertAdjacentElement("afterend", panel);
-
-  const style = document.createElement("style");
-  style.textContent = `
-    .customer-search-panel{margin:10px 0 16px;padding:14px;border:1px solid #dfe3e8;border-radius:12px;background:#f8fafc}
-    .customer-search-heading{font-weight:900;margin-bottom:3px}
-    .customer-search-help,.customer-result-muted{font-size:12px;color:#637381}
-    #customerSearchInput{margin-top:10px}
-    .customer-search-results{display:grid;gap:8px;margin-top:10px}
-    .customer-search-empty{padding:12px;border:1px dashed #d5dbe1;border-radius:10px;color:#637381;font-size:13px;background:#fff}
-    .customer-result{display:flex;justify-content:space-between;gap:12px;padding:12px;border:1px solid #dfe3e8;border-radius:10px;background:#fff}
-    .customer-result-name{font-weight:900}
-    .customer-result-main{font-size:13px;line-height:1.45}
-    .customer-result-actions{display:flex;align-items:flex-start;gap:7px;flex-wrap:wrap;justify-content:flex-end}
-    .customer-result-actions button{padding:7px 9px;font-size:12px}
-    @media(max-width:640px){.customer-result{flex-direction:column}.customer-result-actions{justify-content:flex-start}}
-  `;
-  document.head.appendChild(style);
+export function initialiseCustomerSearch({onSelect}) {
+  state.onSelect = onSelect;
+  state.unsubscribers.forEach((unsubscribe) => unsubscribe());
+  state.unsubscribers = [
+    listenSafely("organisations", (items) => { state.organisations = items; }),
+    listenSafely("customerContacts", (items) => { state.contacts = items; }),
+    listenSafely("enquiries", (items) => { state.enquiries = items; }, {ordered: "createdAt", limit: 300})
+  ];
 
   const input = document.getElementById("customerSearchInput");
-  input.addEventListener("input", () => renderResults(input.value));
+  if (input) input.addEventListener("input", () => render(input.value));
 }
 
-function startHistoryListener() {
-  if (unsubscribe) unsubscribe();
-
-  const historyQuery = query(
-    collection(db, "enquiries"),
-    orderBy("createdAt", "desc"),
-    limit(200)
-  );
-
-  unsubscribe = onSnapshot(
-    historyQuery,
-    (snapshot) => {
-      enquiryHistory = snapshot.docs.map((document) => ({ id: document.id, ...document.data() }));
-      const input = document.getElementById("customerSearchInput");
-      if (input?.value) renderResults(input.value);
-    },
-    () => {
-      const results = document.getElementById("customerSearchResults");
-      if (results) results.innerHTML = `<div class="customer-search-empty">Customer history could not be loaded.</div>`;
-    }
-  );
+export function stopCustomerSearch() {
+  state.unsubscribers.forEach((unsubscribe) => unsubscribe());
+  state.unsubscribers = [];
 }
-
-installSearchUi();
-
-onAuthStateChanged(auth, (user) => {
-  if (user && isAdmin(user.email)) {
-    installSearchUi();
-    startHistoryListener();
-    return;
-  }
-
-  if (unsubscribe) unsubscribe();
-  unsubscribe = null;
-  enquiryHistory = [];
-});

@@ -1,4 +1,4 @@
-const CACHE = "pbc-v34"; // bump when you deploy changes
+const CACHE = "pbc-v35"; // bump when you deploy changes
 
 const ASSETS = [
   "/",
