@@ -65,6 +65,7 @@ els.contentArea.innerHTML = `
         <div>
           <div class="muted" style="margin-bottom:6px;">Zoom</div>
           <div style="display:flex; gap:6px;">
+           <button id="boardFullscreenBtn" type="button">Full Board</button>
             <button id="zoomOutBtn" type="button">-</button>
             <button id="zoomResetBtn" type="button">100%</button>
             <button id="zoomInBtn" type="button">+</button>
@@ -74,7 +75,7 @@ els.contentArea.innerHTML = `
     </div>
 
     <!-- Main Work Area -->
-    <div id="dispatchMainWorkArea" style="flex:1; display:grid; grid-template-columns:220px minmax(0, 1fr) 300px; gap:12px; overflow:hidden; min-height:0;">
+    <div id="dispatchMainWorkArea" style="flex:1; display:grid; grid-template-columns:220px minmax(0, 1fr) 340px; gap:12px; overflow:hidden; min-height:0;">
 
       <!-- Left -->
       <div style="border:1px solid #ddd; border-radius:12px; background:#fff; display:flex; flex-direction:column; overflow:hidden; min-height:0;">
@@ -141,10 +142,10 @@ els.contentArea.innerHTML = `
             <span id="dispatchRightPanelTitle">Driver / Duty Details</span>
           </div>
 
-          <div
-            id="dispatchDetailPanel"
-            style="flex:1; padding:12px; overflow:auto; min-height:0;"
-          >
+            <div
+              id="dispatchDetailPanel"
+              style="flex:1; padding:12px 12px 80px 12px; overflow-y:auto; min-height:0; box-sizing:border-box;"
+            >
           <div class="muted">Click a driver row to view details.</div>
         </div>
       </div>
@@ -209,7 +210,7 @@ toggleDetailPanelBtn.onclick = () => {
     detailPanelEl.style.display = "block";
     rightPanel.style.width = "";
     rightPanel.style.minWidth = "";
-    mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 300px";
+    mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 340px";
     if (rightHeaderLabel) rightHeaderLabel.style.display = "";
     toggleDetailPanelBtn.textContent = "Hide";
   } else {
@@ -225,6 +226,7 @@ toggleDetailPanelBtn.onclick = () => {
 const zoomOutBtn = document.getElementById("zoomOutBtn");
 const zoomResetBtn = document.getElementById("zoomResetBtn");
 const zoomInBtn = document.getElementById("zoomInBtn");
+const boardFullscreenBtn = document.getElementById("boardFullscreenBtn");
 
 const unassignedJobsPanelEl = document.getElementById("unassignedJobsPanel");
 const closeUnassignedJobsPanelBtn = document.getElementById("closeUnassignedJobsPanel");
@@ -238,6 +240,7 @@ let jobGroupsCache = [];
 let selectedDriverEmpNo = "";
 let slotWidth = 10;
 let unsubscribeDutySpans = null;
+let unsubscribeBlocks = null;
 let blocksCache = [];
 let draggedBlockId = "";
 
@@ -252,6 +255,61 @@ let draggedBlockId = "";
     return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
   }
 
+    function setBoardFullscreen(enabled) {
+    const mainWorkArea = document.getElementById("dispatchMainWorkArea");
+    const rightPanel = document.getElementById("dispatchRightPanel");
+    const sidebar = document.querySelector("aside, nav, .sidebar");
+    const card = document.querySelector(".card");
+
+    if (!mainWorkArea) return;
+
+    if (enabled) {
+      document.body.classList.add("dispatch-board-fullscreen");
+
+      if (rightPanel) rightPanel.style.display = "none";
+      if (sidebar) sidebar.style.display = "none";
+
+      mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr)";
+
+      if (card) {
+        card.style.position = "fixed";
+        card.style.left = "0";
+        card.style.top = "0";
+        card.style.width = "100vw";
+        card.style.height = "100vh";
+        card.style.zIndex = "99999";
+        card.style.borderRadius = "0";
+      }
+
+      if (boardFullscreenBtn) boardFullscreenBtn.textContent = "Exit Full Board";
+    } else {
+      document.body.classList.remove("dispatch-board-fullscreen");
+
+      if (rightPanel) rightPanel.style.display = "";
+      if (sidebar) sidebar.style.display = "";
+
+      mainWorkArea.style.gridTemplateColumns = "220px minmax(0, 1fr) 340px";
+
+      if (card) {
+        card.style.position = "";
+        card.style.left = "";
+        card.style.top = "";
+        card.style.width = "";
+        card.style.height = "";
+        card.style.zIndex = "";
+        card.style.borderRadius = "";
+      }
+
+      if (boardFullscreenBtn) boardFullscreenBtn.textContent = "Full Board";
+    }
+
+  setTimeout(() => {
+    buildTimelineHeader();
+    syncDriverSpacerHeight();
+    renderDrivers();
+    renderNowLine();
+  }, 50);
+}
   function timeStrToMin(value) {
     const v = String(value || "").trim();
 
@@ -606,14 +664,48 @@ function renderDriverDetail(driver) {
                             Delete
                           </button>
                         </div>
-
+                          ${
+                            span.dutyNumber
+                              ? `
+                                <div style="font-weight:800; font-size:14px; margin-bottom:6px; color:#1d4ed8; padding-right:92px;">
+                                  Duty Number: ${escapeHtml(span.dutyNumber)}
+                                </div>
+                              `
+                              : ""
+                          }
                         <div style="font-weight:700; font-size:13px; padding-right:92px;">
                           ${minToTimeStr(span.startMin)} - ${minToTimeStr(span.endMin)}
                         </div>
 
-                        <div class="muted" style="font-size:12px; margin-top:3px;">
-                          ${escapeHtml(span.startLocation || "")} → ${escapeHtml(span.endLocation || "")}
-                        </div>
+                          <div class="muted" style="font-size:12px; margin-top:3px;">
+                            Duty Type: ${escapeHtml(span.dutyType || "Charter")}
+                          </div>
+
+                          ${
+                            span.dutyType === "Rail Replacement"
+                              ? `
+                                <div class="muted" style="font-size:12px; margin-top:3px;">
+                                  Route: ${escapeHtml(span.routeNumber || "-")}
+                                </div>
+                                <div class="muted" style="font-size:12px; margin-top:3px;">
+                                  ${escapeHtml(span.startLocation || "")} → ${escapeHtml(span.endLocation || "")}
+                                </div>
+                                ${
+                                  span.routePdfUrl
+                                    ? `
+                                      <div class="muted" style="font-size:12px; margin-top:3px;">
+                                        <a href="${span.routePdfUrl}" target="_blank">Route Description</a>
+                                      </div>
+                                    `
+                                    : ""
+                                }
+                              `
+                              : `
+                                <div class="muted" style="font-size:12px; margin-top:3px;">
+                                  ${escapeHtml(span.startLocation || "")} → ${escapeHtml(span.endLocation || "")}
+                                </div>
+                              `
+                          }
 
                         <div class="muted" style="font-size:12px; margin-top:3px;">
                           Bus: ${escapeHtml(span.assignedBus || "Unassigned")}
@@ -693,31 +785,43 @@ function renderDriverDetail(driver) {
                       block.toName || block.to || block.dropoff || block.endLocation || ""
                     ).trim();
 
+                    const serviceDateText = String(
+                      block.serviceDate || block.date || getSelectedDate() || ""
+                    ).trim();
+
                     return `
-                      <div style="padding:8px; border:1px solid #bfdbfe; border-radius:8px; background:#fff; position:relative;">
-                        <div style="position:absolute; top:8px; right:8px; display:flex; gap:6px;">
-                          <button
-                            type="button"
-                            data-edit-assigned-block="${block.id}"
-                            style="font-size:10px; padding:2px 6px;"
-                          >
-                            Edit
-                          </button>
+                      <div style="padding:8px; border:1px solid #bfdbfe; border-radius:8px; background:#fff;">
+                        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:8px;">
+                          <div style="flex:1; min-width:0;">
+                            <div class="muted" style="font-size:10px; line-height:1.2; font-weight:700;">
+                              Date: ${escapeHtml(serviceDateText)}
+                            </div>
 
-                          <button
-                            type="button"
-                            data-unassign-block="${block.id}"
-                            style="font-size:10px; padding:2px 6px;"
-                          >
-                            Unassign
-                          </button>
+                            <div style="font-weight:700; font-size:13px; margin-top:2px;">
+                              ${minToTimeStr(startMin)} - ${minToTimeStr(endMin)}
+                            </div>
+                          </div>
+
+                          <div style="display:flex; gap:4px; flex:0 0 auto;">
+                            <button
+                              type="button"
+                              data-edit-assigned-block="${block.id}"
+                              style="min-height:22px; height:22px; font-size:9px; line-height:1; padding:1px 5px; border-radius:6px;"
+                            >
+                              Edit
+                            </button>
+
+                            <button
+                              type="button"
+                              data-unassign-block="${block.id}"
+                              style="min-height:22px; height:22px; font-size:9px; line-height:1; padding:1px 5px; border-radius:6px;"
+                            >
+                              Unassign
+                            </button>
+                          </div>
                         </div>
 
-                        <div style="font-weight:700; font-size:13px; padding-right:92px;">
-                          ${minToTimeStr(startMin)} - ${minToTimeStr(endMin)}
-                        </div>
-
-                        <div class="muted" style="font-size:12px; margin-top:3px;">
+                        <div class="muted" style="font-size:11px; line-height:1.3; margin-top:5px; overflow-wrap:anywhere;">
                           ${escapeHtml(fromText)} → ${escapeHtml(toText)}
                         </div>
                       </div>
@@ -782,6 +886,34 @@ function renderDriverDetail(driver) {
         <div id="driverDutySpanFormTitle_${empNo}" style="font-weight:700; margin-bottom:10px;">Create Duty Span</div>
 
         <div style="display:grid; gap:10px;">
+          <div>
+            <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Type</div>
+            <select id="dutyType_${empNo}">
+              <option value="Charter" selected>Charter</option>
+              <option value="Rail Replacement">Rail Replacement</option>
+              <option value="Yard">Yard</option>
+              <option value="Mechanic">Mechanic</option>
+              <option value="Office">Office</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Number</div>
+            <input id="dutyNumber_${empNo}" type="text" placeholder="e.g. 101" />
+          </div>
+
+          <div id="railFields_${empNo}" style="display:none; gap:10px;">
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">Route Number</div>
+              <input id="routeNumber_${empNo}" type="text" placeholder="e.g. T4" />
+            </div>
+
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">Route Description (PDF link)</div>
+              <input id="routePdf_${empNo}" type="text" placeholder="https://..." />
+            </div>
+          </div>
+
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
               <div class="muted" style="margin-bottom:4px; font-size:12px;">Duty Start</div>
@@ -797,7 +929,7 @@ function renderDriverDetail(driver) {
             Use 24+ time for overnight (e.g. 25:30 = 01:30 next day)
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <div id="charterLocationFields_${empNo}" style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
               <div class="muted" style="margin-bottom:4px; font-size:12px;">Start Location</div>
               <select id="dutyStartLocation_${empNo}">
@@ -813,6 +945,17 @@ function renderDriverDetail(driver) {
                 <option value="Hannans Depot">Hannans Depot</option>
                 <option value="Bounds Depot">Bounds Depot</option>
               </select>
+            </div>
+          </div>
+
+          <div id="railLocationFields_${empNo}" style="display:none; grid-template-columns:1fr 1fr; gap:8px;">
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">Start Station</div>
+              <input id="railStart_${empNo}" type="text" placeholder="e.g. Central" />
+            </div>
+            <div>
+              <div class="muted" style="margin-bottom:4px; font-size:12px;">End Station</div>
+              <input id="railEnd_${empNo}" type="text" placeholder="e.g. Parramatta" />
             </div>
           </div>
 
@@ -849,7 +992,6 @@ function renderDriverDetail(driver) {
           </div>
         </div>
       </div>
-    </div>
   `;
 
   const showBtn = document.getElementById(`showAddDutySpanBtn_${empNo}`);
@@ -861,6 +1003,36 @@ function renderDriverDetail(driver) {
   const breakRowsWrap = document.getElementById(`breakRowsWrap_${empNo}`);
   const addMealBreakBtn = document.getElementById(`addMealBreakBtn_${empNo}`);
   const addCribBreakBtn = document.getElementById(`addCribBreakBtn_${empNo}`);
+  const dutyTypeEl = document.getElementById(`dutyType_${empNo}`);
+  const railFieldsEl = document.getElementById(`railFields_${empNo}`);
+  const charterLocationFieldsEl = document.getElementById(`charterLocationFields_${empNo}`);
+  const railLocationFieldsEl = document.getElementById(`railLocationFields_${empNo}`);
+
+    function updateRailFields() {
+      if (!dutyTypeEl) return;
+
+      const isRail = dutyTypeEl.value === "Rail Replacement";
+
+      if (railFieldsEl) {
+        railFieldsEl.style.display = isRail ? "grid" : "none";
+      }
+
+      if (charterLocationFieldsEl) {
+        charterLocationFieldsEl.style.display = isRail ? "none" : "grid";
+      }
+
+      if (railLocationFieldsEl) {
+        railLocationFieldsEl.style.display = isRail ? "grid" : "none";
+      }
+    }
+
+  // run once
+  updateRailFields();
+
+  // run on change
+  if (dutyTypeEl) {
+    dutyTypeEl.addEventListener("change", updateRailFields);
+  }
 
   const editAssignedWrap = document.getElementById(`editAssignedBlockWrap_${empNo}`);
   const editAssignedBlockIdEl = document.getElementById(`editAssignedBlockId_${empNo}`);
@@ -1007,19 +1179,20 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyStartLocation_${empNo}`).value = "";
       document.getElementById(`dutyEndLocation_${empNo}`).value = "";
       document.getElementById(`dutyAssignedBus_${empNo}`).value = "";
-
+      document.getElementById(`dutyType_${empNo}`).value = "Charter";
+      updateRailFields();
       clearBreakRows();
 
       if (startEl) startEl.focus();
     };
-  }
+    }
 
-  if (cancelBtn && formWrap) {
-    cancelBtn.onclick = () => {
-      formWrap.style.display = "none";
-      formWrap.dataset.editingSpanId = "";
-    };
-  }
+    if (cancelBtn && formWrap) {
+      cancelBtn.onclick = () => {
+        formWrap.style.display = "none";
+        formWrap.dataset.editingSpanId = "";
+      };
+    }
 
   if (saveBtn) {
     saveBtn.onclick = async () => {
@@ -1027,10 +1200,22 @@ function renderDriverDetail(driver) {
 
       const dutyStart = document.getElementById(`dutyStart_${empNo}`)?.value || "";
       const dutyEnd = document.getElementById(`dutyEnd_${empNo}`)?.value || "";
-      const startLocation = document.getElementById(`dutyStartLocation_${empNo}`)?.value || "";
-      const endLocation = document.getElementById(`dutyEndLocation_${empNo}`)?.value || "";
-      const assignedBus = document.getElementById(`dutyAssignedBus_${empNo}`)?.value || "";
+      const dutyType = document.getElementById(`dutyType_${empNo}`)?.value || "Charter";
+      const routeNumber = document.getElementById(`routeNumber_${empNo}`)?.value || "";
+      const routePdfUrl = document.getElementById(`routePdf_${empNo}`)?.value || "";
 
+      const startLocation =
+        dutyType === "Rail Replacement"
+          ? document.getElementById(`railStart_${empNo}`)?.value || ""
+          : document.getElementById(`dutyStartLocation_${empNo}`)?.value || "";
+
+      const endLocation =
+        dutyType === "Rail Replacement"
+          ? document.getElementById(`railEnd_${empNo}`)?.value || ""
+          : document.getElementById(`dutyEndLocation_${empNo}`)?.value || "";
+
+      const assignedBus = document.getElementById(`dutyAssignedBus_${empNo}`)?.value || "";
+      const dutyNumber = document.getElementById(`dutyNumber_${empNo}`)?.value || "";
       const startMin = timeStrToMin(dutyStart);
       const endMin = timeStrToMin(dutyEnd);
 
@@ -1055,7 +1240,6 @@ function renderDriverDetail(driver) {
         showError("Duty span overlaps an existing span for this driver.");
         return;
       }
-
       const breakRows = Array.from(
         breakRowsWrap ? breakRowsWrap.querySelectorAll("[data-break-row]") : []
       );
@@ -1104,12 +1288,16 @@ function renderDriverDetail(driver) {
         endMin,
         breaks
       });
-
+       console.log("PDF VALUE:", routePdfUrl);
       try {
         const payload = {
           serviceDate: getSelectedDate(),
           driverEmployeeNumber: empNo,
           driverName: String(driver.displayName || driver.firstName || "").trim(),
+          dutyType,
+          dutyNumber,
+          routeNumber,
+          routePdfUrl,
           startMin,
           endMin,
           startLocation,
@@ -1128,6 +1316,7 @@ function renderDriverDetail(driver) {
         if (editingSpanId) {
           await updateDutySpan(editingSpanId, payload);
         } else {
+          console.log("CREATE PAYLOAD:", payload);
           await addDutySpan(payload);
         }
 
@@ -1155,6 +1344,27 @@ function renderDriverDetail(driver) {
       document.getElementById(`dutyStartLocation_${empNo}`).value = span.startLocation || "";
       document.getElementById(`dutyEndLocation_${empNo}`).value = span.endLocation || "";
       document.getElementById(`dutyAssignedBus_${empNo}`).value = span.assignedBus || "";
+      document.getElementById(`dutyNumber_${empNo}`).value = span.dutyNumber || "";
+      document.getElementById(`dutyType_${empNo}`).value = span.dutyType || "Charter";
+
+      // load rail fields
+        document.getElementById(`routeNumber_${empNo}`).value = span.routeNumber || "";
+        document.getElementById(`routePdf_${empNo}`).value = span.routePdfUrl || "";
+
+        // load correct locations
+        if (span.dutyType === "Rail Replacement") {
+          document.getElementById(`railStart_${empNo}`).value = span.startLocation || "";
+          document.getElementById(`railEnd_${empNo}`).value = span.endLocation || "";
+        } else {
+          document.getElementById(`dutyStartLocation_${empNo}`).value = span.startLocation || "";
+          document.getElementById(`dutyEndLocation_${empNo}`).value = span.endLocation || "";
+        }
+
+        // VERY IMPORTANT → update UI
+        const dutyTypeEl = document.getElementById(`dutyType_${empNo}`);
+        if (dutyTypeEl && typeof updateRailFields === "function") {
+          updateRailFields();
+        }
 
       clearBreakRows();
       (Array.isArray(span.breaks) ? span.breaks : []).forEach((b) => appendBreakRow(b));
@@ -1181,30 +1391,8 @@ function renderDriverDetail(driver) {
   });
 }
 
-const unassignButtons = detailPanelEl.querySelectorAll("[data-unassign-block]");
 
-unassignButtons.forEach((btn) => {
-  btn.onclick = async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
 
-    const blockId = String(btn.getAttribute("data-unassign-block") || "");
-    console.log("UNASSIGN CLICK", { blockId });
-
-    if (!blockId) return;
-
-    const ok = confirm("Unassign this job?");
-    if (!ok) return;
-
-    try {
-      await unassignBlockFromDriver(blockId);
-      console.log("UNASSIGNED OK", { blockId });
-    } catch (e) {
-      console.error("UNASSIGN ERROR", e);
-      showError(e?.message || "Failed to unassign job.");
-    }
-  };
-});
 function getGroupColors(groupKey) {
   const palette = [
     { bg: "#1d4ed8", border: "#1e40af", text: "#ffffff" }, // blue
@@ -1383,7 +1571,7 @@ function renderAssignedBlocksForDriver(empNo) {
       const colors = getGroupColors(groupId);
       const groupName = getGroupName(block);
 
-      const blockWidth = Math.max(120, width);
+      const blockWidth = Math.max(6, width);
 
       const label = groupName;
 
@@ -1478,6 +1666,13 @@ function renderNowLine() {
   }
 }
 
+  function getDispatchStatusBg(status) {
+    const s = String(status || "").toLowerCase();
+
+    if (s === "assigned") return "#22c55e";   // green
+    if (s === "cancelled") return "#ef4444";  // red
+    return "#3b82f6"; // pending = blue
+  }
 function renderDrivers() {
   const activeDrivers = getActiveDrivers();
 
@@ -1531,16 +1726,16 @@ function renderDrivers() {
                 ${hasSpan ? "" : "disabled"}
                 style="
                   height:16px;
-                  width:68px;
-                  min-width:68px;
-                  max-width:68px;
-                  font-size:8px;
+                  width:52px;
+                  min-width:52px;
+                  max-width:52px;
+                  font-size:7px;
                   line-height:1;
                   border-radius:999px;
-                  padding:0 16px 0 6px;
+                  padding:0 12px 0 4px;
                   border:1px solid #d1d5db;
-                  background:${hasSpan ? "#fff" : "#f3f4f6"};
-                  color:${hasSpan ? "#111" : "#9ca3af"};
+                  background:${hasSpan ? getDispatchStatusBg(dispatchStatus) : "#f3f4f6"};
+                  color:${hasSpan ? "#fff" : "#9ca3af"};
                   box-sizing:border-box;
                 "
                 onclick="event.stopPropagation()"
@@ -1797,7 +1992,13 @@ function attachDriverRowEvents(activeDrivers) {
       return;
     }
 
-    if (!driverHasDutySpanCoverage(driverEmpNo, blockStart, blockEnd)) {
+    const matchingDutySpans = getDriverDutySpans(driverEmpNo).filter((span) => {
+      const spanStart = Number(span.startMin || 0);
+      const spanEnd = Number(span.endMin || 0);
+      return blockStart >= spanStart && blockEnd <= spanEnd;
+    });
+
+    if (!matchingDutySpans.length) {
       alert(
         "This job is outside the driver's duty span. Please extend or edit the duty span first."
       );
@@ -1806,14 +2007,26 @@ function attachDriverRowEvents(activeDrivers) {
       return;
     }
 
-      try {
-        await assignBlockToDriver({
-          block,
-          serviceDate: getSelectedDate(),
-          driverEmployeeNumber: driverEmpNo,
-          driverName,
-          createDutySpan: false
-        });
+    if (matchingDutySpans.length > 1) {
+      alert(
+        "This job matches more than one duty span for this driver. Please fix the duty spans before assigning."
+      );
+      draggedBlockId = "";
+      clearAllTimelineRowDropStates();
+      return;
+    }
+
+    const matchedDutySpan = matchingDutySpans[0];
+
+    try {
+      await assignBlockToDriver({
+        block,
+        serviceDate: getSelectedDate(),
+        driverEmployeeNumber: driverEmpNo,
+        driverName,
+        dutySpanId: String(matchedDutySpan.id || ""),
+        createDutySpan: false
+      });
 
         console.log("Assigned block", blockId, "to driver", driverEmpNo);
       } catch (err) {
@@ -1822,6 +2035,11 @@ function attachDriverRowEvents(activeDrivers) {
       }
     };
   });
+}
+
+function getBusLabel(block) {
+  const match = String(block.notes || "").match(/Bus\s+(\d+)/i);
+  return match ? `Bus ${match[1]}` : "";
 }
 
 function renderUnassignedJobs(blocks, selectedDate) {
@@ -1923,20 +2141,34 @@ function renderUnassignedJobs(blocks, selectedDate) {
 
       return sameDate && noDriver;
     })
-    .sort((a, b) => {
-      const aStart = getStartMin(a);
-      const bStart = getStartMin(b);
-      if (aStart !== bStart) return aStart - bStart;
+      .sort((a, b) => {
+        const aGroup = getGroupKey(a).toLowerCase();
+        const bGroup = getGroupKey(b).toLowerCase();
+        const groupCompare = aGroup.localeCompare(bGroup);
+        if (groupCompare !== 0) return groupCompare;
 
-      const aGroup = getGroupKey(a).toLowerCase();
-      const bGroup = getGroupKey(b).toLowerCase();
-      const groupCompare = aGroup.localeCompare(bGroup);
-      if (groupCompare !== 0) return groupCompare;
+        const typeRank = (block) => {
+          const t = String(getTypeText(block) || "").toLowerCase();
+          if (t === "forward") return 1;
+          if (t === "return") return 2;
+          return 9;
+        };
 
-      const aFrom = getFromText(a).toLowerCase();
-      const bFrom = getFromText(b).toLowerCase();
-      return aFrom.localeCompare(bFrom);
-    });
+        const typeCompare = typeRank(a) - typeRank(b);
+        if (typeCompare !== 0) return typeCompare;
+
+        const getBusNo = (block) => {
+          const match = String(block.notes || "").match(/Bus\s+(\d+)/i);
+          return match ? Number(match[1]) : 0;
+        };
+
+        const busCompare = getBusNo(a) - getBusNo(b);
+        if (busCompare !== 0) return busCompare;
+
+        const aStart = getStartMin(a);
+        const bStart = getStartMin(b);
+        return aStart - bStart;
+      });
 
   if (!unassigned.length) {
     unassignedJobsPanelBodyEl.innerHTML = `
@@ -1947,11 +2179,27 @@ function renderUnassignedJobs(blocks, selectedDate) {
     return;
   }
 
+  let lastGroup = "";
+  let lastType = "";
   unassignedJobsPanelBodyEl.innerHTML = unassigned
     .map((b) => {
       const groupName = getGroupKey(b);
       const directionText = getDirectionText(b);
       const typeText = getTypeText(b);
+      let headerHtml = "";
+      if (groupName !== lastGroup) {
+        headerHtml += `
+          <div style="
+            font-weight:700;
+            margin:10px 0 4px;
+            font-size:13px;
+          ">
+            ${escapeHtml(groupName)}
+          </div>
+        `;
+        lastGroup = groupName;
+        lastType = "";
+      }
       const fromText = getFromText(b);
       const toText = getToText(b);
       const startMin = getStartMin(b);
@@ -1971,9 +2219,10 @@ function renderUnassignedJobs(blocks, selectedDate) {
         durationMin ? `${durationMin} min` : ""
       ].filter(Boolean);
 
-      return `
-        <div
-          draggable="true"
+        return `
+          ${headerHtml}
+          <div
+            draggable="true"
           data-block-id="${escapeHtml(b.id || b.blockId || "")}"
           data-start="${startMin}"
           data-end="${endMin}"
@@ -1989,7 +2238,16 @@ function renderUnassignedJobs(blocks, selectedDate) {
             user-select:none;
             box-shadow:0 1px 2px rgba(0,0,0,0.06);
           "
-          title="${escapeHtml(groupName)} ${escapeHtml(timeText)}"
+            title="${escapeHtml(
+              [
+                groupName,
+                timeText ? `Time: ${timeText}` : "",
+                fromText || toText ? `Route: ${fromText} → ${toText}` : "",
+                typeText ? `Type: ${typeText}` : "",
+                getBusLabel(b) ? `Bus: ${getBusLabel(b)}` : "",
+                b.notes ? `Notes: ${b.notes}` : ""
+              ].filter(Boolean).join(" | ")
+            )}"
         >
           <div style="
             font-weight:700;
@@ -1999,6 +2257,7 @@ function renderUnassignedJobs(blocks, selectedDate) {
             white-space:nowrap;
             overflow:hidden;
             text-overflow:ellipsis;
+            display:none;
           ">
             ${escapeHtml(groupName)}
           </div>
@@ -2038,17 +2297,11 @@ function renderUnassignedJobs(blocks, selectedDate) {
           }
 
           ${
-            typeText
+            typeText || getBusLabel(b)
               ? `
-                <div style="
-                  font-size:10px;
-                  margin-top:3px;
-                  opacity:0.85;
-                  white-space:nowrap;
-                  overflow:hidden;
-                  text-overflow:ellipsis;
-                ">
-                  ${escapeHtml(typeText)}
+                <div style="display:flex; gap:6px; margin-top:3px; align-items:center;">
+                  ${typeText ? `<span style="font-size:10px; opacity:0.85;">${escapeHtml(typeText)}</span>` : ""}
+                  ${getBusLabel(b) ? `<span style="font-size:10px; background:rgba(255,255,255,0.25); padding:2px 6px; border-radius:6px; font-weight:600;">${escapeHtml(getBusLabel(b))}</span>` : ""}
                 </div>
               `
               : ""
@@ -2086,6 +2339,12 @@ function renderUnassignedJobs(blocks, selectedDate) {
   });
 }
 
+// stop previous blocks listener
+if (unsubscribeBlocks) {
+  unsubscribeBlocks();
+  unsubscribeBlocks = null;
+}
+
 function loadUnassignedJobsForDate(selectedDate) {
   if (!selectedDate) {
     if (unassignedJobsPanelBodyEl) {
@@ -2096,13 +2355,18 @@ function loadUnassignedJobsForDate(selectedDate) {
     return;
   }
 
+    if (unsubscribeBlocks) {
+    unsubscribeBlocks();
+    unsubscribeBlocks = null;
+  }
+
   if (unassignedJobsPanelBodyEl) {
     unassignedJobsPanelBodyEl.innerHTML = `
       <div class="muted">Loading unassigned jobs...</div>
     `;
   }
 
-  listenBlocksByDate(
+  unsubscribeBlocks = listenBlocksByDate(
     selectedDate,
     (blocks) => {
       blocksCache = blocks || [];
@@ -2283,8 +2547,8 @@ function setupSyncedScroll() {
   );
 }
 
-loadBtn.onclick = () => {
-  const selectedDate = dispatchDateEl.value;
+function loadDispatchForDate(selectedDate, { openPanel = false } = {}) {
+  console.log("LOAD DISPATCH", { selectedDate, openPanel });
 
   if (!selectedDate) {
     showError("Please select a dispatch date.");
@@ -2299,15 +2563,19 @@ loadBtn.onclick = () => {
   }
 
   if (unassignedJobsPanelEl) {
-    unassignedJobsPanelEl.style.display = "flex";
+    unassignedJobsPanelEl.style.display = openPanel ? "flex" : "none";
   }
 
   loadUnassignedJobsForDate(selectedDate);
   startDutySpanListener(selectedDate);
+}
+
+loadBtn.onclick = () => {
+  loadDispatchForDate(dispatchDateEl.value, { openPanel: true });
 };
 
 dispatchDateEl.onchange = () => {
-  loadBtn.click();
+  loadDispatchForDate(dispatchDateEl.value, { openPanel: false });
 };
 
 if (closeUnassignedJobsPanelBtn) {
@@ -2321,6 +2589,21 @@ if (closeUnassignedJobsPanelBtn) {
 zoomOutBtn.onclick = () => applyZoom(Math.max(2, slotWidth - 8));
 zoomResetBtn.onclick = () => applyZoom(52);
 zoomInBtn.onclick = () => applyZoom(slotWidth + 8);
+
+if (boardFullscreenBtn) {
+  boardFullscreenBtn.onclick = () => {
+    console.log("FULL BOARD BUTTON CLICKED");
+
+    const isFull = document.body.classList.contains("dispatch-board-fullscreen");
+    setBoardFullscreen(!isFull);
+  };
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    setBoardFullscreen(false);
+  }
+});
 
 driverSortByEl.onchange = () => {
   renderDrivers();
@@ -2377,7 +2660,6 @@ renderNowLine();
 renderDriverDetail(null);
 setupSyncedScroll();
 setupTimelineWheelZoom();
-startDutySpanListener(getSelectedDate());
 
 if (nowLineTimer) {
   clearInterval(nowLineTimer);
@@ -2386,4 +2668,8 @@ if (nowLineTimer) {
 nowLineTimer = setInterval(() => {
   renderNowLine();
 }, 60000);
+
+console.log("BOTTOM OF DISPATCH FILE REACHED");
+loadDispatchForDate(today, { openPanel: false });
 }
+

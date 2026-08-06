@@ -19,7 +19,7 @@ import {
   deleteTemplateLeg
 } from "./db.js";
 
-console.log("admin_v2.js loaded");
+console.log("admin_v2.js loaded - unified trip form");
 
 import { els, showError } from "./ui.js";
 import { auth } from "./firebase.js";
@@ -85,6 +85,28 @@ let blocksUnsub = null;
 let blocksAllUnsub = null;
 let jobGroupsUnsub = null;
 let recurringUnsub = null;
+let blockActionMessageTimer = null;
+
+function showBlockActionMessage(message, type = "info", sticky = false) {
+  const messageEl = document.getElementById("blockActionMessage");
+  if (!messageEl) return;
+
+  if (blockActionMessageTimer) {
+    clearTimeout(blockActionMessageTimer);
+    blockActionMessageTimer = null;
+  }
+
+  messageEl.textContent = message || "";
+  messageEl.className = `blocks-action-message ${type}`;
+  messageEl.hidden = !message;
+
+  if (message && !sticky) {
+    blockActionMessageTimer = setTimeout(() => {
+      messageEl.hidden = true;
+      messageEl.textContent = "";
+    }, 4200);
+  }
+}
 
 // edit mode for job groups page
 let editingJobGroupId = null;
@@ -94,38 +116,60 @@ let editingJobGroupId = null;
 ========================================================= */
 function renderJobGroupsManager() {
   return `
-    <div class="card">
-      <h3 style="margin-top:0">Job Groups</h3>
+    <div id="jobGroupsPage" class="job-groups-page">
+      <header class="job-groups-hero">
+        <div class="job-groups-hero-title">
+          <span><i data-lucide="layers-3"></i></span>
+          <div>
+            <div class="job-groups-eyebrow">Operations setup</div>
+            <h2>Job Groups</h2>
+            <p>Organise client and school work before creating blocks and trips.</p>
+          </div>
+        </div>
+        <button id="addJobGroupBtn" type="button" class="job-groups-primary-btn"><i data-lucide="plus"></i> Add Job Group</button>
+      </header>
 
-      <div class="muted" style="margin-bottom:8px">
-        Selected Job Group:
-        <b id="selectedJGLabel">None</b>
-      </div>
+      <div id="jobGroupPageMessage" class="job-groups-message" hidden></div>
 
-      <hr style="margin:14px 0; border:none; border-top:1px solid #eee" />
+      <section class="job-groups-selected">
+        <div class="job-groups-selected-icon"><i data-lucide="check-circle-2"></i></div>
+        <div><span>Currently selected</span><strong id="selectedJGLabel">No job group selected</strong><small>New blocks and trips will use this job group.</small></div>
+      </section>
 
-      <h4 style="margin:0 0 10px">Create / Edit Job Group</h4>
-      <input id="jgTitle" placeholder="Job Title (e.g. MCCP 3 PM / Kent Road PS)" />
-      <input id="jgClient" placeholder="Client / School" />
-      <textarea id="jgNotes" placeholder="Notes (bus qty, pax, contact, special instructions)"></textarea>
+      <section id="jobGroupFormWrap" class="card job-groups-form-card" hidden>
+        <div class="job-groups-form-heading">
+          <div>
+            <div id="jobGroupFormKicker" class="job-groups-form-kicker">New job group</div>
+            <h3 id="jobGroupFormTitle">Add Job Group</h3>
+            <p id="jobGroupFormSubtitle">Create a clear reusable group for blocks and trips.</p>
+          </div>
+          <button id="closeJobGroupFormBtn" type="button" class="job-groups-icon-btn" aria-label="Close job group form"><i data-lucide="x"></i></button>
+        </div>
 
-      <div style="display:flex; gap:10px; margin-top:10px; align-items:center">
-        <button id="createJG">Create Job Group</button>
-        <button id="cancelEditJG" style="display:none" class="btn">Cancel</button>
-      </div>
+        <div id="jobGroupFormMessage" class="job-groups-form-message" hidden></div>
 
-      <hr style="margin:16px 0; border:none; border-top:1px solid #eee" />
+        <div class="job-groups-form-section">
+          <div class="job-groups-section-heading"><span>1</span><div><h4>Group details</h4><p>Use a clear title that dispatchers can recognise quickly.</p></div></div>
+          <div class="job-groups-form-grid">
+            <label class="job-groups-field"><span>Job group title <b>*</b></span><input id="jgTitle" type="text" maxlength="150" placeholder="Example: MCCP 3 PM / Kent Road PS" /></label>
+            <label class="job-groups-field"><span>Client / school</span><input id="jgClient" type="text" maxlength="150" placeholder="Client or school name" /></label>
+            <label class="job-groups-field job-groups-full"><span>Notes</span><textarea id="jgNotes" maxlength="1500" placeholder="Bus quantity, passengers, contacts or special instructions"></textarea></label>
+          </div>
+        </div>
 
-      <h4 style="margin:0 0 10px">All Job Groups</h4>
-      <input id="jgSearch" placeholder="Search Job Groups (type MCCP / school name)" />
+        <div class="job-groups-form-actions">
+          <button id="createJG" type="button" class="job-groups-primary-btn">Create Job Group</button>
+          <button id="cancelEditJG" type="button" class="btn">Cancel</button>
+        </div>
+      </section>
 
-      <div id="jgList" style="
-        margin-top:10px;
-        max-height:320px;
-        overflow:auto;
-        border:1px solid #eee;
-        border-radius:12px;
-      "></div>
+      <section class="card job-groups-directory">
+        <div class="job-groups-directory-heading">
+          <div><h3>Job Group Directory</h3><p id="jobGroupResultCount">Loading job groups…</p></div>
+        </div>
+        <label class="job-groups-search"><span>Search</span><div><i data-lucide="search"></i><input id="jgSearch" type="search" placeholder="Title, client, notes or reference" /></div></label>
+        <div id="jgList" class="job-groups-list"><div class="job-groups-empty">Loading job groups…</div></div>
+      </section>
     </div>
   `;
 }
@@ -133,79 +177,130 @@ function renderJobGroupsManager() {
 function wireJobGroupsManager() {
   const listEl = document.getElementById("jgList");
   const searchEl = document.getElementById("jgSearch");
-
   const titleEl = document.getElementById("jgTitle");
   const clientEl = document.getElementById("jgClient");
   const notesEl = document.getElementById("jgNotes");
-
   const createBtn = document.getElementById("createJG");
   const cancelBtn = document.getElementById("cancelEditJG");
+  const addBtn = document.getElementById("addJobGroupBtn");
+  const closeBtn = document.getElementById("closeJobGroupFormBtn");
+  const formWrap = document.getElementById("jobGroupFormWrap");
+  const formTitle = document.getElementById("jobGroupFormTitle");
+  const formKicker = document.getElementById("jobGroupFormKicker");
+  const formSubtitle = document.getElementById("jobGroupFormSubtitle");
+  const formMessage = document.getElementById("jobGroupFormMessage");
+  const pageMessage = document.getElementById("jobGroupPageMessage");
+  const countEl = document.getElementById("jobGroupResultCount");
 
-  if (!listEl || !searchEl || !titleEl || !clientEl || !notesEl || !createBtn || !cancelBtn) return;
+  if (!listEl || !searchEl || !titleEl || !clientEl || !notesEl || !createBtn || !cancelBtn || !addBtn || !closeBtn || !formWrap) return;
 
   editingJobGroupId = null;
-  createBtn.textContent = "Create Job Group";
-  cancelBtn.style.display = "none";
+  let formDirty = false;
 
-  cancelBtn.onclick = () => {
+  function showPageMessage(message, type = "success") {
+    pageMessage.textContent = message;
+    pageMessage.className = `job-groups-message ${type}`;
+    pageMessage.hidden = !message;
+  }
+
+  function showFormMessage(message, type = "error") {
+    formMessage.textContent = message;
+    formMessage.className = `job-groups-form-message ${type}`;
+    formMessage.hidden = !message;
+    if (message) formMessage.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function clearForm() {
     editingJobGroupId = null;
     titleEl.value = "";
     clientEl.value = "";
     notesEl.value = "";
     createBtn.textContent = "Create Job Group";
-    cancelBtn.style.display = "none";
-  };
+    formDirty = false;
+    showFormMessage("");
+  }
+
+  function openAddForm() {
+    clearForm();
+    formKicker.textContent = "New job group";
+    formTitle.textContent = "Add Job Group";
+    formSubtitle.textContent = "Create a clear reusable group for blocks and trips.";
+    formWrap.hidden = false;
+    formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => titleEl.focus(), 250);
+  }
+
+  function closeForm(force = false) {
+    if (!force && formDirty && !confirm("Discard your unsaved job group changes?")) return;
+    formWrap.hidden = true;
+    clearForm();
+  }
+
+  addBtn.onclick = openAddForm;
+  cancelBtn.onclick = () => closeForm();
+  closeBtn.onclick = () => closeForm();
+  [titleEl, clientEl, notesEl].forEach((element) => {
+    element.addEventListener("input", () => { formDirty = true; });
+  });
 
   if (jobGroupsUnsub) jobGroupsUnsub();
   jobGroupsUnsub = listenJobGroups(
     (list) => {
+      if (!document.getElementById("jobGroupsPage")) {
+        jobGroupsUnsub?.();
+        jobGroupsUnsub = null;
+        return;
+      }
       jobGroupsCache = (list || []).filter((x) => !x.deleted);
       renderList();
       updateSelectedLabels();
     },
-    (e) => showError(e?.message || "Failed to load job groups")
+    (error) => showPageMessage(error?.message || "Failed to load job groups.", "error")
   );
 
-  searchEl.oninput = () => renderList();
+  searchEl.oninput = renderList;
 
   createBtn.onclick = async () => {
-    showError("");
-    try {
-      const title = titleEl.value.trim();
-      const client = clientEl.value.trim();
-      const notes = notesEl.value.trim();
+    showFormMessage("");
+    const title = titleEl.value.trim();
+    const client = clientEl.value.trim();
+    const notes = notesEl.value.trim();
+    if (!title) return showFormMessage("Job group title is required.");
 
-      if (!title) return showError("Job Group Title is required.");
+    try {
+      if (!editingJobGroupId) {
+        const duplicate = jobGroupsCache.find((group) =>
+          jgTitle(group).trim().toLowerCase() === title.toLowerCase() &&
+          jgClient(group).trim().toLowerCase() === client.toLowerCase()
+        );
+        if (duplicate) return showFormMessage("A job group with this title and client already exists. Edit the existing group instead.");
+      }
+
+      const wasEditing = Boolean(editingJobGroupId);
+      createBtn.disabled = true;
+      cancelBtn.disabled = true;
+      createBtn.textContent = "Saving…";
 
       if (editingJobGroupId) {
-        await updateJobGroup(editingJobGroupId, {
-          title,
-          clientName: client,
-          notes
-        });
-
-        alert("Job Group updated ✅");
-        editingJobGroupId = null;
-        createBtn.textContent = "Create Job Group";
-        cancelBtn.style.display = "none";
+        await updateJobGroup(editingJobGroupId, { title, clientName: client, notes });
       } else {
         const docRef = await addJobGroup({
-          title,
-          clientName: client,
-          notes,
+          title, clientName: client, notes,
           deleted: false,
           createdBy: auth.currentUser?.email
         });
-
         state.selectedJobGroupId = docRef.id;
-        alert("Job Group created and selected ✅");
       }
 
-      titleEl.value = "";
-      clientEl.value = "";
-      notesEl.value = "";
-    } catch (e) {
-      showError(e?.message || "Failed to save job group");
+      closeForm(true);
+      showPageMessage(wasEditing ? `${title} was updated successfully.` : `${title} was created and selected.`, "success");
+    } catch (error) {
+      console.error("Failed to save job group", error);
+      showFormMessage(error?.message || "Failed to save the job group.");
+    } finally {
+      createBtn.disabled = false;
+      cancelBtn.disabled = false;
+      if (!formWrap.hidden) createBtn.textContent = editingJobGroupId ? "Save Changes" : "Create Job Group";
     }
   };
 
@@ -219,8 +314,10 @@ function wireJobGroupsManager() {
           return t.includes(q);
         });
 
+    countEl.textContent = `${filtered.length} of ${jobGroupsCache.length} job groups`;
+
     if (!filtered.length) {
-      listEl.innerHTML = `<div class="muted" style="padding:10px">No job groups found.</div>`;
+      listEl.innerHTML = `<div class="job-groups-empty">No job groups match this search.</div>`;
       return;
     }
 
@@ -228,40 +325,37 @@ function wireJobGroupsManager() {
       .slice(0, 200)
       .map((jg) => {
         const active = state.selectedJobGroupId === jg.id;
-
-        const createdBy = jg.createdBy ? `Created by: ${escapeHtml(jg.createdBy)}` : "";
         const title = escapeHtml(jgTitle(jg) || "(No title)");
         const client = escapeHtml(jgClient(jg) || "");
         const notes = escapeHtml(jgNotes(jg) || "");
+        const id = escapeHtml(jg.id || "");
 
         return `
-          <div data-jg="${jg.id}" style="
-            padding:10px 12px;
-            border-bottom:1px solid #eee;
-            background:${active ? "#fdecec" : "#fff"};
-          ">
-            <div style="display:flex; justify-content:space-between; gap:10px; align-items:flex-start">
-              <div style="flex:1; cursor:pointer" data-jg-pick="${jg.id}">
-                <div style="font-weight:900">${title}</div>
-                ${client ? `<div class="muted" style="font-size:13px">${client}</div>` : ""}
-                ${notes ? `<div class="muted" style="font-size:13px; margin-top:4px">${notes}</div>` : ""}
-                ${createdBy ? `<div class="muted" style="font-size:12px; margin-top:6px">${createdBy}</div>` : ""}
-                <div class="muted" style="font-size:12px; margin-top:6px">${escapeHtml(jg.id)}</div>
-              </div>
-
-              <div style="display:flex; gap:8px; flex-shrink:0">
-                <button class="btn" data-edit="${jg.id}">Edit</button>
-                <button class="btn danger" data-del="${jg.id}">Delete</button>
+          <article data-jg="${id}" class="job-groups-item ${active ? "selected" : ""}">
+            <div class="job-groups-item-main" data-jg-pick="${id}">
+              <div class="job-groups-item-icon"><i data-lucide="layers-3"></i></div>
+              <div class="job-groups-item-copy">
+                <div class="job-groups-item-title">${title}${active ? `<span>Selected</span>` : ""}</div>
+                ${client ? `<div class="job-groups-item-client">${client}</div>` : `<div class="job-groups-item-client">No client specified</div>`}
+                ${notes ? `<div class="job-groups-item-notes">${notes}</div>` : ""}
+                <div class="job-groups-item-meta">Reference: ${id}${jg.createdBy ? ` · Created by ${escapeHtml(jg.createdBy)}` : ""}</div>
               </div>
             </div>
-          </div>
+            <div class="job-groups-item-actions">
+              <button type="button" class="btn" data-edit="${id}"><i data-lucide="pencil"></i> Edit</button>
+              <button type="button" class="job-groups-delete-btn" data-del="${id}"><i data-lucide="trash-2"></i> Delete</button>
+            </div>
+          </article>
         `;
       })
       .join("");
 
+    window.lucide?.createIcons?.();
+
     [...listEl.querySelectorAll("[data-jg-pick]")].forEach((row) => {
       row.onclick = () => {
         state.selectedJobGroupId = row.getAttribute("data-jg-pick");
+        showPageMessage(`${jgTitle(jobGroupsCache.find((group) => group.id === state.selectedJobGroupId)) || "Job group"} is now selected.`, "success");
         updateSelectedLabels();
         renderList();
       };
@@ -277,9 +371,13 @@ function wireJobGroupsManager() {
         titleEl.value = jgTitle(jg);
         clientEl.value = jgClient(jg);
         notesEl.value = jgNotes(jg);
-
+        formKicker.textContent = "Edit job group";
+        formTitle.textContent = `Edit ${jgTitle(jg) || "Job Group"}`;
+        formSubtitle.textContent = "Update the client details or operational notes.";
         createBtn.textContent = "Save Changes";
-        cancelBtn.style.display = "inline-block";
+        formDirty = false;
+        formWrap.hidden = false;
+        formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
       };
     });
 
@@ -289,17 +387,24 @@ function wireJobGroupsManager() {
         const jg = jobGroupsCache.find((x) => x.id === id);
         const label = jg ? `${jgTitle(jg)}` : id;
 
-        if (!confirm(`Delete Job Group: ${label} ?`)) return;
+        if (!confirm(`Delete job group "${label}"? Existing blocks will keep their stored job group reference.`)) return;
 
         try {
+          btn.disabled = true;
+          btn.textContent = "Deleting…";
           await deleteJobGroup(id);
-
           if (state.selectedJobGroupId === id) {
             state.selectedJobGroupId = null;
             updateSelectedLabels();
           }
-        } catch (e) {
-          showError(e?.message || "Failed to delete job group");
+          if (editingJobGroupId === id) closeForm(true);
+          showPageMessage(`${label} was deleted.`, "success");
+        } catch (error) {
+          console.error("Failed to delete job group", error);
+          showPageMessage(error?.message || "Failed to delete the job group.", "error");
+          btn.disabled = false;
+          btn.innerHTML = `<i data-lucide="trash-2"></i> Delete`;
+          window.lucide?.createIcons?.();
         }
       };
     });
@@ -307,7 +412,7 @@ function wireJobGroupsManager() {
 
   function updateSelectedLabels() {
     const jg = jobGroupsCache.find((x) => x.id === state.selectedJobGroupId) || null;
-    const label = jg ? `${jgTitle(jg)}${jgClient(jg) ? " — " + jgClient(jg) : ""}` : "None";
+    const label = jg ? `${jgTitle(jg)}${jgClient(jg) ? " — " + jgClient(jg) : ""}` : "No job group selected";
 
     const a = document.getElementById("selectedJGLabel");
     if (a) a.textContent = label;
@@ -319,11 +424,9 @@ function wireJobGroupsManager() {
 ========================================================= */
 export function renderAdminBookings() {
   showError("");
-  els.contentArea.innerHTML = `
-    <h2 style="margin-top:0">Job Groups</h2>
-    ${renderJobGroupsManager()}
-  `;
+  els.contentArea.innerHTML = renderJobGroupsManager();
   wireJobGroupsManager();
+  window.lucide?.createIcons?.();
 }
 
 /* =========================================================
@@ -331,27 +434,31 @@ export function renderAdminBookings() {
 ========================================================= */
 function renderJobGroupDropdownOnly() {
   return `
-    <div class="card">
-      <h3 style="margin-top:0">Select Job Group</h3>
-
-      <div class="muted" style="margin-bottom:6px">
-        Selected:
-        <b id="selectedJGLabel">None</b>
+    <section class="card blocks-job-group-card">
+      <div class="blocks-section-heading">
+        <span>1</span>
+        <div><h3>Select Job Group</h3><p>Choose where this block or trip will be saved.</p></div>
       </div>
 
-      <select id="jgSelect" style="width:100%">
-        <option value="">-- Select Job Group --</option>
-      </select>
+      <label class="blocks-field blocks-full">
+        <span>Job group <b>*</b></span>
+        <select id="jgSelect">
+          <option value="">-- Select Job Group --</option>
+        </select>
+      </label>
 
-      <div class="muted" style="margin-top:8px; font-size:12px">
-        Tip: Create/edit job groups in the “Job Groups” page.
+      <div class="blocks-selected-group">
+        <i data-lucide="check-circle-2"></i>
+        <div><span>Selected</span><strong id="selectedJGLabel">None</strong></div>
       </div>
-    </div>
+      <div class="blocks-help">Create or edit reusable groups from the Job Groups page.</div>
+    </section>
   `;
 }
 
 function wireJobGroupDropdownOnly() {
   const sel = document.getElementById("jgSelect");
+  let lastAutoFilledStartLocation = "";
   if (!sel) return;
 
   if (jobGroupsUnsub) jobGroupsUnsub();
@@ -398,29 +505,126 @@ function wireJobGroupDropdownOnly() {
 
     const b = document.getElementById("blockJGLabel");
     if (b) b.textContent = label || "No Job Group selected";
+
+    const multiStartLocationEl = document.getElementById("multiStartLocation");
+    const jobGroupTitle = jg ? jgTitle(jg) : "";
+
+    if (multiStartLocationEl && jobGroupTitle) {
+      const currentValue = multiStartLocationEl.value.trim();
+
+      const shouldAutoFill =
+        !currentValue ||
+        currentValue === lastAutoFilledStartLocation;
+
+      if (shouldAutoFill) {
+        multiStartLocationEl.value = jobGroupTitle;
+        lastAutoFilledStartLocation = jobGroupTitle;
+        multiStartLocationEl.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
   }
 }
 
 function renderMultiLegRowsContainer() {
   return `
-    <div id="loopWrap" style="display:none; margin-top:12px">
-      <div class="muted" style="margin-bottom:6px">Loop / Multi-leg rows</div>
-
-      <div id="loopRows"></div>
-
-      <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap">
-        <button id="addLoopRow" class="btn">+ Add another leg</button>
-        <button id="dupLastRow" class="btn">Duplicate last</button>
-        <button id="clearLoopRows" class="btn danger">Clear rows</button>
+    <div id="loopWrap" class="blocks-route-builder">
+      <div class="blocks-section-heading">
+        <span>3</span>
+        <div><h3>Route Builder</h3><p>Enter each stop in travel order. Each row's departure connects to the next row's arrival.</p></div>
       </div>
 
-      <div class="muted" style="margin-top:8px">
-        Each row will be saved as a separate leg (better for rostering later).
+      <div class="blocks-trip-section">
+        <div class="blocks-trip-title"><i data-lucide="route"></i><span>Forward Trip</span></div>
+
+        <div class="blocks-route-table-wrap">
+          <table class="blocks-route-table">
+            <thead>
+              <tr>
+                <th>Stop Name</th>
+                <th>Arrive time</th>
+                <th>Depart time</th>
+              </tr>
+            </thead>
+
+            <tbody id="multiStopRows">
+              <tr data-multi-start-row>
+                <td>
+                  <input id="multiStartLocation" placeholder="Start location" />
+                </td>
+                <td>
+                  <input type="time" disabled title="The trip starts at this location" />
+                </td>
+                <td>
+                  <input id="multiStartTime" type="time" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="blocks-route-actions">
+          <button id="addMultiStopBtn" type="button" class="blocks-add-stop-btn"><i data-lucide="plus"></i> Add Stop</button>
+          <button id="clearMultiStopsBtn" type="button" class="blocks-clear-btn"><i data-lucide="eraser"></i> Clear Stops</button>
+        </div>
+      </div>
+
+      <div class="blocks-return-section">
+        <label class="blocks-field blocks-full"><span>Return option</span>
+          <select id="multiReturnOption">
+            <option value="NONE">No return</option>
+            <option value="SAME_ROUTE">Return same route</option>
+          </select>
+        </label>
+
+        <div id="multiReturnWrap" class="blocks-return-wrap" style="display:none;">
+          <div class="blocks-help">
+            Return stops are shown in reverse order. Edit the Arrive and Depart times as needed before saving.
+          </div>
+          <div class="blocks-trip-title"><i data-lucide="undo-2"></i><span>Return Trip</span></div>
+          <button id="autoFillReturnTimesBtn" type="button" class="blocks-autofill-btn"><i data-lucide="wand-sparkles"></i> Auto-fill Return Times</button>
+
+          <div class="blocks-route-table-wrap">
+            <table class="blocks-route-table">
+              <thead>
+                <tr>
+                  <th>Stop Name</th>
+                  <th>Arrive time</th>
+                  <th>Depart time</th>
+                </tr>
+              </thead>
+
+              <tbody id="multiReturnStopRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="blocks-preview-section">
+        <div class="blocks-trip-title"><i data-lucide="eye"></i><span>Block Preview</span></div>
+        <div id="multiLegPreview" class="muted">Add start location, stops, and times to preview the blocks.</div>
       </div>
     </div>
   `;
 }
 
+function multiStopRowTemplate(idx) {
+  return `
+    <tr data-multi-stop-row="${idx}">
+      <td>
+        <div class="blocks-stop-name-wrap">
+          <input class="multiStopName" placeholder="Stop name / venue" />
+          <button type="button" class="blocks-remove-btn" data-remove-multi-stop="${idx}">Remove</button>
+        </div>
+      </td>
+      <td>
+        <input class="multiStopArrival" type="time" />
+      </td>
+      <td>
+        <input class="multiStopDeparture" type="time" />
+      </td>
+    </tr>
+  `;
+}           
 function loopRowTemplate(idx) {
   return `
     <div class="card" style="margin-top:10px; padding:12px" data-loop-row="${idx}">
@@ -455,333 +659,936 @@ function loopRowTemplate(idx) {
 }
 
 function wireBlockEntryAdvanced() {
-  const patternEl = document.getElementById("tripPattern");
-  const returnWrap = document.getElementById("returnWrap");
-  const loopWrap = document.getElementById("loopWrap");
-  const loopRowsEl = document.getElementById("loopRows");
+  const addStopBtn = document.getElementById("addMultiStopBtn");
+  const clearStopsBtn = document.getElementById("clearMultiStopsBtn");
+  const stopRowsEl = document.getElementById("multiStopRows");
+  const returnOptionEl = document.getElementById("multiReturnOption");
+  const multiReturnWrap = document.getElementById("multiReturnWrap");
+  const returnRowsEl = document.getElementById("multiReturnStopRows");
+  const autoFillReturnTimesBtn = document.getElementById("autoFillReturnTimesBtn");
 
-  const addRowBtn = document.getElementById("addLoopRow");
-  const dupBtn = document.getElementById("dupLastRow");
-  const clearBtn = document.getElementById("clearLoopRows");
+  if (!stopRowsEl || !returnRowsEl) return;
 
-  if (!patternEl || !returnWrap || !loopWrap || !loopRowsEl) return;
+  function reindexStopRows() {
+    const rows = [...stopRowsEl.querySelectorAll("[data-multi-stop-row]")];
 
-  function ensureAtLeastOneRow() {
-    if (loopRowsEl.children.length === 0) {
-      loopRowsEl.insertAdjacentHTML("beforeend", loopRowTemplate(0));
-      wireRemoveButtons();
-    }
-  }
-
-  function reindexRows() {
-    const rows = [...loopRowsEl.querySelectorAll("[data-loop-row]")];
     rows.forEach((row, i) => {
-      row.setAttribute("data-loop-row", String(i));
-      const title = row.querySelector("div[style*='font-weight:900']");
-      if (title) title.textContent = `Leg ${i + 1}`;
-      const rm = row.querySelector("[data-remove-row]");
-      if (rm) rm.setAttribute("data-remove-row", String(i));
+      row.setAttribute("data-multi-stop-row", String(i));
+
+      const removeBtn = row.querySelector("[data-remove-multi-stop]");
+      if (removeBtn) {
+        removeBtn.setAttribute("data-remove-multi-stop", String(i));
+      }
     });
   }
 
-  function wireRemoveButtons() {
-    [...loopRowsEl.querySelectorAll("[data-remove-row]")].forEach((btn) => {
+  function syncReturnStopRows() {
+    const oldTimes = [...returnRowsEl.querySelectorAll("[data-multi-return-row]")].map(
+      (row) => ({
+        arrivalTime: row.querySelector(".multiReturnArrival")?.value || "",
+        departureTime: row.querySelector(".multiReturnDeparture")?.value || ""
+      })
+    );
+
+    const forwardNames = [
+      (document.getElementById("multiStartLocation")?.value || "").trim(),
+      ...[...stopRowsEl.querySelectorAll("[data-multi-stop-row]")].map(
+        (row) => (row.querySelector(".multiStopName")?.value || "").trim()
+      )
+    ];
+
+    const returnNames = forwardNames.reverse();
+
+    returnRowsEl.innerHTML = returnNames
+      .map((name, index) => {
+        const isFirst = index === 0;
+        const isLast = index === returnNames.length - 1;
+        const oldTime = oldTimes[index] || {};
+
+        return `
+          <tr data-multi-return-row="${index}" style="border-top:1px solid #e5e7eb;">
+            <td style="padding:8px;">
+              <div style="display:flex; gap:8px; align-items:center;">
+                <input
+                  class="multiReturnName"
+                  value="${escapeHtml(name)}"
+                  readonly
+                />
+
+                <button
+                  type="button"
+                  class="btn danger"
+                  data-remove-multi-return="${index}"
+                >
+                  Remove
+                </button>
+              </div>
+            </td>
+
+            <td style="padding:8px;">
+              <input
+                class="multiReturnArrival"
+                ${isLast ? 'id="multiReturnFinishTime"' : ""}
+                type="time"
+                value="${escapeHtml(oldTime.arrivalTime || "")}"
+                ${isFirst ? "disabled" : ""}
+              />
+            </td>
+
+            <td style="padding:8px;">
+              <input
+                class="multiReturnDeparture"
+                ${isFirst ? 'id="multiReturnStartTime"' : ""}
+                type="time"
+                value="${escapeHtml(oldTime.departureTime || "")}"
+                ${isLast ? "disabled" : ""}
+              />
+            </td>
+          </tr>
+        `;
+      })
+      .join("");
+
+    [...returnRowsEl.querySelectorAll("[data-remove-multi-return]")].forEach(
+      (btn) => {
+        btn.onclick = () => {
+          const removedName = (btn.closest("[data-multi-return-row]")?.querySelector(".multiReturnName")?.value || "Return stop").trim();
+          const row = btn.closest("[data-multi-return-row]");
+          if (row) row.remove();
+
+          [
+            ...returnRowsEl.querySelectorAll("[data-multi-return-row]")
+          ].forEach((returnRow, i) => {
+            returnRow.setAttribute("data-multi-return-row", String(i));
+
+            const removeBtn = returnRow.querySelector(
+              "[data-remove-multi-return]"
+            );
+
+            if (removeBtn) {
+              removeBtn.setAttribute("data-remove-multi-return", String(i));
+            }
+          });
+
+          wireReturnTimeEvents();
+          renderMultiLegPreview();
+          showBlockActionMessage(`${removedName || "Return stop"} was removed from the return trip.`, "warning");
+        };
+      }
+    );
+
+    wireReturnTimeEvents();
+  }
+
+  function autoFillReturnTimesFromFirstDepart() {
+    const returnRows = [
+      ...returnRowsEl.querySelectorAll("[data-multi-return-row]")
+    ];
+
+    const forwardRows = [
+      {
+        departureMin: minFromTimeStr(
+          document.getElementById("multiStartTime")?.value || ""
+        )
+      },
+      ...[...stopRowsEl.querySelectorAll("[data-multi-stop-row]")].map(
+        (row) => ({
+          arrivalMin: minFromTimeStr(
+            row.querySelector(".multiStopArrival")?.value || ""
+          ),
+          departureMin: minFromTimeStr(
+            row.querySelector(".multiStopDeparture")?.value || ""
+          )
+        })
+      )
+    ];
+
+    if (returnRows.length < 2) {
+      showError("Return trip must have at least 2 stops.");
+      showBlockActionMessage("Return trip must have at least 2 stops before times can be auto-filled.", "error");
+      return;
+    }
+
+    if (forwardRows.length !== returnRows.length) {
+      showError("Forward and return stop count must match before auto-fill.");
+      showBlockActionMessage("Forward and return stop counts must match before auto-fill.", "error");
+      return;
+    }
+
+    const firstDepartEl = returnRows[0].querySelector(
+      ".multiReturnDeparture"
+    );
+
+    let currentMin = minFromTimeStr(firstDepartEl?.value || "");
+
+    if (currentMin == null) {
+      showError("Enter the first Return Depart time first.");
+      showBlockActionMessage("Enter the first return departure time, then try Auto-fill again.", "error");
+      return;
+    }
+
+    const forwardLegMinutes = [];
+
+    for (let i = 0; i < forwardRows.length - 1; i++) {
+      const departMin = forwardRows[i].departureMin;
+      const arriveMin = forwardRows[i + 1].arrivalMin;
+
+      if (
+        departMin == null ||
+        arriveMin == null ||
+        arriveMin <= departMin
+      ) {
+        showError(
+          "Fill all Forward Arrive/Depart times before auto-fill."
+        );
+        showBlockActionMessage("Complete all forward arrival and departure times before using Auto-fill.", "error");
+        return;
+      }
+
+      forwardLegMinutes.push(arriveMin - departMin);
+    }
+
+    const forwardWaitMinutes = [];
+
+    for (let i = 1; i < forwardRows.length - 1; i++) {
+      const arriveMin = forwardRows[i].arrivalMin;
+      const departMin = forwardRows[i].departureMin;
+
+      if (
+        arriveMin == null ||
+        departMin == null ||
+        departMin < arriveMin
+      ) {
+        showError(
+          "Fill all Forward stop waiting times before auto-fill."
+        );
+        showBlockActionMessage("Complete all forward stop waiting times before using Auto-fill.", "error");
+        return;
+      }
+
+      forwardWaitMinutes.push(departMin - arriveMin);
+    }
+
+    const reverseLegMinutes = forwardLegMinutes.slice().reverse();
+    const reverseWaitMinutes = forwardWaitMinutes.slice().reverse();
+
+    for (let i = 0; i < returnRows.length - 1; i++) {
+      const row = returnRows[i];
+      const nextRow = returnRows[i + 1];
+
+      const departEl = row.querySelector(".multiReturnDeparture");
+
+      if (departEl && !departEl.disabled) {
+        departEl.value = timeStrFromMin(currentMin);
+      }
+
+      const nextArrivalMin = currentMin + reverseLegMinutes[i];
+      const nextArrivalEl = nextRow.querySelector(".multiReturnArrival");
+
+      if (nextArrivalEl && !nextArrivalEl.disabled) {
+        nextArrivalEl.value = timeStrFromMin(nextArrivalMin);
+      }
+
+      const nextDepartEl = nextRow.querySelector(".multiReturnDeparture");
+
+      if (nextDepartEl && !nextDepartEl.disabled) {
+        const waitMin = reverseWaitMinutes[i] || 0;
+        const nextDepartMin = nextArrivalMin + waitMin;
+
+        nextDepartEl.value = timeStrFromMin(nextDepartMin);
+        currentMin = nextDepartMin;
+      } else {
+        currentMin = nextArrivalMin;
+      }
+    }
+
+    renderMultiLegPreview();
+    showError("");
+    showBlockActionMessage("Return times were auto-filled successfully. Review them before saving.", "success");
+  }
+
+  function wireReturnTimeEvents() {
+    [
+      ...returnRowsEl.querySelectorAll("input[type='time']")
+    ].forEach((input) => {
+      const handler = () => {
+        renderMultiLegPreview();
+      };
+
+      input.oninput = handler;
+      input.onchange = handler;
+      input.onblur = handler;
+    });
+  }
+
+  function wireStopRowEvents() {
+    [
+      ...stopRowsEl.querySelectorAll("[data-remove-multi-stop]")
+    ].forEach((btn) => {
       btn.onclick = () => {
-        const i = Number(btn.getAttribute("data-remove-row"));
-        const row = loopRowsEl.querySelector(`[data-loop-row="${i}"]`);
+        const idx = Number(
+          btn.getAttribute("data-remove-multi-stop")
+        );
+
+        const row = stopRowsEl.querySelector(
+          `[data-multi-stop-row="${idx}"]`
+        );
+
+        const removedName = (row?.querySelector(".multiStopName")?.value || `Stop ${idx + 1}`).trim();
         if (row) row.remove();
-        reindexRows();
-        if (loopRowsEl.children.length === 0) ensureAtLeastOneRow();
+
+        reindexStopRows();
+        ensureAtLeastOneStop();
+        syncReturnStopRows();
+        renderMultiLegPreview();
+        showBlockActionMessage(`${removedName || `Stop ${idx + 1}`} was removed from the forward trip.`, "warning");
       };
     });
+
+    [
+      ...stopRowsEl.querySelectorAll(
+        ".multiStopName, .multiStopArrival, .multiStopDeparture"
+      )
+    ].forEach((input) => {
+      const handler = () => {
+        if (input.classList.contains("multiStopName")) {
+          syncReturnStopRows();
+        }
+
+        renderMultiLegPreview();
+      };
+
+      input.oninput = handler;
+      input.onchange = handler;
+    });
   }
 
-  function addRow(prefill = null) {
-    const idx = loopRowsEl.children.length;
-    loopRowsEl.insertAdjacentHTML("beforeend", loopRowTemplate(idx));
-    const row = loopRowsEl.querySelector(`[data-loop-row="${idx}"]`);
-    if (prefill && row) {
-      row.querySelector(".lrFrom").value = prefill.from || "";
-      row.querySelector(".lrTo").value = prefill.to || "";
-      row.querySelector(".lrStart").value = prefill.start || "";
-      row.querySelector(".lrEnd").value = prefill.end || "";
-      row.querySelector(".lrType").value = prefill.type || "Loop";
+  function addStopRow() {
+    const idx = stopRowsEl.querySelectorAll(
+      "[data-multi-stop-row]"
+    ).length;
+
+    stopRowsEl.insertAdjacentHTML(
+      "beforeend",
+      multiStopRowTemplate(idx)
+    );
+
+    wireStopRowEvents();
+    syncReturnStopRows();
+    renderMultiLegPreview();
+  }
+
+  function ensureAtLeastOneStop() {
+    if (!stopRowsEl.querySelector("[data-multi-stop-row]")) {
+      addStopRow();
     }
-    wireRemoveButtons();
   }
 
-  patternEl.onchange = () => {
-    const v = patternEl.value;
-    returnWrap.style.display = v === "FR" ? "block" : "none";
-    loopWrap.style.display = v === "LOOP" ? "block" : "none";
-    if (v === "LOOP") ensureAtLeastOneRow();
-  };
+  function getMultiStopDataForPreview() {
+    const startLocation = (
+      document.getElementById("multiStartLocation")?.value || ""
+    ).trim();
 
-  if (addRowBtn) addRowBtn.onclick = () => addRow();
-  if (dupBtn)
-    dupBtn.onclick = () => {
-      const last = loopRowsEl.querySelector("[data-loop-row]:last-child");
-      if (!last) return addRow();
-      addRow({
-        from: last.querySelector(".lrFrom").value,
-        to: last.querySelector(".lrTo").value,
-        start: last.querySelector(".lrStart").value,
-        end: last.querySelector(".lrEnd").value,
-        type: last.querySelector(".lrType").value
+    const startTime =
+      document.getElementById("multiStartTime")?.value || "";
+
+    const stops = [
+      ...stopRowsEl.querySelectorAll("[data-multi-stop-row]")
+    ].map((row) => ({
+      name: (
+        row.querySelector(".multiStopName")?.value || ""
+      ).trim(),
+      arrivalTime:
+        row.querySelector(".multiStopArrival")?.value || "",
+      departureTime:
+        row.querySelector(".multiStopDeparture")?.value || "",
+      note: ""
+    }));
+
+    const returnOption =
+      document.getElementById("multiReturnOption")?.value || "NONE";
+
+    const returnStops = [
+      ...returnRowsEl.querySelectorAll("[data-multi-return-row]")
+    ].map((row) => ({
+      name: (
+        row.querySelector(".multiReturnName")?.value || ""
+      ).trim(),
+      arrivalTime:
+        row.querySelector(".multiReturnArrival")?.value || "",
+      departureTime:
+        row.querySelector(".multiReturnDeparture")?.value || ""
+    }));
+
+    return {
+      startLocation,
+      startTime,
+      stops,
+      returnOption,
+      returnStops
+    };
+  }
+
+  function buildBlockSummaries(data) {
+    const summaries = [];
+    const validStops = data.stops.filter((stop) => stop.name);
+
+    if (!data.startLocation || !validStops.length) {
+      return summaries;
+    }
+
+    const lastStop = validStops[validStops.length - 1];
+
+    summaries.push({
+      title: "Forward block",
+      from: data.startLocation,
+      to: lastStop.name,
+      startTime: data.startTime,
+      endTime: lastStop.arrivalTime
+    });
+
+    if (
+      data.returnOption === "SAME_ROUTE" &&
+      data.returnStops.length > 1
+    ) {
+      const firstReturnStop = data.returnStops[0];
+      const lastReturnStop =
+        data.returnStops[data.returnStops.length - 1];
+
+      summaries.push({
+        title: "Return block",
+        from: firstReturnStop.name,
+        to: lastReturnStop.name,
+        startTime: firstReturnStop.departureTime,
+        endTime: lastReturnStop.arrivalTime
       });
+    }
+
+    return summaries;
+  }
+
+  function renderMultiLegPreview() {
+    const previewEl = document.getElementById("multiLegPreview");
+    if (!previewEl) return;
+
+    const data = getMultiStopDataForPreview();
+    const summaries = buildBlockSummaries(data);
+
+    if (!summaries.length) {
+      previewEl.innerHTML =
+        "Add start location, stops, and times to preview the blocks.";
+      return;
+    }
+
+    previewEl.innerHTML = `
+      <div style="display:grid; gap:6px;">
+        ${summaries
+          .map(
+            (summary) => `
+              <div style="
+                padding:8px;
+                border:1px solid #e5e7eb;
+                border-radius:8px;
+                background:#fff;
+                color:#111;
+              ">
+                <div style="font-weight:800;">
+                  ${escapeHtml(summary.title)}
+                </div>
+
+                <div class="muted" style="font-size:12px; margin-top:3px;">
+                  ${escapeHtml(summary.from)} →
+                  ${escapeHtml(summary.to)}
+                  · ${escapeHtml(summary.startTime || "--:--")} -
+                  ${escapeHtml(summary.endTime || "--:--")}
+                </div>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
+  if (addStopBtn) {
+    addStopBtn.onclick = (event) => {
+      addStopRow();
+      if (event?.isTrusted) {
+        const stopCount = stopRowsEl.querySelectorAll("[data-multi-stop-row]").length;
+        showBlockActionMessage(`Stop ${stopCount} was added. Enter its location and times.`, "success");
+      }
     };
-  if (clearBtn)
-    clearBtn.onclick = () => {
-      loopRowsEl.innerHTML = "";
-      ensureAtLeastOneRow();
+  }
+
+  if (clearStopsBtn) {
+    clearStopsBtn.onclick = () => {
+      [
+        ...stopRowsEl.querySelectorAll("[data-multi-stop-row]")
+      ].forEach((row) => row.remove());
+
+      ensureAtLeastOneStop();
+      syncReturnStopRows();
+      renderMultiLegPreview();
+      showBlockActionMessage("Forward stops were cleared. One blank stop is ready for entry.", "warning");
+    };
+  }
+
+  if (returnOptionEl && multiReturnWrap) {
+    returnOptionEl.onchange = () => {
+      const hasReturn = returnOptionEl.value === "SAME_ROUTE";
+
+      multiReturnWrap.style.display = hasReturn ? "block" : "none";
+
+      if (hasReturn) {
+        syncReturnStopRows();
+        showBlockActionMessage("Return trip enabled. Stops were copied in reverse order.", "success");
+      } else {
+        returnRowsEl.innerHTML = "";
+        showBlockActionMessage("Return trip removed. Only the forward block will be saved.", "info");
+      }
+
+      renderMultiLegPreview();
+    };
+  }
+
+  ["multiStartLocation", "multiStartTime"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    const handler = () => {
+      if (id === "multiStartLocation") {
+        syncReturnStopRows();
+      }
+
+      renderMultiLegPreview();
     };
 
-  returnWrap.style.display = "none";
-  loopWrap.style.display = "none";
+    el.oninput = handler;
+    el.onchange = handler;
+  });
+
+  if (autoFillReturnTimesBtn) {
+    autoFillReturnTimesBtn.onclick = () => {
+      autoFillReturnTimesFromFirstDepart();
+    };
+  }
+
+  ensureAtLeastOneStop();
+  wireStopRowEvents();
+  syncReturnStopRows();
+  renderMultiLegPreview();
 }
 
 export function renderAdminBlocks() {
   showError("");
+
   els.contentArea.innerHTML = `
-    <h2 style="margin-top:0">Blocks</h2>
-
-    ${renderJobGroupDropdownOnly()}
-
-    <div class="card" style="margin-top:18px">
-      <h3 style="margin-top:0">Add Block / Trip</h3>
-
-      <div class="muted" style="margin-bottom:8px">
-        Saving under: <b id="blockJGLabel">No Job Group selected</b>
-      </div>
-
-      <input id="blockDate" type="date" />
-
-      <div class="muted" style="margin:10px 0 4px">Trip Pattern</div>
-      <select id="tripPattern">
-        <option value="ONE">One Way (1 leg)</option>
-        <option value="FR">Forward + Return (2 legs)</option>
-        <option value="LOOP">Loop / Multi-leg (many legs)</option>
-      </select>
-
-      <div id="oneWayWrap" style="margin-top:12px">
-        <div class="muted" style="margin-bottom:6px">Forward / One Way</div>
-
-        <input id="blockFrom" placeholder="From" />
-        <input id="blockTo" placeholder="To" />
-
-        <div style="display:flex; gap:10px">
-          <div style="flex:1">
-            <div class="muted" style="margin:6px 0 4px">Start Time</div>
-            <input id="blockStart" type="time" />
-          </div>
-          <div style="flex:1">
-            <div class="muted" style="margin:6px 0 4px">End Time</div>
-            <input id="blockEnd" type="time" />
+    <div id="blocksEntryPage" class="blocks-entry-page">
+      <header class="blocks-hero">
+        <div class="blocks-hero-title">
+          <span><i data-lucide="blocks"></i></span>
+          <div>
+            <div class="blocks-eyebrow">Trip planning</div>
+            <h2>Blocks</h2>
+            <p>Create one-way, multi-stop and return work from one unified form.</p>
           </div>
         </div>
+      </header>
 
-        <div class="muted" style="margin:10px 0 4px">Block Type</div>
-        <select id="blockType">
-          <option value="Forward">Forward</option>
-          <option value="Return">Return</option>
-          <option value="Loop">Loop</option>
-          <option value="Extra">Extra</option>
-        </select>
+      <div id="blockActionMessage" class="blocks-action-message info" role="status" aria-live="polite" hidden></div>
 
-        <div id="returnWrap" style="display:none; margin-top:12px; padding-top:10px; border-top:1px solid #eee">
-          <div class="muted" style="margin-bottom:6px">Return (times only — From/To will be auto swapped)</div>
+      ${renderJobGroupDropdownOnly()}
 
-          <div style="display:flex; gap:10px">
-            <div style="flex:1">
-              <div class="muted" style="margin:6px 0 4px">Return Start Time</div>
-              <input id="returnStart" type="time" />
-            </div>
-            <div style="flex:1">
-              <div class="muted" style="margin:6px 0 4px">Return End Time</div>
-              <input id="returnEnd" type="time" />
-            </div>
+      <section class="card blocks-form-card">
+        <div class="blocks-form-heading">
+          <div>
+            <div class="blocks-form-kicker">New operational work</div>
+            <h3>Add Block / Trip</h3>
+            <p>Set the service details, build the route and review it before saving.</p>
+          </div>
+          <div class="blocks-saving-under"><span>Saving under</span><strong id="blockJGLabel">No Job Group selected</strong></div>
+        </div>
+
+        <div class="blocks-service-section">
+          <div class="blocks-section-heading">
+            <span>2</span>
+            <div><h3>Service Details</h3><p>Choose the operating date and number of identical vehicles required.</p></div>
+          </div>
+          <div class="blocks-service-grid">
+            <label class="blocks-field"><span>Service date <b>*</b></span><input id="blockDate" type="date" /></label>
+            <label class="blocks-field"><span>How many buses? <b>*</b></span><input id="busCount" type="number" min="1" value="1" /><small>Creates multiple identical blocks.</small></label>
           </div>
         </div>
 
         ${renderMultiLegRowsContainer()}
 
-        <textarea id="blockNotes" placeholder="Notes (bus 1/bus 2, pax, changes, school time change etc.)"></textarea>
-
-        <button id="createBlock">Save</button>
-
-        <div class="muted" style="margin-top:8px">
-          Tip: For 2 buses, create another leg (or duplicate) and put “Bus 1 / Bus 2” in Notes.
+        <div class="blocks-notes-section">
+          <div class="blocks-section-heading">
+            <span>4</span>
+            <div><h3>Final Details</h3><p>Add any information the dispatcher or driver needs to know.</p></div>
+          </div>
+          <label class="blocks-field blocks-full"><span>Notes</span>
+            <textarea id="blockNotes" placeholder="Bus number, passengers, changes, school time changes or special instructions"></textarea>
+          </label>
         </div>
-      </div>
+
+        <div class="blocks-save-area">
+          <button id="createBlock" class="blocks-save-btn"><i data-lucide="save"></i> Save Block / Trip</button>
+          <div class="blocks-save-tip">For multiple buses, use “How many buses?” above.</div>
+        </div>
+
+        <div id="blockSaveSuccess" class="form-success blocks-success" style="display:none"></div>
+      </section>
     </div>
   `;
 
   wireJobGroupDropdownOnly();
   wireBlockEntryAdvanced();
   wireCreateBlockAdvanced();
+  window.lucide?.createIcons?.();
 }
 
 function wireCreateBlockAdvanced() {
   const btn = document.getElementById("createBlock");
   if (!btn) return;
 
+  function showSaveSuccess(message) {
+    const successEl = document.getElementById("blockSaveSuccess");
+    if (!successEl) return;
+    successEl.textContent = message;
+    successEl.style.display = "block";
+  }
+
+  function hideSaveSuccess() {
+    const successEl = document.getElementById("blockSaveSuccess");
+    if (!successEl) return;
+    successEl.textContent = "";
+    successEl.style.display = "none";
+  }
+
+  function clearInputValue(id) {
+    const input = document.getElementById(id);
+    if (input) input.value = "";
+  }
+
   btn.onclick = async () => {
     showError("");
+    hideSaveSuccess();
+
     try {
       if (!state.selectedJobGroupId) return showError("Please select a Job Group first.");
 
-      const serviceDate = document.getElementById("blockDate").value;
-      if (!serviceDate) return showError("Please select a date.");
+      const busCount = Number(document.getElementById("busCount")?.value || 1);
 
-      const pattern = document.getElementById("tripPattern").value;
-      const notes = document.getElementById("blockNotes").value.trim();
-      const createdBy = auth.currentUser?.email;
-
-      const from = (document.getElementById("blockFrom").value || "").trim();
-      const to = (document.getElementById("blockTo").value || "").trim();
-      const start = document.getElementById("blockStart").value;
-      const end = document.getElementById("blockEnd").value;
-      const baseType = document.getElementById("blockType").value;
-
-      function validateLegBasics(_from, _to, _start, _end) {
-        if (!_from) return "Please enter From.";
-        if (!_to) return "Please enter To.";
-        if (!_start || !_end) return "Please enter Start Time and End Time.";
-        const s = minFromTimeStr(_start);
-        const e = minFromTimeStr(_end);
-        if (s == null || e == null) return "Invalid times.";
-        if (e <= s) return "End time must be after start time.";
-        return null;
+      if (!Number.isInteger(busCount) || busCount < 1) {
+        return showError("How many buses must be at least 1.");
       }
 
-      // LOOP
-      if (pattern === "LOOP") {
-        const loopRowsEl = document.getElementById("loopRows");
-        const rows = [...(loopRowsEl?.querySelectorAll("[data-loop-row]") || [])];
-        if (!rows.length) return showError("Please add at least 1 loop leg.");
+      const serviceDate =
+        document.getElementById("blockDate")?.value || "";
 
-        const loopId = uid();
-        const legs = [];
+      if (!serviceDate) {
+        return showError("Please select a date.");
+      }
 
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i];
-          const rFrom = (r.querySelector(".lrFrom")?.value || "").trim();
-          const rTo = (r.querySelector(".lrTo")?.value || "").trim();
-          const rStart = r.querySelector(".lrStart")?.value || "";
-          const rEnd = r.querySelector(".lrEnd")?.value || "";
-          const rType = r.querySelector(".lrType")?.value || "Loop";
+      const notes =
+        document.getElementById("blockNotes")?.value.trim() || "";
 
-          const err = validateLegBasics(rFrom, rTo, rStart, rEnd);
-          if (err) return showError(`Leg ${i + 1}: ${err}`);
+      const createdBy = auth.currentUser?.email || "";
 
-          legs.push({
-            jobGroupId: state.selectedJobGroupId,
-            serviceDate,
-            from: rFrom,
-            to: rTo,
-            startMin: minFromTimeStr(rStart),
-            endMin: minFromTimeStr(rEnd),
-            blockType: rType,
-            notes,
-            createdBy,
-            tripPattern: "LOOP",
-            loopId,
-            legIndex: i + 1
+      // ONE FORM HANDLES ONE-WAY, RETURN, AND MULTI-STOP TRIPS
+        const startLocation = (document.getElementById("multiStartLocation")?.value || "").trim();
+        const startTime = document.getElementById("multiStartTime")?.value || "";
+        const returnOption = document.getElementById("multiReturnOption")?.value || "NONE";
+
+        if (!startLocation) return showError("Please enter Start Location.");
+        if (!startTime) return showError("Please enter Start Time.");
+
+        const startMin = minFromTimeStr(startTime);
+        if (startMin == null) return showError("Invalid Start Time.");
+
+        const stopRows = [...(document.querySelectorAll("[data-multi-stop-row]") || [])];
+
+        if (!stopRows.length) return showError("Please add at least one stop.");
+
+        const routeStops = [];
+
+        for (let i = 0; i < stopRows.length; i++) {
+          const row = stopRows[i];
+
+          const stopName = (row.querySelector(".multiStopName")?.value || "").trim();
+          const arrivalTime = row.querySelector(".multiStopArrival")?.value || "";
+          const departureTime = row.querySelector(".multiStopDeparture")?.value || "";
+
+          if (!stopName) return showError(`Stop ${i + 1}: Please enter Stop Name.`);
+          if (!arrivalTime) return showError(`Stop ${i + 1}: Please enter Arrival Time.`);
+          if (!departureTime) return showError(`Stop ${i + 1}: Please enter Departure Time.`);
+
+          const arrivalMin = minFromTimeStr(arrivalTime);
+          const departureMin = minFromTimeStr(departureTime);
+
+          if (arrivalMin == null || departureMin == null) {
+            return showError(`Stop ${i + 1}: Invalid arrival or departure time.`);
+          }
+
+          if (departureMin < arrivalMin) {
+            return showError(`Stop ${i + 1}: Departure cannot be before arrival.`);
+          }
+
+          routeStops.push({
+            stopNo: i + 1,
+            name: stopName,
+            arrivalTime,
+            departureTime,
+            arrivalMin,
+            departureMin,
+            note: ""
           });
         }
 
-        for (const leg of legs) await addBlock(leg);
+        const lastStop = routeStops[routeStops.length - 1];
 
-        alert(`Saved ${legs.length} legs ✅`);
-        document.getElementById("blockNotes").value = "";
-        return;
-      }
+        const forwardLegs = [];
 
-      // ONE
-      if (pattern === "ONE") {
-        const err = validateLegBasics(from, to, start, end);
-        if (err) return showError(err);
-
-        await addBlock({
-          jobGroupId: state.selectedJobGroupId,
-          serviceDate,
-          from,
-          to,
-          startMin: minFromTimeStr(start),
-          endMin: minFromTimeStr(end),
-          blockType: baseType,
-          notes,
-          createdBy,
-          tripPattern: "ONE"
+        forwardLegs.push({
+          legNo: 1,
+          legType: "Forward",
+          from: startLocation,
+          to: routeStops[0].name,
+          startTime,
+          endTime: routeStops[0].arrivalTime,
+          startMin,
+          endMin: routeStops[0].arrivalMin
         });
 
-        alert("Block saved ✅");
-        document.getElementById("blockFrom").value = "";
-        document.getElementById("blockTo").value = "";
-        document.getElementById("blockStart").value = "";
-        document.getElementById("blockEnd").value = "";
-        document.getElementById("blockNotes").value = "";
+        for (let i = 1; i < routeStops.length; i++) {
+          forwardLegs.push({
+            legNo: forwardLegs.length + 1,
+            legType: "Forward",
+            from: routeStops[i - 1].name,
+            to: routeStops[i].name,
+            startTime: routeStops[i - 1].departureTime,
+            endTime: routeStops[i].arrivalTime,
+            startMin: routeStops[i - 1].departureMin,
+            endMin: routeStops[i].arrivalMin
+          });
+        }
+
+        for (const leg of forwardLegs) {
+          if (leg.endMin <= leg.startMin) {
+            return showError(`Forward leg ${leg.legNo}: Arrive time must be after Depart time.`);
+          }
+        }
+
+        let returnStartMin = null;
+        let returnFinishMin = null;
+        let returnLegs = [];
+
+        if (returnOption === "SAME_ROUTE") {
+          const returnRows = [...(document.querySelectorAll("[data-multi-return-row]") || [])].map((row) => {
+            const arrivalTime = row.querySelector(".multiReturnArrival")?.value || "";
+            const departureTime = row.querySelector(".multiReturnDeparture")?.value || "";
+
+            return {
+              name: (row.querySelector(".multiReturnName")?.value || "").trim(),
+              arrivalTime,
+              departureTime,
+              arrivalMin: arrivalTime ? minFromTimeStr(arrivalTime) : null,
+              departureMin: departureTime ? minFromTimeStr(departureTime) : null
+            };
+          });
+
+              if (returnRows.length < 2) {
+                return showError("Return trip must have at least 2 stops.");
+              }
+
+          for (let r = 0; r < returnRows.length; r++) {
+            const row = returnRows[r];
+            const isFirst = r === 0;
+            const isLast = r === returnRows.length - 1;
+
+            if (!row.name) return showError(`Return stop ${r + 1}: Stop name is missing.`);
+
+            if (isFirst && row.departureMin == null) {
+              return showError("Return first stop: Please enter Depart time.");
+            }
+
+            if (isLast && row.arrivalMin == null) {
+              return showError("Return final stop: Please enter Arrive time.");
+            }
+
+            if (!isFirst && row.arrivalMin == null) {
+              return showError(`Return stop ${r + 1}: Please enter Arrive time.`);
+            }
+
+            if (!isLast && row.departureMin == null) {
+              return showError(`Return stop ${r + 1}: Please enter Depart time.`);
+            }
+
+            if (
+              row.arrivalMin != null &&
+              row.departureMin != null &&
+              row.departureMin < row.arrivalMin
+            ) {
+              return showError(`Return stop ${r + 1}: Depart time cannot be before Arrive time.`);
+            }
+          }
+
+          returnLegs = returnRows.slice(0, -1).map((row, index) => {
+            const nextRow = returnRows[index + 1];
+
+            return {
+              legNo: index + 1,
+              legType: "Return",
+              from: row.name,
+              to: nextRow.name,
+              startTime: row.departureTime,
+              endTime: nextRow.arrivalTime,
+              startMin: row.departureMin,
+              endMin: nextRow.arrivalMin,
+              note: index === returnRows.length - 2
+                ? "Return same route finish"
+                : "Return same route"
+            };
+          });
+
+          const invalidLeg = returnLegs.find((leg) => leg.endMin <= leg.startMin);
+          if (invalidLeg) {
+            return showError(
+              `Return leg ${invalidLeg.legNo}: Arrive time must be after Depart time.`
+            );
+          }
+
+          returnStartMin = returnLegs[0].startMin;
+          returnFinishMin = returnLegs[returnLegs.length - 1].endMin;
+
+          if (returnStartMin < lastStop.departureMin) {
+            return showError("Return start time cannot be before the last stop departure time.");
+          }
+        }
+
+        showBlockActionMessage(
+          `Saving ${returnOption === "SAME_ROUTE" ? "forward and return" : "forward"} block${busCount > 1 ? `s for ${busCount} buses` : ""}…`,
+          "info",
+          true
+        );
+
+        for (let i = 0; i < busCount; i++) {
+          const routePairId = uid();
+
+          const busNote =
+            busCount > 1
+              ? `${notes ? `${notes} | ` : ""}Bus ${i + 1}`
+              : notes;
+
+          await addBlock({
+            jobGroupId: state.selectedJobGroupId,
+            serviceDate,
+
+            from: startLocation,
+            to: lastStop.name,
+            startMin,
+            endMin: lastStop.arrivalMin,
+
+            blockType: "Forward",
+            notes: busNote,
+            createdBy,
+
+            tripPattern: "LOOP",
+            blockKind: "parent",
+            routeMode: "multiStop",
+            routeDirection: "Forward",
+            routePairId,
+
+            startLocation,
+            returnOption,
+
+            legCount: forwardLegs.length,
+            stopCount: routeStops.length,
+            routeStops,
+            generatedLegs: forwardLegs,
+
+            dispatchStatus: "Pending"
+          });
+
+          if (returnOption === "SAME_ROUTE") {
+            await addBlock({
+              jobGroupId: state.selectedJobGroupId,
+              serviceDate,
+
+              from: lastStop.name,
+              to: startLocation,
+              startMin: returnStartMin,
+              endMin: returnFinishMin,
+
+              blockType: "Return",
+              notes: busNote,
+              createdBy,
+
+              tripPattern: "LOOP",
+              blockKind: "parent",
+              routeMode: "multiStop",
+              routeDirection: "Return",
+              routePairId,
+
+              startLocation,
+              returnOption,
+
+              legCount: returnLegs.length,
+              stopCount: routeStops.length,
+              routeStops,
+              generatedLegs: returnLegs,
+
+              dispatchStatus: "Pending"
+            });
+          }
+        }
+
+        const savedCount = returnOption === "SAME_ROUTE" ? busCount * 2 : busCount;
+
+        showSaveSuccess(
+          `Saved ${savedCount} multi-stop block${savedCount === 1 ? "" : "s"} successfully.`
+        );
+        showBlockActionMessage(
+          `Saved ${savedCount} block${savedCount === 1 ? "" : "s"} successfully. The form is ready for the next trip.`,
+          "success",
+          true
+        );
+
+        clearInputValue("multiStartTime");
+
+        const returnOptionEl = document.getElementById("multiReturnOption");
+        if (returnOptionEl) returnOptionEl.value = "NONE";
+
+        const returnWrapEl = document.getElementById("multiReturnWrap");
+        if (returnWrapEl) returnWrapEl.style.display = "none";
+
+        [...document.querySelectorAll("[data-multi-stop-row]")].forEach((row) => row.remove());
+
+        const returnRowsEl = document.getElementById("multiReturnStopRows");
+        if (returnRowsEl) returnRowsEl.innerHTML = "";
+
+        const previewEl = document.getElementById("multiLegPreview");
+        if (previewEl) {
+          previewEl.innerHTML = "Add start location, stops, and times to preview the blocks.";
+        }
+
+        clearInputValue("blockNotes");
+
+        const selectedJobGroup = jobGroupsCache.find(
+          (jobGroup) => jobGroup.id === state.selectedJobGroupId
+        );
+        const startLocationEl = document.getElementById("multiStartLocation");
+        if (startLocationEl) {
+          startLocationEl.value = selectedJobGroup ? jgTitle(selectedJobGroup) : "";
+        }
+
+        document.getElementById("addMultiStopBtn")?.click();
+
         return;
-      }
-
-      // FR
-      if (pattern === "FR") {
-        const err = validateLegBasics(from, to, start, end);
-        if (err) return showError(err);
-
-        const rStart = document.getElementById("returnStart").value;
-        const rEnd = document.getElementById("returnEnd").value;
-
-        if (!rStart || !rEnd) return showError("Please enter Return Start Time and Return End Time.");
-        const rs = minFromTimeStr(rStart);
-        const re = minFromTimeStr(rEnd);
-        if (rs == null || re == null) return showError("Invalid return times.");
-        if (re <= rs) return showError("Return end time must be after return start time.");
-
-        const pairId = uid();
-
-        await addBlock({
-          jobGroupId: state.selectedJobGroupId,
-          serviceDate,
-          from,
-          to,
-          startMin: minFromTimeStr(start),
-          endMin: minFromTimeStr(end),
-          blockType: "Forward",
-          notes,
-          createdBy,
-          tripPattern: "FR",
-          pairId,
-          legIndex: 1
-        });
-
-        await addBlock({
-          jobGroupId: state.selectedJobGroupId,
-          serviceDate,
-          from: to,
-          to: from,
-          startMin: rs,
-          endMin: re,
-          blockType: "Return",
-          notes,
-          createdBy,
-          tripPattern: "FR",
-          pairId,
-          legIndex: 2
-        });
-
-        alert("Forward + Return saved ✅");
-        document.getElementById("blockFrom").value = "";
-        document.getElementById("blockTo").value = "";
-        document.getElementById("blockStart").value = "";
-        document.getElementById("blockEnd").value = "";
-        document.getElementById("returnStart").value = "";
-        document.getElementById("returnEnd").value = "";
-        document.getElementById("blockNotes").value = "";
-        return;
-      }
     } catch (e) {
       showError(e?.message || "Failed to save");
+      showBlockActionMessage(e?.message || "The block could not be saved. Check the form and try again.", "error", true);
     }
   };
 }
@@ -791,51 +1598,31 @@ function wireCreateBlockAdvanced() {
 ========================================================= */
 export function renderAdminBlocksByDate() {
   showError("");
+  const now = new Date();
+  const today = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
   els.contentArea.innerHTML = `
-    <h2 style="margin-top:0">Blocks By Date</h2>
+    <div id="blocksBrowserPage" class="blocks-browser-page">
+      <header class="blocks-browser-hero">
+        <div class="blocks-browser-hero-title"><span><i data-lucide="calendar-range"></i></span><div><div class="blocks-browser-eyebrow">Operations browser</div><h2>Blocks By Date</h2><p>Find, review and safely edit scheduled blocks.</p></div></div>
+      </header>
 
-    <div class="card">
+      <div id="blocksBrowserMessage" class="blocks-browser-message info" role="status" aria-live="polite" hidden></div>
 
-      <div style="
-        display:grid;
-        grid-template-columns: 220px 1fr 220px;
-        gap:14px;
-        align-items:end;
-      ">
-
-        <div>
-          <div class="muted" style="margin-bottom:6px">Date</div>
-
-          <div style="display:flex; gap:10px; align-items:center">
-            <input id="filterDate" type="date" />
-
-            <label class="muted" style="display:flex; gap:6px; align-items:center; white-space:nowrap">
-              <input id="showAllDates" type="checkbox" checked />
-              Show all
-            </label>
-          </div>
-
+      <section class="card blocks-browser-workspace">
+        <div class="blocks-browser-heading"><div><h3>Scheduled Blocks</h3><p id="blocksBrowserCount">Loading today’s blocks…</p></div></div>
+        <div class="blocks-browser-filters">
+          <label class="blocks-browser-field"><span>Date</span><input id="filterDate" type="date" value="${today}" /></label>
+          <label class="blocks-browser-search"><span>Search</span><div><i data-lucide="search"></i><input id="blockSearch" type="search" placeholder="Venue, group, client, notes or type" /></div></label>
+          <label class="blocks-browser-field"><span>Job Group</span><select id="jgFilter"><option value="">All Job Groups</option></select></label>
+          <label class="blocks-browser-all-toggle"><input id="showAllDates" type="checkbox" /><span><strong>Show all dates</strong><small>May take longer for large records</small></span></label>
         </div>
 
-        <div>
-          <div class="muted" style="margin-bottom:6px">Search</div>
-          <input id="blockSearch" placeholder="Search by venue / group / client / notes / type..." />
-        </div>
-
-        <div>
-          <div class="muted" style="margin-bottom:6px">Job Group</div>
-          <select id="jgFilter">
-            <option value="">All Job Groups</option>
-          </select>
-        </div>
-
-      </div>
-
-      <div id="blockList" style="margin-top:12px"></div>
-
+        <div id="blockList" class="blocks-browser-list"><div class="blocks-browser-loading"><span></span><div><strong>Loading blocks…</strong><small>Retrieving the selected date.</small></div></div></div>
+      </section>
     </div>
   `;
 
+  window.lucide?.createIcons?.();
   wireBlocksBrowser();
 }
 
@@ -845,10 +1632,38 @@ function wireBlocksBrowser() {
   const searchEl = document.getElementById("blockSearch");
   const jgFilterEl = document.getElementById("jgFilter");
   const listEl = document.getElementById("blockList");
+  const messageEl = document.getElementById("blocksBrowserMessage");
+  const countEl = document.getElementById("blocksBrowserCount");
 
   let allBlocks = [];
   let dateBlocks = [];
   let editingBlockId = null;
+  let blocksLoading = true;
+  let messageTimer = null;
+
+  function showBrowserMessage(message, type = "info", sticky = false) {
+    if (!messageEl) return;
+    if (messageTimer) clearTimeout(messageTimer);
+    messageEl.textContent = message || "";
+    messageEl.className = `blocks-browser-message ${type}`;
+    messageEl.hidden = !message;
+    if (message && !sticky) {
+      messageTimer = setTimeout(() => {
+        messageEl.hidden = true;
+        messageEl.textContent = "";
+      }, 4200);
+    }
+  }
+
+  function showBrowserError(message) {
+    showError(message);
+    showBrowserMessage(message, "error", true);
+  }
+
+  function renderLoading(message) {
+    listEl.innerHTML = `<div class="blocks-browser-loading"><span></span><div><strong>${escapeHtml(message)}</strong><small>Please wait while the records are retrieved.</small></div></div>`;
+    if (countEl) countEl.textContent = message;
+  }
 
   if (jobGroupsUnsub) jobGroupsUnsub();
   jobGroupsUnsub = listenJobGroups(
@@ -857,7 +1672,7 @@ function wireBlocksBrowser() {
       rebuildJobGroupFilterOptions();
       render();
     },
-    (e) => showError(e?.message || "Failed to load job groups")
+    (e) => showBrowserError(e?.message || "Failed to load job groups.")
   );
 
   function rebuildJobGroupFilterOptions() {
@@ -888,13 +1703,25 @@ function wireBlocksBrowser() {
     }
     if (blocksAllUnsub) blocksAllUnsub();
 
-    listEl.innerHTML = `<div class="muted">Loading…</div>`;
+    blocksLoading = true;
+    renderLoading("Loading all blocks…");
+    showBrowserMessage("Loading all dates. Large block histories can take longer.", "warning", true);
     blocksAllUnsub = listenBlocksAll(
       (blocks) => {
+        if (!document.getElementById("blocksBrowserPage")) {
+          blocksAllUnsub?.();
+          blocksAllUnsub = null;
+          return;
+        }
+        blocksLoading = false;
         allBlocks = (blocks || []).filter((b) => !b.deleted);
         render();
+        showBrowserMessage(`Loaded ${allBlocks.length} blocks across all dates.`, "success");
       },
-      (e) => showError(e?.message || "Failed to load blocks")
+      (e) => {
+        blocksLoading = false;
+        showBrowserError(e?.message || "Failed to load blocks.");
+      }
     );
   }
 
@@ -905,14 +1732,26 @@ function wireBlocksBrowser() {
     }
     if (blocksUnsub) blocksUnsub();
 
-    listEl.innerHTML = `<div class="muted">Loading…</div>`;
+    blocksLoading = true;
+    renderLoading(`Loading blocks for ${date}…`);
+    showBrowserMessage(`Loading blocks for ${date}…`, "info", true);
     blocksUnsub = listenBlocksByDate(
       date,
       (blocks) => {
+        if (!document.getElementById("blocksBrowserPage")) {
+          blocksUnsub?.();
+          blocksUnsub = null;
+          return;
+        }
+        blocksLoading = false;
         dateBlocks = (blocks || []).filter((b) => !b.deleted);
         render();
+        showBrowserMessage(`Loaded ${dateBlocks.length} block${dateBlocks.length === 1 ? "" : "s"} for ${date}.`, "success");
       },
-      (e) => showError(e?.message || "Failed to load blocks")
+      (e) => {
+        blocksLoading = false;
+        showBrowserError(e?.message || "Failed to load blocks.");
+      }
     );
   }
 
@@ -923,11 +1762,17 @@ function wireBlocksBrowser() {
     showAllEl.onchange = () => {
       editingBlockId = null;
       if (showAllEl.checked) {
+        if (filterEl) filterEl.value = "";
         startAllBlocksListener();
       } else {
+        if (filterEl && !filterEl.value) {
+          const now = new Date();
+          filterEl.value = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+        }
         const d = filterEl?.value || "";
         if (!d) {
-          listEl.innerHTML = `<div class="muted">Pick a date first (or enable “Show all dates”).</div>`;
+          listEl.innerHTML = `<div class="blocks-browser-empty">Pick a date first or enable Show all dates.</div>`;
+          showBrowserMessage("Select a date to load a smaller, faster result set.", "warning");
           return;
         }
         startBlocksByDateListener(d);
@@ -948,9 +1793,10 @@ function wireBlocksBrowser() {
     };
   }
 
-  startAllBlocksListener();
+  startBlocksByDateListener(filterEl?.value || "");
 
   function render() {
+    if (blocksLoading) return;
     const q = (searchEl?.value || "").trim().toLowerCase();
     const selectedJG = (jgFilterEl?.value || "").trim();
     const date = (filterEl?.value || "").trim();
@@ -981,28 +1827,63 @@ function wireBlocksBrowser() {
       });
     }
 
-    list = list
-      .slice()
-      .sort((a, b) => {
-        const da = a.serviceDate || "";
-        const db = b.serviceDate || "";
-        if (da !== db) return da.localeCompare(db);
-        return (a.startMin ?? 0) - (b.startMin ?? 0);
-      });
+      list = list
+        .slice()
+        .sort((a, b) => {
+          const da = a.serviceDate || "";
+          const db = b.serviceDate || "";
+          if (da !== db) return da.localeCompare(db);
 
-    renderBlocks(list);
+          const aStart = Number(a.startMin ?? 0);
+          const bStart = Number(b.startMin ?? 0);
+          if (aStart !== bStart) return aStart - bStart;
+
+          const getBusNo = (notes) => {
+            const match = String(notes || "").match(/Bus\s+(\d+)/i);
+            return match ? Number(match[1]) : 0;
+          };
+
+          return getBusNo(a.notes) - getBusNo(b.notes);
+        });
+
+    const renderLimit = 300;
+    const visibleList = list.slice(0, renderLimit);
+    if (countEl) {
+      countEl.textContent = `${list.length > renderLimit ? `Showing first ${renderLimit} of ` : ""}${list.length} block${list.length === 1 ? "" : "s"}${showAll ? " across all dates" : date ? ` on ${date}` : ""}`;
+    }
+    renderBlocks(visibleList);
   }
 
   function renderEditForm(b) {
     return `
-      <div style="
+      <div class="blocks-browser-edit-form" style="
         margin-top:12px;
         padding:12px;
         border:1px solid #eee;
         border-radius:12px;
         background:#fafafa;
       ">
-        <div style="font-weight:900; margin-bottom:10px;">Edit Block</div>
+        <div style="font-weight:900; margin-bottom:10px;">
+          ${Array.isArray(b.generatedLegs) && b.generatedLegs.length ? "Edit Multi-stop Block" : "Edit Block"}
+        </div>
+
+        ${
+          Array.isArray(b.generatedLegs) && b.generatedLegs.length
+            ? `
+              <div class="blocks-browser-edit-warning" style="
+                padding:10px;
+                border:1px solid #fde68a;
+                background:#fffbeb;
+                border-radius:10px;
+                margin-bottom:12px;
+                color:#92400e;
+              ">
+                This is a multi-stop parent block. The fields below edit the dispatch summary only.
+                The detailed generated legs are shown below for checking.
+              </div>
+            `
+            : ""
+        }
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <div style="flex:1; min-width:180px;">
@@ -1056,6 +1937,89 @@ function wireBlocksBrowser() {
           </div>
         </div>
 
+        ${
+          Array.isArray(b.generatedLegs) && b.generatedLegs.length
+            ? `
+              <div style="margin-top:14px;">
+                <div style="font-weight:900; margin-bottom:8px;">Generated Legs</div>
+
+                <div style="display:grid; gap:10px;">
+                  ${b.generatedLegs
+                    .map((leg, idx) => `
+                      <div style="
+                        padding:10px;
+                        border:1px solid #e5e7eb;
+                        border-radius:10px;
+                        background:#fff;
+                      ">
+                        <div style="font-weight:900; margin-bottom:8px;">
+                          Leg ${escapeHtml(leg.legNo || idx + 1)}
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">From</div>
+                            <input
+                              id="editLegFrom_${b.id}_${idx}"
+                              value="${escapeHtml(leg.from || "")}"
+                            />
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">To</div>
+                            <input
+                              id="editLegTo_${b.id}_${idx}"
+                              value="${escapeHtml(leg.to || "")}"
+                            />
+                          </div>
+                        </div>
+
+                        <div style="display:grid; grid-template-columns:160px 160px 180px 1fr; gap:10px; margin-top:8px;">
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">Start Time</div>
+                            <input
+                              id="editLegStart_${b.id}_${idx}"
+                              type="time"
+                              value="${escapeHtml(leg.startTime || timeStrFromMin(leg.startMin))}"
+                            />
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">End Time</div>
+                            <input
+                              id="editLegEnd_${b.id}_${idx}"
+                              type="time"
+                              value="${escapeHtml(leg.endTime || timeStrFromMin(leg.endMin))}"
+                            />
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">Leg Type</div>
+                            <select id="editLegType_${b.id}_${idx}">
+                              <option value="Forward" ${leg.legType === "Forward" ? "selected" : ""}>Forward</option>
+                              <option value="Return" ${leg.legType === "Return" ? "selected" : ""}>Return</option>
+                              <option value="Loop" ${leg.legType === "Loop" ? "selected" : ""}>Loop</option>
+                              <option value="Extra" ${leg.legType === "Extra" ? "selected" : ""}>Extra</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <div class="muted" style="margin-bottom:4px;">Note</div>
+                            <input
+                              id="editLegNote_${b.id}_${idx}"
+                              value="${escapeHtml(leg.note || "")}"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    `)
+                    .join("")}
+                </div>
+              </div>
+            `
+            : ""
+        }
+
         <div style="display:flex; gap:10px; margin-top:12px;">
           <button class="btn" data-block-save="${b.id}">Save Changes</button>
           <button class="btn" data-block-cancel="${b.id}">Cancel</button>
@@ -1066,7 +2030,7 @@ function wireBlocksBrowser() {
 
 function renderBlocks(blocks) {
   if (!blocks?.length) {
-    listEl.innerHTML = `<div class="muted">No blocks.</div>`;
+    listEl.innerHTML = `<div class="blocks-browser-empty">No blocks match the selected date and filters.</div>`;
     return;
   }
 
@@ -1079,7 +2043,7 @@ function renderBlocks(blocks) {
       const isEditing = editingBlockId === b.id;
 
       return `
-        <div style="
+        <div class="blocks-browser-card" style="
           border:1px solid #eee;
           border-radius:10px;
           padding:14px;
@@ -1087,7 +2051,7 @@ function renderBlocks(blocks) {
           background:#fff;
         ">
 
-          <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px">
+          <div class="blocks-browser-card-head" style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px">
 
             <div style="flex:1">
 
@@ -1101,6 +2065,33 @@ function renderBlocks(blocks) {
               <div style="margin-top:8px">
                 <b>${escapeHtml(b.from || "-")} → ${escapeHtml(b.to || "-")}</b>
               </div>
+
+              ${
+                Array.isArray(b.generatedLegs) && b.generatedLegs.length
+                  ? `
+                    <div style="margin-top:10px; display:grid; gap:6px;">
+                      ${b.generatedLegs
+                        .map((leg) => `
+                          <div style="
+                            padding:8px 10px;
+                            border:1px solid #e5e7eb;
+                            border-radius:8px;
+                            background:#fafafa;
+                          ">
+                            <div style="font-weight:800;">
+                              Leg ${escapeHtml(leg.legNo || "")}: ${escapeHtml(leg.from || "-")} → ${escapeHtml(leg.to || "-")}
+                            </div>
+                            <div class="muted" style="font-size:12px; margin-top:2px;">
+                              ${escapeHtml(leg.legType || "Leg")} · ${escapeHtml(leg.startTime || timeStrFromMin(leg.startMin))} - ${escapeHtml(leg.endTime || timeStrFromMin(leg.endMin))}
+                              ${leg.note ? ` · ${escapeHtml(leg.note)}` : ""}
+                            </div>
+                          </div>
+                        `)
+                        .join("")}
+                    </div>
+                  `
+                  : ""
+              }
 
               ${b.notes ? `<div class="muted" style="margin-top:6px">${escapeHtml(b.notes)}</div>` : ``}
 
@@ -1136,6 +2127,7 @@ function renderBlocks(blocks) {
     btn.onclick = () => {
       editingBlockId = btn.getAttribute("data-block-edit");
       render();
+      showBrowserMessage("Block opened for editing.", "info");
     };
   });
 
@@ -1145,10 +2137,16 @@ function renderBlocks(blocks) {
       if (!confirm("Delete this block?")) return;
 
       try {
+        btn.disabled = true;
+        btn.textContent = "Deleting…";
+        showBrowserMessage("Deleting block… Do not click again.", "info", true);
         await deleteBlock(id);
         if (editingBlockId === id) editingBlockId = null;
+        showBrowserMessage("Block deleted successfully.", "success");
       } catch (e) {
-        showError(e?.message || "Failed to delete block");
+        btn.disabled = false;
+        btn.textContent = "Delete";
+        showBrowserError(e?.message || "Failed to delete block.");
       }
     };
   });
@@ -1157,6 +2155,7 @@ function renderBlocks(blocks) {
     btn.onclick = () => {
       editingBlockId = null;
       render();
+      showBrowserMessage("Block changes cancelled.", "warning");
     };
   });
 
@@ -1173,18 +2172,22 @@ function renderBlocks(blocks) {
         const blockType = document.getElementById(`editBlockType_${id}`).value;
         const notes = document.getElementById(`editBlockNotes_${id}`).value.trim();
 
-        if (!serviceDate) return showError("Date is required.");
-        if (!start || !end) return showError("Start and end time are required.");
-        if (!from) return showError("From is required.");
-        if (!to) return showError("To is required.");
+        if (!serviceDate) return showBrowserError("Date is required.");
+        if (!start || !end) return showBrowserError("Start and end time are required.");
+        if (!from) return showBrowserError("From is required.");
+        if (!to) return showBrowserError("To is required.");
 
         const startMin = minFromTimeStr(start);
         const endMin = minFromTimeStr(end);
 
-        if (startMin == null || endMin == null) return showError("Invalid time.");
-        if (endMin <= startMin) return showError("End time must be after start time.");
+        if (startMin == null || endMin == null) return showBrowserError("Invalid time.");
+        if (endMin <= startMin) return showBrowserError("End time must be after start time.");
 
-        await updateBlock(id, {
+        const originalBlock = [...allBlocks, ...dateBlocks].find((x) => x.id === id);
+        const hasGeneratedLegs =
+          Array.isArray(originalBlock?.generatedLegs) && originalBlock.generatedLegs.length;
+
+        const updateData = {
           serviceDate,
           startMin,
           endMin,
@@ -1192,11 +2195,71 @@ function renderBlocks(blocks) {
           to,
           blockType,
           notes
-        });
+        };
+
+        if (hasGeneratedLegs) {
+          const generatedLegs = originalBlock.generatedLegs.map((oldLeg, idx) => {
+            const legFrom = document.getElementById(`editLegFrom_${id}_${idx}`)?.value.trim() || "";
+            const legTo = document.getElementById(`editLegTo_${id}_${idx}`)?.value.trim() || "";
+            const legStart = document.getElementById(`editLegStart_${id}_${idx}`)?.value || "";
+            const legEnd = document.getElementById(`editLegEnd_${id}_${idx}`)?.value || "";
+            const legType = document.getElementById(`editLegType_${id}_${idx}`)?.value || oldLeg.legType || "Forward";
+            const legNote = document.getElementById(`editLegNote_${id}_${idx}`)?.value.trim() || "";
+
+            const legStartMin = legStart ? minFromTimeStr(legStart) : null;
+            const legEndMin = legEnd ? minFromTimeStr(legEnd) : null;
+
+            return {
+              ...oldLeg,
+              legNo: idx + 1,
+              from: legFrom,
+              to: legTo,
+              startTime: legStart,
+              endTime: legEnd,
+              startMin: legStartMin,
+              endMin: legEndMin,
+              legType,
+              note: legNote
+            };
+          });
+
+          for (const leg of generatedLegs) {
+            if (!leg.from) return showBrowserError(`Leg ${leg.legNo}: From is required.`);
+            if (!leg.to) return showBrowserError(`Leg ${leg.legNo}: To is required.`);
+
+            if (leg.startTime && leg.startMin == null) {
+              return showBrowserError(`Leg ${leg.legNo}: Invalid start time.`);
+            }
+
+            if (leg.endTime && leg.endMin == null) {
+              return showBrowserError(`Leg ${leg.legNo}: Invalid end time.`);
+            }
+
+            if (
+              leg.startMin != null &&
+              leg.endMin != null &&
+              leg.endMin <= leg.startMin
+            ) {
+              return showBrowserError(`Leg ${leg.legNo}: End time must be after start time.`);
+            }
+          }
+
+          updateData.generatedLegs = generatedLegs;
+          updateData.legCount = generatedLegs.length;
+        }
+
+        btn.disabled = true;
+        btn.textContent = "Saving…";
+        showBrowserMessage("Saving block changes… Do not click again.", "info", true);
+        await updateBlock(id, updateData);
 
         editingBlockId = null;
+        showError("");
+        showBrowserMessage("Block changes saved successfully.", "success", true);
       } catch (e) {
-        showError(e?.message || "Failed to update block");
+        btn.disabled = false;
+        btn.textContent = "Save Changes";
+        showBrowserError(e?.message || "Failed to update block.");
       }
     };
   });

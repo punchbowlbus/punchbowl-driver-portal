@@ -1,4 +1,4 @@
-const CACHE = "pbc-v7"; // bump when you deploy changes
+const CACHE = "pbc-v34"; // bump when you deploy changes
 
 const ASSETS = [
   "/",
@@ -21,6 +21,8 @@ const ASSETS = [
   // NEW modules you are using now
   "/js/shifts_ui.js",
   "/js/modals.js",
+  "/js/bulk_duty_spans.js",
+  "/js/driver_duty_sheet.js",
 ];
 
 self.addEventListener("install", (event) => {

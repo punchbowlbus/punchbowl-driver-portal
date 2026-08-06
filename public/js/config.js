@@ -27,3 +27,5 @@ export const CHARTER_STATUS = ["Draft", "Confirmed", "Cancelled"];
 
 // Optional: Job types for legs (you can change these anytime)
 export const JOB_TYPES = ["School", "Charter", "Rail", "Loop", "Dead-run", "Other"];
+
+export const FCM_VAPID_KEY = "BIzWZ2A906hAey2Hy1egd3DSvjBkB0J0DmDvMkT_YOOkENbpLIudzp2K6zmLTMXgpSYJC6iGSfMj9kQudqXIOv8";
