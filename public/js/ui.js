@@ -125,6 +125,7 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
   const adminQuickItems = isAdmin
     ? [
         { id: "newEnquiry", label: "New Enquiry", icon: "phone-incoming" },
+        { id: "customers", label: "Customers", icon: "building-2" },
         { id: "adminAllJobs", label: "All Jobs", icon: "list" },
         { id: "driverMonitor", label: "Driver Monitor", icon: "users" },
         { id: "operationsDashboard", label: "Operations Dashboard", icon: "bar-chart-3" },

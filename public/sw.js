@@ -1,8 +1,11 @@
-const CACHE = "pbc-v35"; // bump when you deploy changes
+const CACHE = "pbc-v37"; // bump when you deploy changes
 
 const ASSETS = [
   "/",
   "/index.html",
+  "/customers.html",
+  "/enquiries.html",
+  "/styles.css",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -15,7 +18,7 @@ const ASSETS = [
   "/js/config.js",
   "/js/state.js",
   "/js/db.js",
-  "/js/admin.js",
+  "/js/admin_v2.js",
   "/js/driver.js",
 
   // NEW modules you are using now
@@ -23,6 +26,9 @@ const ASSETS = [
   "/js/modals.js",
   "/js/bulk_duty_spans.js",
   "/js/driver_duty_sheet.js",
+  "/js/customers.js",
+  "/js/enquiries.js",
+  "/js/customer_search.js",
 ];
 
 self.addEventListener("install", (event) => {

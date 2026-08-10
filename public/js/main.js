@@ -315,6 +315,13 @@ export async function go(pageId) {
     return;
   }
 
+  if (pageId === "customers") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    window.location.href = "./customers.html";
+    return;
+  }
+
   // Dispatch Board
   if (pageId === "adminDispatchBoard") {
     if (!state.isAdmin) return showError("No admin access");
