@@ -1,10 +1,11 @@
-const CACHE = "pbc-v37"; // bump when you deploy changes
+const CACHE = "pbc-v48"; // Dispatch Pro workspace
 
 const ASSETS = [
   "/",
   "/index.html",
   "/customers.html",
   "/enquiries.html",
+  "/enquiry_inbox.html",
   "/styles.css",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
@@ -28,6 +29,9 @@ const ASSETS = [
   "/js/driver_duty_sheet.js",
   "/js/customers.js",
   "/js/enquiries.js",
+  "/js/enquiry_inbox.js",
+  "/js/charter_bookings.js",
+  "/js/incident_reports.js",
   "/js/customer_search.js",
 ];
 
