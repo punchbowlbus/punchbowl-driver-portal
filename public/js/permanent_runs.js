@@ -27,6 +27,10 @@ export function renderAdminPermanentRunsPage({
   let openTemplateLegsLoading = false;
   let addingLegForTemplateId = null;
   let editingLegId = null;
+  let actionMessageTimer = null;
+  let templateSaveInProgress = false;
+  let legSaveInProgress = false;
+  let generateInProgress = false;
 
   function escapeHtml(s) {
     return (s ?? "")
@@ -144,17 +148,45 @@ export function renderAdminPermanentRunsPage({
     return result;
   }
 
+  function showActionMessage(message, type = "info", sticky = false) {
+    const messageEl = document.getElementById("permanentRunsActionMessage");
+    if (!messageEl) return;
+    if (actionMessageTimer) clearTimeout(actionMessageTimer);
+    messageEl.textContent = message || "";
+    messageEl.className = `permanent-runs-message ${type}`;
+    messageEl.hidden = !message;
+    if (message && !sticky) {
+      actionMessageTimer = setTimeout(() => {
+        messageEl.hidden = true;
+        messageEl.textContent = "";
+      }, 4500);
+    }
+  }
+
+  function showActionError(message) {
+    showError(message);
+    showActionMessage(message, "error", true);
+  }
+
   showError("");
   els.contentArea.innerHTML = `
-    <h2 style="margin-top:0">Permanent Runs</h2>
+    <div id="permanentRunsPage" class="permanent-runs-page">
+      <header class="permanent-runs-hero">
+        <div class="permanent-runs-hero-title">
+          <span><i data-lucide="repeat-2"></i></span>
+          <div><div class="permanent-runs-eyebrow">Recurring operations</div><h2>Permanent Runs</h2><p>Create reusable schedules and generate blocks for regular services.</p></div>
+        </div>
+      </header>
 
-    <div class="card">
-      <h3 style="margin-top:0">Recurring Template</h3>
+      <div id="permanentRunsActionMessage" class="permanent-runs-message info" role="status" aria-live="polite" hidden></div>
+
+    <div class="card permanent-runs-form-card">
+      <div class="permanent-runs-card-heading"><span>1</span><div><h3>Recurring Template</h3><p>Create repeating templates for school runs and regular services.</p></div></div>
       <div class="muted" style="margin-bottom:12px">
-        Create repeating templates for school runs and regular services.
+        Complete the linked job group, date range and recurring pattern.
       </div>
 
-      <div style="display:grid; grid-template-columns: 1.2fr 1fr; gap:14px;">
+      <div class="permanent-runs-form-grid" style="display:grid; grid-template-columns: 1.2fr 1fr; gap:14px;">
         <div>
           <div class="muted" style="margin-bottom:6px">Linked Job Group</div>
           <select id="rtJobGroup">
@@ -207,14 +239,15 @@ export function renderAdminPermanentRunsPage({
         </div>
       </div>
 
-      <div style="display:flex; gap:10px; margin-top:14px; align-items:center;">
-        <button id="createRT">Create Template</button>
+      <div class="permanent-runs-form-actions" style="display:flex; gap:10px; margin-top:14px; align-items:center;">
+        <button id="createRT" class="permanent-runs-primary-btn">Create Template</button>
         <button id="cancelRTEdit" class="btn" style="display:none;">Cancel</button>
       </div>
     </div>
 
-    <div class="card" style="margin-top:16px">
-      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
+    <div class="card permanent-runs-directory" style="margin-top:16px">
+      <div class="permanent-runs-card-heading"><span>2</span><div><h3>Template Directory</h3><p>Open a template to manage its legs or generate scheduled blocks.</p></div></div>
+      <div class="permanent-runs-filters" style="display:flex; gap:10px; flex-wrap:wrap; align-items:end;">
         <div style="flex:2; min-width:260px;">
           <div class="muted" style="margin-bottom:6px">Search</div>
           <input id="rtSearch" placeholder="Search templates by name or notes" />
@@ -241,7 +274,10 @@ export function renderAdminPermanentRunsPage({
 
       <div id="rtList" style="margin-top:14px"></div>
     </div>
+    </div>
   `;
+
+  window.lucide?.createIcons?.();
 
   const typeEl = document.getElementById("rtType");
   const weeklyWrap = document.getElementById("weeklyDaysWrap");
@@ -290,6 +326,7 @@ export function renderAdminPermanentRunsPage({
     if (openTemplateId === templateId) {
       closeOpenTemplate();
       renderRTList();
+      showActionMessage("Template details closed.", "info");
       return;
     }
 
@@ -300,17 +337,23 @@ export function renderAdminPermanentRunsPage({
     addingLegForTemplateId = null;
     editingLegId = null;
     renderRTList();
+    showActionMessage("Loading template legs…", "info", true);
 
     openTemplateLegsUnsub = listenTemplateLegs(
       templateId,
       (legs) => {
+        if (!document.getElementById("permanentRunsPage")) {
+          closeOpenTemplate();
+          return;
+        }
         openTemplateLegs = (legs || []).slice().sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
         openTemplateLegsLoading = false;
         renderRTList();
+        showActionMessage(`Template opened with ${openTemplateLegs.length} leg${openTemplateLegs.length === 1 ? "" : "s"}.`, "success");
       },
       (e) => {
         openTemplateLegsLoading = false;
-        showError(e?.message || "Failed to load template legs");
+        showActionError(e?.message || "Failed to load template legs.");
         renderRTList();
       }
     );
@@ -575,6 +618,7 @@ export function renderAdminPermanentRunsPage({
         typeEl.onchange();
         createBtn.textContent = "Save Changes";
         cancelBtn.style.display = "inline-block";
+        showActionMessage(`Editing ${t.title || t.name || "recurring template"}.`, "info");
         window.scrollTo({ top: 0, behavior: "smooth" });
       };
     });
@@ -588,6 +632,8 @@ export function renderAdminPermanentRunsPage({
         if (!confirm(`Delete template: ${label} ?`)) return;
 
         try {
+          btn.disabled = true;
+          btn.textContent = "Deleting…";
           await deleteRecurringTemplate(id);
 
           if (editingTemplateId === id) {
@@ -598,39 +644,47 @@ export function renderAdminPermanentRunsPage({
           if (openTemplateId === id) {
             closeOpenTemplate();
           }
+          showActionMessage(`${label} was deleted.`, "success");
         } catch (e) {
-          showError(e?.message || "Failed to delete template");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          showActionError(e?.message || "Failed to delete template.");
         }
       };
     });
 
     [...listEl.querySelectorAll("[data-rt-generate]")].forEach((btn) => {
       btn.onclick = async () => {
+        if (generateInProgress) return;
         const id = btn.getAttribute("data-rt-generate");
         const t = recurringCache.find((x) => x.id === id);
         if (!t) return;
 
         if (openTemplateId !== id) {
-          return showError("Please open the template first.");
+          return showActionError("Please open the template first.");
         }
 
         if (openTemplateLegsLoading) {
-          return showError("Legs are still loading. Please wait a moment.");
+          return showActionError("Legs are still loading. Please wait a moment.");
         }
 
         const legsToUse = openTemplateLegs;
 
         if (!legsToUse.length) {
-          return showError("No template legs found. Please add legs before generating.");
+          return showActionError("No template legs found. Please add legs before generating.");
         }
 
         try {
           const dates = getMatchingDatesForTemplate(t);
 
           if (!dates.length) {
-            return showError("No matching dates found for this template.");
+            return showActionError("No matching dates found for this template.");
           }
 
+          generateInProgress = true;
+          btn.disabled = true;
+          btn.textContent = "Generating…";
+          showActionMessage(`Generating blocks for ${dates.length} service date${dates.length === 1 ? "" : "s"}… Do not click again.`, "info", true);
           let createdCount = 0;
 
           for (const serviceDate of dates) {
@@ -655,7 +709,7 @@ export function renderAdminPermanentRunsPage({
           }
 
           if (createdCount < 1) {
-            return showError("No blocks were created. Template will stay visible.");
+            return showActionError("No blocks were created. Template will stay visible.");
           }
 
           await markRecurringTemplateGenerated(id, {
@@ -666,9 +720,16 @@ export function renderAdminPermanentRunsPage({
             closeOpenTemplate();
           }
 
-          alert(`Generated ${createdCount} blocks ✅`);
+          showError("");
+          showActionMessage(`Generated ${createdCount} blocks successfully.`, "success", true);
         } catch (e) {
-          showError(e?.message || "Failed to generate blocks");
+          showActionError(e?.message || "Failed to generate blocks. The template remains available for review.");
+        } finally {
+          generateInProgress = false;
+          if (document.contains(btn)) {
+            btn.disabled = false;
+            btn.textContent = "Generate Blocks";
+          }
         }
       };
     });
@@ -679,6 +740,7 @@ export function renderAdminPermanentRunsPage({
         editingLegId = null;
         renderRTList();
         wireLegFormEvents();
+        showActionMessage("New leg form opened.", "info");
       };
     });
 
@@ -688,6 +750,7 @@ export function renderAdminPermanentRunsPage({
         addingLegForTemplateId = null;
         renderRTList();
         wireLegFormEvents();
+        showActionMessage("Leg opened for editing.", "info");
       };
     });
 
@@ -700,10 +763,15 @@ export function renderAdminPermanentRunsPage({
         if (!confirm(`Delete leg: ${label} ?`)) return;
 
         try {
+          btn.disabled = true;
+          btn.textContent = "Deleting…";
           await deleteTemplateLeg(legId);
           if (editingLegId === legId) editingLegId = null;
+          showActionMessage(`${label} was deleted.`, "success");
         } catch (e) {
-          showError(e?.message || "Failed to delete leg");
+          btn.disabled = false;
+          btn.textContent = "Delete";
+          showActionError(e?.message || "Failed to delete leg.");
         }
       };
     });
@@ -730,11 +798,13 @@ export function renderAdminPermanentRunsPage({
         addingLegForTemplateId = null;
         editingLegId = null;
         renderRTList();
+        showActionMessage("Leg changes cancelled.", "warning");
       };
     }
 
     if (saveBtn) {
       saveBtn.onclick = async () => {
+        if (legSaveInProgress) return;
         showError("");
         try {
           const templateId = openTemplateId;
@@ -747,19 +817,24 @@ export function renderAdminPermanentRunsPage({
           const to = (document.getElementById(`tplLegTo_${templateId}`)?.value || "").trim();
           const legType = document.getElementById(`tplLegType_${templateId}`)?.value || "Service";
 
-          if (!name) return showError("Leg name is required.");
-          if (!startTime) return showError("Start time is required.");
-          if (!endTime) return showError("End time is required.");
-          if (!from) return showError("From is required.");
-          if (!to) return showError("To is required.");
+          if (!name) return showActionError("Leg name is required.");
+          if (!startTime) return showActionError("Start time is required.");
+          if (!endTime) return showActionError("End time is required.");
+          if (!from) return showActionError("From is required.");
+          if (!to) return showActionError("To is required.");
 
           const startMin = minFromTimeStr(startTime);
           const endMin = minFromTimeStr(endTime);
 
-          if (startMin == null || endMin == null) return showError("Invalid leg times.");
-          if (endMin <= startMin) return showError("End time must be after start time.");
+          if (startMin == null || endMin == null) return showActionError("Invalid leg times.");
+          if (endMin <= startMin) return showActionError("End time must be after start time.");
 
           const countsAsWork = countsAsWorkFromLegType(legType);
+          legSaveInProgress = true;
+          saveBtn.disabled = true;
+          if (formCancelBtn) formCancelBtn.disabled = true;
+          saveBtn.textContent = "Saving…";
+          showActionMessage(`${legId ? "Updating" : "Saving"} ${name}… Do not click again.`, "info", true);
 
           if (legId) {
             await updateTemplateLeg(legId, {
@@ -775,7 +850,7 @@ export function renderAdminPermanentRunsPage({
             });
 
             editingLegId = null;
-            alert("Leg updated ✅");
+            showActionMessage(`${name} was updated successfully.`, "success");
             return;
           }
 
@@ -795,9 +870,16 @@ export function renderAdminPermanentRunsPage({
           });
 
           addingLegForTemplateId = null;
-          alert("Leg added ✅");
+          showActionMessage(`${name} was added successfully.`, "success");
         } catch (e) {
-          showError(e?.message || "Failed to save leg");
+          showActionError(e?.message || "Failed to save leg.");
+        } finally {
+          legSaveInProgress = false;
+          if (document.contains(saveBtn)) {
+            saveBtn.disabled = false;
+            saveBtn.textContent = saveBtn.getAttribute("data-leg-edit-id") ? "Save Changes" : "Save Leg";
+          }
+          if (formCancelBtn && document.contains(formCancelBtn)) formCancelBtn.disabled = false;
         }
       };
     }
@@ -819,6 +901,7 @@ export function renderAdminPermanentRunsPage({
     cancelBtn.onclick = () => {
       editingTemplateId = null;
       resetForm();
+      showActionMessage("Template changes cancelled.", "warning");
     };
   }
 
@@ -827,6 +910,11 @@ export function renderAdminPermanentRunsPage({
 
     jobGroupsUnsub = listenJobGroups(
       (list) => {
+        if (!document.getElementById("permanentRunsPage")) {
+          jobGroupsUnsub?.();
+          jobGroupsUnsub = null;
+          return;
+        }
         jobGroupsCache = (list || []).filter((jg) => !jg.deleted);
 
         const old = rtJobGroupEl.value || "";
@@ -854,6 +942,12 @@ export function renderAdminPermanentRunsPage({
   if (recurringUnsub) recurringUnsub();
   recurringUnsub = listenRecurringTemplates(
     (list) => {
+      if (!document.getElementById("permanentRunsPage")) {
+        recurringUnsub?.();
+        recurringUnsub = null;
+        closeOpenTemplate();
+        return;
+      }
       recurringCache = (list || []).filter((t) => !t.deleted);
       renderRTList();
     },
@@ -861,6 +955,7 @@ export function renderAdminPermanentRunsPage({
   );
 
   createBtn.onclick = async () => {
+    if (templateSaveInProgress) return;
     showError("");
 
     try {
@@ -871,24 +966,32 @@ export function renderAdminPermanentRunsPage({
       const startDate = document.getElementById("rtStart").value;
       const endDate = document.getElementById("rtEnd").value || null;
 
-      if (!title) return showError("Template title is required.");
-      if (!jobGroupId) return showError("Please select a Linked Job Group.");
-      if (!startDate) return showError("Start date is required.");
+      if (!title) return showActionError("Template title is required.");
+      if (!jobGroupId) return showActionError("Please select a linked Job Group.");
+      if (!startDate) return showActionError("Start date is required.");
+      if (endDate && endDate < startDate) return showActionError("End date cannot be before the start date.");
 
       let daysOfWeek = [];
       let intervalDays = null;
 
       if (patternType === "WEEKLY") {
         daysOfWeek = [...document.querySelectorAll("input.dow:checked")].map((x) => x.value);
-        if (!daysOfWeek.length) return showError("Select at least one day (Mon–Sun).");
+        if (!daysOfWeek.length) return showActionError("Select at least one weekly day (Mon–Sun).");
       }
 
       if (patternType === "CUSTOM") {
         intervalDays = Number(document.getElementById("rtIntervalDays").value || "");
         if (!intervalDays || intervalDays < 1) {
-          return showError("Enter a valid interval (e.g. 14).");
+          return showActionError("Enter a valid recurring interval, such as 14 days.");
         }
       }
+
+      const wasEditing = Boolean(editingTemplateId);
+      templateSaveInProgress = true;
+      createBtn.disabled = true;
+      cancelBtn.disabled = true;
+      createBtn.textContent = "Saving…";
+      showActionMessage(`${wasEditing ? "Updating" : "Saving"} ${title}… Do not click again.`, "info", true);
 
       if (editingTemplateId) {
         await updateRecurringTemplate(editingTemplateId, {
@@ -903,7 +1006,7 @@ export function renderAdminPermanentRunsPage({
         });
 
         resetForm();
-        alert("Recurring template updated ✅");
+        showActionMessage(`${title} was updated successfully.`, "success");
         return;
       }
 
@@ -920,9 +1023,15 @@ export function renderAdminPermanentRunsPage({
       });
 
       resetForm();
-      alert("Recurring template created ✅");
+      showActionMessage(`${title} was created successfully. Open it to add route legs.`, "success", true);
     } catch (e) {
-      showError(e?.message || "Failed to create recurring template");
+      showActionError(e?.message || "Failed to save the recurring template.");
+    } finally {
+      templateSaveInProgress = false;
+      createBtn.disabled = false;
+      cancelBtn.disabled = false;
+      if (editingTemplateId) createBtn.textContent = "Save Changes";
+      else createBtn.textContent = "Create Template";
     }
   };
 

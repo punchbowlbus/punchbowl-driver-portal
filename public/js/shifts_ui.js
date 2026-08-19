@@ -26,24 +26,25 @@ export function renderShifts(shifts, legsByShiftId, options = {}, actions = {}) 
           `).join("")}
         </div>
 
-        <div style="margin-top:10px;">
-          ${actions.onAddLeg ? `<button data-add="${shift.id}">Add Leg</button>` : ""}
-          ${actions.onConfirmShift ? `<button data-confirm="${shift.id}">Confirm</button>` : ""}
-        </div>
+          <div style="margin-top:10px;">
+            ${actions.onAddLeg ? `<button data-add="${shift.id}">Add Leg</button>` : ""}
+            ${actions.onConfirmShift ? `<button data-confirm-yes="${shift.id}">Yes</button>` : ""}
+            ${actions.onConfirmShift ? `<button data-confirm-no="${shift.id}">No</button>` : ""}
+          </div>
       </div>
     `;
   }).join("");
 
   // Attach button events
   shifts.forEach(shift => {
-    const addBtn = document.querySelector(`[data-add="${shift.id}"]`);
-    if (addBtn && actions.onAddLeg) {
-      addBtn.onclick = () => actions.onAddLeg(shift.id);
+    const yesBtn = document.querySelector(`[data-confirm-yes="${shift.id}"]`);
+    if (yesBtn && actions.onConfirmShift) {
+      yesBtn.onclick = () => actions.onConfirmShift(shift.id, "Yes");
     }
 
-    const confirmBtn = document.querySelector(`[data-confirm="${shift.id}"]`);
-    if (confirmBtn && actions.onConfirmShift) {
-      confirmBtn.onclick = () => actions.onConfirmShift(shift.id, "confirmed");
+    const noBtn = document.querySelector(`[data-confirm-no="${shift.id}"]`);
+    if (noBtn && actions.onConfirmShift) {
+      noBtn.onclick = () => actions.onConfirmShift(shift.id, "No");
     }
   });
 }

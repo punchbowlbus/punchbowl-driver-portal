@@ -37,6 +37,15 @@ export function listenShifts({ isAdmin, driverEmail }, onData, onErr) {
   );
 }
 
+export async function addShift(data) {
+  return await addDoc(collection(db, "shifts"), {
+    deleted: false,
+    ...data,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+}
+
 /* =========================================================
    LEGS
 ========================================================= */
@@ -119,7 +128,13 @@ export function listenBlocksByDate(date, onData, onErr) {
 
   return onSnapshot(
     qy,
-    (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true);
+
+      onData(list);
+    },
     onErr
   );
 }
@@ -151,6 +166,11 @@ export async function addDutySpan(data) {
     serviceDate: String(data.serviceDate || "").trim(),
     driverEmployeeNumber: String(data.driverEmployeeNumber || "").trim(),
     driverName: String(data.driverName || "").trim(),
+
+    dutyType: String(data.dutyType || "Charter").trim(),
+    dutyNumber: String(data.dutyNumber || "").trim(),
+    routeNumber: String(data.routeNumber || "").trim(),
+    routePdfUrl: String(data.routePdfUrl || "").trim(),
 
     startMin: Number(data.startMin || 0),
     endMin: Number(data.endMin || 0),
@@ -317,6 +337,34 @@ export function listenDutySpansByDriverAndDate(driverEmployeeNumber, date, onDat
     collection(db, "dutySpans"),
     where("driverEmployeeNumber", "==", String(driverEmployeeNumber).trim()),
     where("serviceDate", "==", String(date).trim()),
+    orderBy("startMin", "asc")
+  );
+
+  return onSnapshot(
+    qy,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true);
+
+      onData(list);
+    },
+    onErr
+  );
+}
+
+export function listenDutySpansByDriverAndDateRange(driverEmployeeNumber, startDate, endDate, onData, onErr) {
+  if (!driverEmployeeNumber || !startDate || !endDate) {
+    onData([]);
+    return () => {};
+  }
+
+  const qy = query(
+    collection(db, "dutySpans"),
+    where("driverEmployeeNumber", "==", String(driverEmployeeNumber).trim()),
+    where("serviceDate", ">=", String(startDate).trim()),
+    where("serviceDate", "<=", String(endDate).trim()),
+    orderBy("serviceDate", "asc"),
     orderBy("startMin", "asc")
   );
 
@@ -548,6 +596,32 @@ export async function getEmployee(employeeNumber) {
   };
 }
 
+export async function getEmployeeByEmail(email) {
+  if (!email) return null;
+
+  const qy = query(
+    collection(db, "employees"),
+    where("email", "==", String(email).trim().toLowerCase())
+  );
+
+  return new Promise((resolve, reject) => {
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        unsub();
+        if (snap.empty) return resolve(null);
+
+        const docSnap = snap.docs[0];
+        resolve({
+          id: docSnap.id,
+          ...docSnap.data()
+        });
+      },
+      reject
+    );
+  });
+}
+
 export function listenEmployees(onData, onErr) {
   const qy = query(collection(db, "employees"), orderBy("employeeNumber", "asc"));
 
@@ -660,3 +734,4 @@ export async function deactivateBus(fleetNumber) {
     updatedAt: serverTimestamp()
   });
 }
+
