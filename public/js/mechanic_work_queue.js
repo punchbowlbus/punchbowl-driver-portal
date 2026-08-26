@@ -2,8 +2,8 @@ import {
   collection,
   doc,
   onSnapshot,
-  query,
   orderBy,
+  query,
   serverTimestamp,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
@@ -25,22 +25,23 @@ const els = {
 };
 
 let currentUser = null;
-let currentEmployee = null;
 let jobs = [];
 let buses = [];
 let selectedJob = null;
-let employeeUnsub = null;
 let jobsUnsub = null;
 let busesUnsub = null;
 
 function normalize(v) { return String(v || "").trim().toLowerCase(); }
-function esc(v) { return String(v ?? "").replace(/[&<>'"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[m])); }
+function esc(v) { return String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[m])); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 function fmtKm(v) { const n = num(v); return n == null ? "—" : `${Math.round(n).toLocaleString("en-AU")} km`; }
-function fmtDate(v) { if (!v) return "—"; const d = typeof v?.toDate === "function" ? v.toDate() : new Date(`${v}T00:00:00`); return Number.isNaN(d.getTime()) ? String(v) : new Intl.DateTimeFormat("en-AU",{day:"2-digit",month:"short",year:"numeric"}).format(d); }
+function fmtDate(v) {
+  if (!v) return "—";
+  const d = typeof v?.toDate === "function" ? v.toDate() : new Date(`${v}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? String(v) : new Intl.DateTimeFormat("en-AU", { day:"2-digit", month:"short", year:"numeric" }).format(d);
+}
 function showStatus(message, type="success") { els.status.className = `status ${type}`; els.status.textContent = message; }
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
-function displayName(emp) { return emp?.displayName || [emp?.firstName, emp?.lastName].filter(Boolean).join(" ") || emp?.employeeNumber || currentUser?.email || "Mechanic"; }
 
 const CHECKLISTS = {
   "Scheduled Service": ["Engine oil","Oil filter","Fuel filter","Coolant level / condition","Brake system","Steering","Suspension","Tyres and wheel nuts","Lights and electrical","Doors and interlocks","Windscreen / wipers","Fluid leaks","Safety equipment","Road test"],
@@ -54,55 +55,60 @@ const CHECKLISTS = {
   "Other": ["Work requirement confirmed","Work completed","Functional test completed"]
 };
 
-function employeeMatchesJob(job) {
-  if (!currentEmployee) return false;
-  const tokens = [
-    currentEmployee.employeeNumber,
-    currentEmployee.displayName,
-    currentEmployee.email,
-    `${currentEmployee.firstName || ""} ${currentEmployee.lastName || ""}`.trim()
-  ].map(normalize).filter(Boolean);
-  const assigned = [job.assignedMechanic, job.assignedMechanicName, job.assignedMechanicEmployeeNumber, job.assignedMechanicEmail].map(normalize).filter(Boolean);
-  return tokens.some((t) => assigned.includes(t));
-}
-
-function activeJobs() {
-  return jobs.filter(employeeMatchesJob);
+function openJobs() {
+  return jobs.filter((j) => !["Completed","Closed","Cancelled"].includes(j.status));
 }
 
 function renderQueue() {
-  const mine = activeJobs();
   const status = els.statusFilter.value;
-  let list = mine.filter((j) => status ? j.status === status : !["Completed","Closed","Cancelled"].includes(j.status));
-  list = list.sort((a,b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")) || String(b.createdAt?.seconds || 0).localeCompare(String(a.createdAt?.seconds || 0)));
+  let list = jobs.filter((j) => status ? j.status === status : !["Completed","Closed","Cancelled"].includes(j.status));
+  list = list.sort((a,b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")) || Number(b.createdAt?.seconds || 0) - Number(a.createdAt?.seconds || 0));
 
-  els.metricAssigned.textContent = mine.filter((j) => j.status === "Assigned").length;
-  els.metricProgress.textContent = mine.filter((j) => j.status === "In Progress").length;
-  els.metricUrgent.textContent = mine.filter((j) => /urgent|critical/i.test(j.priority || "") && !["Completed","Closed","Cancelled"].includes(j.status)).length;
-  els.metricApproval.textContent = mine.filter((j) => j.status === "Waiting Approval").length;
+  const open = openJobs();
+  els.metricAssigned.textContent = jobs.filter((j) => j.status === "Assigned").length;
+  els.metricProgress.textContent = jobs.filter((j) => j.status === "In Progress").length;
+  els.metricUrgent.textContent = open.filter((j) => /urgent|critical/i.test(j.priority || "")).length;
+  els.metricApproval.textContent = jobs.filter((j) => j.status === "Waiting Approval").length;
 
-  els.jobQueue.innerHTML = list.length ? list.map((j) => `
-    <article class="mechanic-job-card ${/urgent|critical/i.test(j.priority || "") ? "urgent" : ""}">
-      <div class="job-card-top">
-        <div><div class="job-card-number">${esc(j.jobNumber || j.id)}</div><div class="job-card-bus">${esc(j.fleetNumber || "Bus")}</div></div>
-        <span class="badge ${/urgent|critical/i.test(j.priority || "") ? "bad" : /high/i.test(j.priority || "") ? "warn" : "info"}">${esc(j.priority || "Normal")}</span>
-      </div>
-      <div class="job-card-type">${esc(j.jobType || "Workshop Job")}</div>
-      <div class="job-card-fault">${esc(j.reportedFault || "No fault description")}</div>
-      <div class="list-meta">Status: ${esc(j.status || "New")}</div>
-      <div class="list-meta">Due: ${esc(fmtDate(j.dueDate))}</div>
-      <div class="job-card-footer"><span class="list-meta">${esc(j.rego || "")}</span><button class="button primary" type="button" data-open-job="${esc(j.id)}">${j.status === "Assigned" ? "Open Job Card" : "Continue Job"}</button></div>
-    </article>`).join("") : `<div class="empty">No workshop jobs assigned to you for this filter.</div>`;
+  if (!list.length) {
+    els.jobQueue.innerHTML = `<div class="empty">No workshop jobs for this filter.</div>`;
+    return;
+  }
+
+  els.jobQueue.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th><th>Bus</th><th>Type</th><th>Priority</th><th>Assigned Mechanic</th><th>Status</th><th>Due</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${list.map((j) => `
+            <tr>
+              <td><strong>${esc(j.jobNumber || j.id)}</strong><div class="list-meta">${esc(j.reportedFault || "")}</div></td>
+              <td><strong>${esc(j.fleetNumber || "—")}</strong><div class="list-meta">${esc(j.rego || "")}</div></td>
+              <td>${esc(j.jobType || "Workshop Job")}</td>
+              <td><span class="badge ${/urgent|critical/i.test(j.priority || "") ? "bad" : /high/i.test(j.priority || "") ? "warn" : "info"}">${esc(j.priority || "Normal")}</span></td>
+              <td>${esc(j.assignedMechanic || j.assignedMechanicName || j.assignedMechanicEmployeeNumber || "Unassigned")}</td>
+              <td>${esc(j.status || "New")}</td>
+              <td>${esc(fmtDate(j.dueDate))}</td>
+              <td><button class="button primary" type="button" data-open-job="${esc(j.id)}">${j.status === "Assigned" ? "Open Job Card" : "View / Continue"}</button></td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+
   els.jobQueue.querySelectorAll("[data-open-job]").forEach((btn) => btn.addEventListener("click", () => openJob(btn.dataset.openJob)));
 }
 
-function renderEmployeeIdentity() {
-  if (!currentEmployee) { els.mechanicIdentity.textContent = "No matching employee profile found for this sign-in."; return; }
-  els.mechanicIdentity.textContent = `${displayName(currentEmployee)} · Employee ${currentEmployee.employeeNumber || "—"} · ${currentEmployee.role || currentEmployee.department || "Workshop"}`;
+function jobBus(job) {
+  return buses.find((b) => b.id === job.busId || normalize(b.fleetNumber || b.busNumber) === normalize(job.fleetNumber));
 }
-
-function jobBus(job) { return buses.find((b) => b.id === job.busId || normalize(b.fleetNumber || b.busNumber) === normalize(job.fleetNumber)); }
-function currentBusOdo(job) { const b = jobBus(job); return num(b?.currentOdometer ?? b?.odometer ?? b?.odometerKm ?? job.currentOdometer); }
+function currentBusOdo(job) {
+  const b = jobBus(job);
+  return num(b?.currentOdometer ?? b?.odometer ?? b?.odometerKm ?? job.currentOdometer);
+}
 
 function renderChecklist(job) {
   const items = CHECKLISTS[job.jobType] || CHECKLISTS.Other;
@@ -117,18 +123,19 @@ function partRow(part={}) {
   tr.querySelector(".remove-part").addEventListener("click", () => tr.remove());
   els.partsBody.appendChild(tr);
 }
-
 function renderParts(parts=[]) { els.partsBody.innerHTML = ""; if (parts.length) parts.forEach(partRow); else partRow(); }
 
 function openJob(id) {
   const job = jobs.find((j) => j.id === id);
-  if (!job || !employeeMatchesJob(job)) return showStatus("This job is not assigned to your employee profile.", "error");
-  selectedJob = job; clearStatus();
-  els.queueView.hidden = true; els.jobCardView.hidden = false;
+  if (!job) return showStatus("Workshop job not found.", "error");
+  selectedJob = job;
+  clearStatus();
+  els.queueView.hidden = true;
+  els.jobCardView.hidden = false;
   els.jobCardTitle.textContent = `${job.jobNumber || job.id} · ${job.jobType || "Workshop Job"}`;
   els.jobCardVehicle.textContent = `${job.fleetNumber || "Bus"}${job.rego ? ` · ${job.rego}` : ""}`;
   els.jobCardStatusBadge.innerHTML = `<span class="badge info">${esc(job.status || "New")}</span>`;
-  els.jobCardMeta.innerHTML = `<div><strong>Priority:</strong> ${esc(job.priority || "Normal")}</div><div><strong>Due:</strong> ${esc(fmtDate(job.dueDate))}</div><div><strong>Assigned:</strong> ${esc(job.assignedMechanic || displayName(currentEmployee))}</div>`;
+  els.jobCardMeta.innerHTML = `<div><strong>Priority:</strong> ${esc(job.priority || "Normal")}</div><div><strong>Due:</strong> ${esc(fmtDate(job.dueDate))}</div><div><strong>Assigned:</strong> ${esc(job.assignedMechanic || job.assignedMechanicName || "Unassigned")}</div>`;
   els.readonlyJobDetails.innerHTML = `<div class="readonly-field"><div class="readonly-label">Requested work</div><div class="readonly-value">${esc(job.reportedFault || "—")}</div></div><div class="readonly-field"><div class="readonly-label">Fleet Manager notes</div><div class="readonly-value">${esc(job.managerNotes || "—")}</div></div>`;
   const previous = currentBusOdo(job);
   els.jobPreviousOdometer.value = previous == null ? "" : String(previous);
@@ -142,7 +149,8 @@ function openJob(id) {
   els.labourStart.value = job.jobCard?.labourStart || "";
   els.labourFinish.value = job.jobCard?.labourFinish || "";
   els.mechanicNotes.value = job.jobCard?.mechanicNotes || "";
-  renderChecklist(job); renderParts(job.jobCard?.partsUsed || []);
+  renderChecklist(job);
+  renderParts(job.jobCard?.partsUsed || []);
   const locked = ["Completed","Closed","Waiting Approval"].includes(job.status);
   els.jobCardForm.classList.toggle("jobcard-locked", locked);
   els.startJobBtn.disabled = locked || job.status === "In Progress";
@@ -162,9 +170,18 @@ function collectJobCard() {
     supplierRef: tr.querySelector(".part-supplier")?.value.trim() || ""
   })).filter((p) => p.partNumber || p.description || p.supplierRef || p.quantity > 0);
   return {
-    previousOdometer: num(els.jobPreviousOdometer.value), currentOdometer: num(els.jobCurrentOdometer.value),
-    diagnosis: els.diagnosis.value.trim(), workCompleted: els.workCompleted.value.trim(), furtherWork: els.furtherWork.value.trim(), furtherWorkRequired: els.furtherWorkRequired.value,
-    safeToReturn: els.safeToReturn.value, checklist, partsUsed, labourStart: els.labourStart.value, labourFinish: els.labourFinish.value, mechanicNotes: els.mechanicNotes.value.trim()
+    previousOdometer: num(els.jobPreviousOdometer.value),
+    currentOdometer: num(els.jobCurrentOdometer.value),
+    diagnosis: els.diagnosis.value.trim(),
+    workCompleted: els.workCompleted.value.trim(),
+    furtherWork: els.furtherWork.value.trim(),
+    furtherWorkRequired: els.furtherWorkRequired.value,
+    safeToReturn: els.safeToReturn.value,
+    checklist,
+    partsUsed,
+    labourStart: els.labourStart.value,
+    labourFinish: els.labourFinish.value,
+    mechanicNotes: els.mechanicNotes.value.trim()
   };
 }
 
@@ -172,59 +189,83 @@ async function saveJobCard(status, message) {
   if (!selectedJob) return;
   clearStatus();
   const card = collectJobCard();
-  if (card.currentOdometer != null && card.previousOdometer != null && card.currentOdometer < card.previousOdometer) return showStatus(`Current odometer cannot be lower than ${card.previousOdometer.toLocaleString("en-AU")} km.`, "error");
+  if (card.currentOdometer != null && card.previousOdometer != null && card.currentOdometer < card.previousOdometer) {
+    return showStatus(`Current odometer cannot be lower than ${card.previousOdometer.toLocaleString("en-AU")} km.`, "error");
+  }
   if (status === "Waiting Approval") {
     if (!card.diagnosis) return showStatus("Enter diagnosis / findings before completing the job.", "error");
     if (!card.workCompleted) return showStatus("Enter work carried out before completing the job.", "error");
     if (!card.safeToReturn) return showStatus("Select whether the vehicle is safe to return to service.", "error");
   }
   const payload = {
-    jobCard: card, status,
+    jobCard: card,
+    status,
     updatedAt: serverTimestamp(),
-    updatedByEmail: normalize(currentUser?.email),
-    mechanicEmployeeNumber: currentEmployee?.employeeNumber || "",
-    mechanicName: displayName(currentEmployee),
-    mechanicEmail: normalize(currentEmployee?.email || currentUser?.email)
+    updatedByEmail: normalize(currentUser?.email)
   };
   if (status === "In Progress" && !selectedJob.startedAt) payload.startedAt = serverTimestamp();
-  if (status === "Waiting Approval") { payload.completedAt = serverTimestamp(); payload.completedByEmail = normalize(currentUser?.email); }
+  if (status === "Waiting Approval") {
+    payload.completedAt = serverTimestamp();
+    payload.completedByEmail = normalize(currentUser?.email);
+  }
   try {
-    await updateDoc(doc(db,"workshopJobs",selectedJob.id), payload);
+    await updateDoc(doc(db, "workshopJobs", selectedJob.id), payload);
     showStatus(message);
-    if (status === "Waiting Approval") { els.jobCardView.hidden = true; els.queueView.hidden = false; selectedJob = null; }
-  } catch (err) { showStatus(err?.message || "Unable to update workshop job.", "error"); }
+  } catch (err) {
+    showStatus(err?.message || "Unable to update workshop job.", "error");
+  }
 }
 
 function startListeners() {
-  employeeUnsub?.(); jobsUnsub?.(); busesUnsub?.();
-  employeeUnsub = onSnapshot(collection(db,"employees"),(snap) => {
-    const all = snap.docs.map((d) => ({id:d.id,...d.data()}));
-    currentEmployee = all.find((e) => normalize(e.email) === normalize(currentUser?.email)) || null;
-    renderEmployeeIdentity(); renderQueue();
-  },(err) => showStatus(err?.message || "Unable to load employee profile.","error"));
-  jobsUnsub = onSnapshot(query(collection(db,"workshopJobs"),orderBy("createdAt","desc")),(snap) => {
-    jobs = snap.docs.map((d) => ({id:d.id,...d.data()})); renderQueue();
-    if (selectedJob) { const refreshed = jobs.find((j) => j.id === selectedJob.id); if (refreshed) selectedJob = refreshed; }
-  },(err) => showStatus(err?.message || "Unable to load workshop jobs.","error"));
-  busesUnsub = onSnapshot(collection(db,"buses"),(snap) => { buses = snap.docs.map((d) => ({id:d.id,...d.data()})); });
+  if (jobsUnsub) jobsUnsub();
+  if (busesUnsub) busesUnsub();
+
+  jobsUnsub = onSnapshot(query(collection(db, "workshopJobs"), orderBy("createdAt", "desc")), (snap) => {
+    jobs = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+    renderQueue();
+    if (selectedJob) {
+      const refreshed = jobs.find((j) => j.id === selectedJob.id);
+      if (refreshed) selectedJob = refreshed;
+    }
+  }, (err) => showStatus(err?.message || "Unable to load workshop jobs.", "error"));
+
+  busesUnsub = onSnapshot(collection(db, "buses"), (snap) => {
+    buses = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
+  });
 }
 
-els.statusFilter.addEventListener("change",renderQueue);
-els.refreshBtn.addEventListener("click",renderQueue);
-els.backToQueueBtn.addEventListener("click",() => { selectedJob = null; els.jobCardView.hidden = true; els.queueView.hidden = false; clearStatus(); });
-els.addPartBtn.addEventListener("click",() => partRow());
-els.startJobBtn.addEventListener("click",() => saveJobCard("In Progress","Job started."));
-els.waitingPartsBtn.addEventListener("click",() => saveJobCard("Waiting Parts","Job marked as waiting for parts."));
-els.saveProgressBtn.addEventListener("click",() => saveJobCard(selectedJob?.status === "Assigned" ? "In Progress" : (selectedJob?.status || "In Progress"),"Progress saved."));
-els.completeJobBtn.addEventListener("click",() => saveJobCard("Waiting Approval","Job card completed and sent to Fleet Manager for approval."));
-els.loginBtn.addEventListener("click",() => signInWithPopup(auth,provider));
-els.logoutBtn.addEventListener("click",() => signOut(auth));
+els.statusFilter.addEventListener("change", renderQueue);
+els.refreshBtn.addEventListener("click", () => renderQueue());
+els.backToQueueBtn.addEventListener("click", () => {
+  selectedJob = null;
+  els.jobCardView.hidden = true;
+  els.queueView.hidden = false;
+  clearStatus();
+});
+els.addPartBtn.addEventListener("click", () => partRow());
+els.startJobBtn.addEventListener("click", () => saveJobCard("In Progress", "Workshop job started."));
+els.waitingPartsBtn.addEventListener("click", () => saveJobCard("Waiting Parts", "Workshop job marked as waiting for parts."));
+els.saveProgressBtn.addEventListener("click", () => saveJobCard(selectedJob?.status === "Assigned" ? "In Progress" : (selectedJob?.status || "In Progress"), "Job card progress saved."));
+els.completeJobBtn.addEventListener("click", () => saveJobCard("Waiting Approval", "Job card completed and sent to Fleet Manager for approval."));
+els.loginBtn.addEventListener("click", () => signInWithPopup(auth, provider));
+els.logoutBtn.addEventListener("click", () => signOut(auth));
 
-onAuthStateChanged(auth,(user) => {
+onAuthStateChanged(auth, (user) => {
   currentUser = user;
   if (!user) {
-    els.authText.textContent = "Not signed in"; els.loginBtn.hidden = false; els.logoutBtn.hidden = true; els.jobQueue.innerHTML = `<div class="empty">Sign in to view assigned workshop jobs.</div>`;
-    employeeUnsub?.(); jobsUnsub?.(); busesUnsub?.(); return;
+    els.authText.textContent = "Not signed in";
+    els.loginBtn.hidden = false;
+    els.logoutBtn.hidden = true;
+    els.mechanicIdentity.textContent = "Sign in to view the shared workshop queue.";
+    els.jobQueue.innerHTML = `<div class="empty">Sign in to load workshop jobs.</div>`;
+    if (jobsUnsub) jobsUnsub();
+    if (busesUnsub) busesUnsub();
+    return;
   }
-  els.authText.textContent = `Signed in: ${user.email || ""}`; els.loginBtn.hidden = true; els.logoutBtn.hidden = false; startListeners();
+
+  els.authText.textContent = `Signed in: ${user.email}`;
+  els.loginBtn.hidden = true;
+  els.logoutBtn.hidden = false;
+  els.mechanicIdentity.textContent = "Shared workshop table · all assigned jobs visible to workshop staff";
+  startListeners();
 });
