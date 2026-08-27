@@ -315,10 +315,25 @@ export async function go(pageId) {
     return;
   }
 
+  if (pageId === "charterBookings") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    const mod = await import("./charter_bookings.js?v=1");
+    await mod.renderCharterBookingsPage();
+    return;
+  }
+
   if (pageId === "customers") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
     window.location.href = "./customers.html";
+    return;
+  }
+
+  if (pageId === "enquiryInbox") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    window.location.href = "./enquiry_inbox.html";
     return;
   }
 
@@ -328,7 +343,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=3");
+    const mod = await import("./dispatch_board.js?v=14");
     mod.renderDispatchBoardPage();
     return;
   }
@@ -1013,7 +1028,9 @@ onSnapshot(
   }
 
   if (pageId === "incidentReport") {
-    renderPlaceholder("Incident Report", "Coming soon...");
+    stopAllListeners();
+    const mod = await import("./incident_reports.js?v=2");
+    await mod.renderIncidentReportPage();
     return;
   }
 

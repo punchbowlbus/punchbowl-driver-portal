@@ -9,6 +9,7 @@ import {
   updateDoc,
   setDoc,
   getDoc,
+  writeBatch,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
@@ -271,6 +272,41 @@ export async function updateDutySpan(dutySpanId, patch) {
   }
 
   await updateDoc(doc(db, "dutySpans", dutySpanId), nextPatch);
+}
+
+export async function transferDutySpanWithBlocks({
+  dutySpanId,
+  blockIds = [],
+  driverEmployeeNumber,
+  driverName
+}) {
+  if (!dutySpanId) throw new Error("Duty span id is required.");
+  if (!driverEmployeeNumber) throw new Error("Target driver is required.");
+
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+
+  batch.update(doc(db, "dutySpans", dutySpanId), {
+    driverEmployeeNumber: String(driverEmployeeNumber).trim(),
+    driverName: String(driverName || "").trim(),
+    driverAcknowledgment: "Pending",
+    dispatchStatus: "Pending",
+    reassignedAt: now,
+    updatedAt: now
+  });
+
+  [...new Set(blockIds.filter(Boolean).map(String))].forEach((blockId) => {
+    batch.update(doc(db, "blocks", blockId), {
+      assignedDriverEmployeeNumber: String(driverEmployeeNumber).trim(),
+      assignedDriverName: String(driverName || "").trim(),
+      dutySpanId: String(dutySpanId),
+      dispatchStatus: "Assigned",
+      reassignedAt: now,
+      updatedAt: now
+    });
+  });
+
+  await batch.commit();
 }
 
 export async function updateDutySpanDispatchStatus(dutySpanId, dispatchStatus) {

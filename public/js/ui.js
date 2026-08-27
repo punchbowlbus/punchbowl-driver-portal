@@ -124,8 +124,6 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
 
   const adminQuickItems = isAdmin
     ? [
-        { id: "newEnquiry", label: "New Enquiry", icon: "phone-incoming" },
-        { id: "customers", label: "Customers", icon: "building-2" },
         { id: "adminAllJobs", label: "All Jobs", icon: "list" },
         { id: "driverMonitor", label: "Driver Monitor", icon: "users" },
         { id: "operationsDashboard", label: "Operations Dashboard", icon: "bar-chart-3" },
@@ -136,16 +134,28 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
       ]
     : [];
 
-  const adminItems = isAdmin
+  const charterItems = isAdmin
+    ? [
+        { id: "charterBookings", label: "Charter Bookings", icon: "notebook-tabs" },
+        { id: "customers", label: "Customers", icon: "building-2" },
+      ]
+    : [];
+
+  const planningItems = isAdmin
     ? [
         { id: "adminDispatchBoard", label: "Dispatch Board", icon: "map" },
-        { id: "adminEmployees", label: "Employees", icon: "user" },
-        { id: "adminBuses", label: "Fleet", icon: "bus" },
         { id: "adminBookings", label: "Job Groups", icon: "layers" },
         { id: "adminBlocks", label: "Blocks", icon: "grid" },
         { id: "adminPermanentRuns", label: "Permanent Runs", icon: "repeat" },
         { id: "adminBulkDutySpans", label: "Bulk Duty Spans", icon: "layers" },
         { id: "adminBlocksByDate", label: "Blocks By Date", icon: "calendar" },
+      ]
+    : [];
+
+  const administrationItems = isAdmin
+    ? [
+        { id: "adminEmployees", label: "Employees", icon: "user" },
+        { id: "adminBuses", label: "Fleet", icon: "bus" },
         { id: "settings", label: "Settings", icon: "settings" },
       ]
     : [];
@@ -162,6 +172,24 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
       )
       .join("");
 
+  const renderGroup = (id, title, items, defaultOpen = true) => {
+    const storageKey = `pbc-menu-${id}`;
+    const containsActivePage = items.some((item) => item.id === activePage);
+    let isOpen = defaultOpen;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved !== null) isOpen = saved !== "closed";
+    } catch {}
+    if (containsActivePage) isOpen = true;
+    return `
+      <section class="menuSection" data-menu-section="${escapeHtml(id)}">
+        <button class="menuGroupTitle menuGroupToggle" type="button" data-menu-toggle="${escapeHtml(id)}" aria-expanded="${isOpen}">
+          <span>${escapeHtml(title)}</span><i data-lucide="chevron-down"></i>
+        </button>
+        <div class="menuGroupBody" data-menu-body="${escapeHtml(id)}" ${isOpen ? "" : "hidden"}>${renderButtons(items)}</div>
+      </section>`;
+  };
+
   if (!isAdmin) {
     els.navArea.innerHTML = `
       <div class="menuGroupTitle">MENU</div>
@@ -169,14 +197,12 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     `;
     els.adminNavArea.innerHTML = "";
   } else {
-    els.navArea.innerHTML = `
-      <div class="menuGroupTitle">OPERATIONS</div>
-      ${renderButtons(adminQuickItems)}
-    `;
+    els.navArea.innerHTML = renderGroup("operations", "Operations", adminQuickItems, true);
 
     els.adminNavArea.innerHTML = `
-      <div class="menuGroupTitle">MANAGEMENT</div>
-      ${renderButtons(adminItems)}
+      ${renderGroup("charter", "Charter Management", charterItems, true)}
+      ${renderGroup("planning", "Planning & Dispatch", planningItems, true)}
+      ${renderGroup("administration", "Administration", administrationItems, false)}
     `;
   }
 
@@ -196,6 +222,19 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
 
   hook(els.navArea);
   hook(els.adminNavArea);
+
+  [...document.querySelectorAll("[data-menu-toggle]")].forEach((button) => {
+    button.onclick = () => {
+      const id = button.getAttribute("data-menu-toggle");
+      const body = document.querySelector(`[data-menu-body="${id}"]`);
+      if (!body) return;
+      const willOpen = body.hidden;
+      body.hidden = willOpen ? false : true;
+      button.setAttribute("aria-expanded", String(willOpen));
+      try { localStorage.setItem(`pbc-menu-${id}`, willOpen ? "open" : "closed"); } catch {}
+      if (window.lucide) window.lucide.createIcons();
+    };
+  });
 
   if (window.lucide) window.lucide.createIcons();
 }

@@ -35,6 +35,7 @@ let editingContactId = null;
 let activeFilter = "active";
 let saving = false;
 let unsubscribers = [];
+let requestedOrganisationId = new URLSearchParams(window.location.search).get("organisationId") || "";
 
 function isAdmin(email) {
   return ADMIN_EMAILS.map(normalizeEmail).includes(normalizeEmail(email));
@@ -263,7 +264,7 @@ async function toggleActive() {
 function startListeners() {
   unsubscribers.forEach((unsubscribe) => unsubscribe());
   unsubscribers = [
-    onSnapshot(query(collection(db, "organisations"), limit(500)), (snapshot) => { organisations = snapshot.docs.map((item) => ({id: item.id, ...item.data()})); renderDirectory(); if (selectedOrganisationId) selectOrganisation(selectedOrganisationId); }, (error) => showStatus(error.message, "error")),
+    onSnapshot(query(collection(db, "organisations"), limit(500)), (snapshot) => { organisations = snapshot.docs.map((item) => ({id: item.id, ...item.data()})); renderDirectory(); if (selectedOrganisationId) selectOrganisation(selectedOrganisationId); else if (requestedOrganisationId && organisations.some((item) => item.id === requestedOrganisationId)) { const id = requestedOrganisationId; requestedOrganisationId = ""; selectOrganisation(id); } }, (error) => showStatus(error.message, "error")),
     onSnapshot(query(collection(db, "customerContacts"), limit(1000)), (snapshot) => { contacts = snapshot.docs.map((item) => ({id: item.id, ...item.data()})); renderDirectory(); if (selectedOrganisationId) { renderContacts(selectedOrganisationId); const org = organisations.find((item) => item.id === selectedOrganisationId); if (org) renderHistory(org); } }, () => {}),
     onSnapshot(query(collection(db, "enquiries"), limit(1000)), (snapshot) => { enquiries = snapshot.docs.map((item) => ({id: item.id, ...item.data()})); renderDirectory(); if (selectedOrganisationId) { const org = organisations.find((item) => item.id === selectedOrganisationId); if (org) renderHistory(org); } }, () => {}),
     onSnapshot(query(collection(db, "employees"), limit(300)), (snapshot) => {
