@@ -47,7 +47,7 @@ function hasWorkshopManagerAccess(employee) {
   const role = String(employee.role || "").trim().toLowerCase();
   const accessLevel = String(employee.accessLevel || "").trim().toLowerCase();
   if (status !== "active") return false;
-  if (accessLevel === "super admin") return true;
+  if (accessLevel === "admin" || accessLevel === "super admin") return true;
   return department === "workshop" && (role === "manager" || role === "fleet manager");
 }
 function esc(v) { return String(v ?? "").replace(/[&<>'"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[m])); }
@@ -280,11 +280,11 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   const allowed = isSuperAdmin(user.email) || hasWorkshopManagerAccess(employee);
-  els.authText.textContent = isSuperAdmin(user.email) ? `Super Admin: ${user.email}` : `Fleet Manager: ${user.email}`;
+  els.authText.textContent = isSuperAdmin(user.email) ? `Super Admin: ${user.email}` : `Workshop: ${user.email}`;
 
   if (!allowed) {
     stopListeners();
-    showStatus("Your employee record does not have Fleet Manager access to Workshop Management.", "error");
+    showStatus("Your employee record does not have Admin or Fleet Manager access to Workshop Management.", "error");
     return;
   }
 
