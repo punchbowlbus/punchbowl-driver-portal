@@ -161,3 +161,6 @@ if (status) {
 }
 
 ensureUi();
+
+// Load the popup-free Job Card print handler after the existing Workshop modules.
+import("./workshop_print_fix.js?v=20260828-print1").catch((err) => console.error("Workshop print handler failed to load", err));
