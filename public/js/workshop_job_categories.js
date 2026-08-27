@@ -6,6 +6,7 @@ import {
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
+import { getRequirementTemplate } from "./workshop_service_requirements.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -183,7 +184,6 @@ async function createJobWithCategory(event) {
   const form = event.target;
   if (form?.id !== "jobForm") return;
 
-  // Own this submission so the category is saved atomically with the Job Card.
   event.preventDefault();
   event.stopImmediatePropagation();
 
@@ -203,6 +203,21 @@ async function createJobWithCategory(event) {
   const assignedMechanic = String($("jobMechanic")?.value || "").trim();
   const vehicleIsEv = isEv(bus);
   const interval = jobType === "Scheduled Service" ? serviceInterval(bus, category) : null;
+  const requirementKey = templateKey(bus, jobType, category);
+  const requirementTemplate = requirementKey ? getRequirementTemplate(requirementKey) : null;
+  const assignedChecklist = requirementTemplate ? {
+    templateKey: requirementKey,
+    templateTitle: requirementTemplate.title,
+    templateSource: requirementTemplate.source,
+    schedule: requirementTemplate.schedule || "",
+    assignedAtIso: new Date().toISOString(),
+    items: requirementTemplate.items.map((item, index) => ({
+      id: `${requirementKey}-${index + 1}`,
+      section: item.section || "General",
+      item: item.item || "",
+      action: item.action || ""
+    }))
+  } : null;
 
   const payload = {
     jobNumber,
@@ -214,7 +229,8 @@ async function createJobWithCategory(event) {
     serviceType:jobType === "Scheduled Service" ? category : "",
     inspectionType:jobType === "Safety Inspection" ? category : "",
     serviceProgram:jobType === "Scheduled Service" ? (vehicleIsEv ? "EV" : "Diesel") : "",
-    serviceTemplateKey:templateKey(bus, jobType, category),
+    serviceTemplateKey:requirementKey,
+    assignedChecklist,
     serviceIntervalKm:interval,
     serviceDueOdometer:jobType === "Scheduled Service" && bus.nextServiceType === category ? num(bus.nextServiceOdometer) : null,
     priority:$("jobPriority")?.value || "Normal",
@@ -234,7 +250,7 @@ async function createJobWithCategory(event) {
     createdByEmail:normalizeEmail(auth.currentUser?.email),
     createdAt:serverTimestamp(),
     updatedAt:serverTimestamp(),
-    schemaVersion:2
+    schemaVersion:3
   };
 
   const submitBtn = form.querySelector('button[type="submit"]');
@@ -249,7 +265,8 @@ async function createJobWithCategory(event) {
     $("jobCategoryWrap").hidden = true;
     $("jobDialog")?.close();
     const categoryText = category ? ` · ${category}` : "";
-    showStatus(`✓ Workshop job ${jobNumber} created${categoryText} and assigned successfully.`);
+    const checklistText = assignedChecklist ? ` · ${assignedChecklist.items.length} checklist items assigned` : "";
+    showStatus(`✓ Workshop job ${jobNumber} created${categoryText}${checklistText}.`);
   } catch (err) {
     showStatus(err?.message || "Unable to create workshop job.", "error");
   } finally {
