@@ -1,295 +1,455 @@
-// Import necessary Firebase and UI modules
-import { listenBuses, saveBus } from "./db.js";
+import {
+  deactivateBus,
+  getBus,
+  listenBuses,
+  saveBus
+} from "./db.js";
 import { els, showError } from "./ui.js";
+import { escapeHtml } from "./utils.js";
 
-// Function to render the buses page
+let busesUnsub = null;
+
+const ACCESS_TYPES = ["STEPS", "WHEEL CHAIR", "LOW FLOOR"];
+const FUEL_TYPES = ["Diesel", "EV", "Hybrid"];
+const DEPOTS = ["Hannans", "Bounds", "Olympic Park"];
+const STATUSES = ["Active", "In Service", "Workshop", "Out of Service", "Inactive"];
+const YES_NO = ["YES", "NO"];
+
+function options(items, placeholder) {
+  return [
+    `<option value="">${escapeHtml(placeholder)}</option>`,
+    ...items.map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`)
+  ].join("");
+}
+
+function statusClass(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "active" || value === "in service") return "active";
+  if (value === "workshop") return "workshop";
+  if (value === "out of service") return "out";
+  return "inactive";
+}
+
+function parseCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const character = line[i];
+    if (character === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (character === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function normalizeYesNo(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (["YES", "Y"].includes(normalized)) return "YES";
+  if (["NO", "N"].includes(normalized)) return "NO";
+  return String(value || "").trim();
+}
+
 export function renderBusesPage() {
   showError("");
 
+  if (busesUnsub) {
+    busesUnsub();
+    busesUnsub = null;
+  }
+
   els.contentArea.innerHTML = `
-    <h2 style="margin-top:0">Fleet Management</h2>
+    <div id="fleetPage" class="fleet-page">
+      <header class="fleet-hero">
+        <div class="fleet-hero-title">
+          <span><i data-lucide="bus-front"></i></span>
+          <div>
+            <div class="fleet-eyebrow">Fleet management</div>
+            <h2>Fleet</h2>
+            <p>Manage vehicle records, specifications, depot allocation and service status.</p>
+          </div>
+        </div>
+        <div class="fleet-hero-actions">
+          <button id="importBusesBtn" type="button" class="fleet-secondary-btn"><i data-lucide="file-up"></i> Import CSV</button>
+          <button id="addBusBtn" type="button" class="fleet-primary-btn"><i data-lucide="plus"></i> Add Vehicle</button>
+          <input id="importBusesFile" type="file" accept=".csv,text/csv" hidden />
+        </div>
+      </header>
 
-    <div class="card">
-      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
-        <button id="addBusBtn">Add Bus</button>
-        <button id="editBusBtn">Edit Selected</button>
-        <button id="importBusesBtn" type="button">Import CSV</button>
-        <input id="importBusesFile" type="file" accept=".csv" style="display:none" />
-        <input id="busSearch" type="text" placeholder="Search bus..." style="max-width:260px"/>
-      </div>
+      <div id="fleetPageMessage" class="fleet-message" hidden></div>
 
-      <div id="busFormWrap" style="display:none; margin-bottom:16px; padding:14px; border:1px solid #ddd; border-radius:12px; background:#fff;">
-        <h3 id="busFormTitle" style="margin-top:0">Add Bus</h3>
-
-        <div style="display:grid; grid-template-columns:repeat(2, minmax(220px, 1fr)); gap:10px;">
-          <input id="busFleetNumber" type="text" placeholder="Fleet Number" />
-          <input id="busRego" type="text" placeholder="Rego" />
-
-          <select id="busAccessType">
-            <option value="">Access Type</option>
-            <option value="STEPS">STEPS</option>
-            <option value="WHEEL CHAIR">WHEEL CHAIR</option>
-            <option value="LOW FLOOR">LOW FLOOR</option>
-          </select>
-
-          <input id="busYear" type="text" placeholder="Year" />
-          <input id="busMake" type="text" placeholder="Make" />
-          <input id="busModel" type="text" placeholder="Model" />
-          <input id="busEuro" type="text" placeholder="Euro #" />
-
-          <select id="busAdblue">
-            <option value="">AdBlue</option>
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-          </select>
-
-          <select id="busFuelType">
-            <option value="">Fuel Type</option>
-            <option value="Diesel">Diesel</option>
-            <option value="EV">EV</option>
-            <option value="Hybrid">Hybrid</option>
-          </select>
-
-          <input id="busVin" type="text" placeholder="VIN / Chassis No." />
-
-          <select id="busAirConditioned">
-            <option value="">Air Conditioned</option>
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-          </select>
-
-          <input id="busTare" type="text" placeholder="Tare" />
-          <input id="busGvm" type="text" placeholder="GVM" />
-          <input id="busRegoExpiry" type="text" placeholder="Date of Rego / Expiry" />
-
-          <select id="busRearDoor">
-            <option value="">Rear Door</option>
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-          </select>
-
-          <input id="busSeatCount" type="text" placeholder="Seat Count" />
-          <input id="busStandCount" type="text" placeholder="Stand Count" />
-          <input id="busBodyBy" type="text" placeholder="Body By" />
-          <input id="busBodyModel" type="text" placeholder="Body Model" />
-          <input id="busColour" type="text" placeholder="Colour" />
-          <input id="busCctvCount" type="text" placeholder="CCTV Count" />
-
-          <select id="busFireSuppression">
-            <option value="">Fire Suppression</option>
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-          </select>
-
-          <select id="busLuggageBins">
-            <option value="">Luggage Bins</option>
-            <option value="YES">YES</option>
-            <option value="NO">NO</option>
-          </select>
-
-          <select id="busDepot">
-            <option value="">Depot</option>
-            <option value="Hannans">Hannans</option>
-            <option value="Bounds">Bounds</option>
-            <option value="Olympic Park">Olympic Park</option>
-          </select>
-
-          <select id="busStatus">
-            <option value="Active">Active</option>
-            <option value="In Service">In Service</option>
-            <option value="Workshop">Workshop</option>
-            <option value="Out of Service">Out of Service</option>
-            <option value="Inactive">Inactive</option>
-          </select>
+      <section id="busFormWrap" class="card fleet-form-card" hidden>
+        <div class="fleet-form-heading">
+          <div>
+            <div id="busFormKicker" class="fleet-form-kicker">New vehicle</div>
+            <h3 id="busFormTitle">Add Vehicle</h3>
+            <p id="busFormSubtitle">Create a vehicle record and enter its operating specifications.</p>
+          </div>
+          <button id="closeBusFormBtn" type="button" class="fleet-icon-btn" aria-label="Close vehicle form"><i data-lucide="x"></i></button>
         </div>
 
-        <div style="margin-top:10px;">
-          <textarea id="busNotes" placeholder="Notes" style="width:100%; min-height:80px; padding:10px; border:1px solid #ddd; border-radius:8px;"></textarea>
+        <div id="fleetFormMessage" class="fleet-form-message" hidden></div>
+
+        <div class="fleet-form-section">
+          <div class="fleet-section-heading"><span>1</span><div><h4>Vehicle identity</h4><p>Fleet number, registration and manufacturer information.</p></div></div>
+          <div class="fleet-form-grid">
+            <label class="fleet-field"><span>Fleet number <b>*</b></span><input id="busFleetNumber" type="text" maxlength="30" autocomplete="off" /></label>
+            <label class="fleet-field"><span>Registration</span><input id="busRego" type="text" maxlength="20" autocomplete="off" /></label>
+            <label class="fleet-field"><span>Year</span><input id="busYear" type="number" min="1950" max="2100" inputmode="numeric" /></label>
+            <label class="fleet-field"><span>Make</span><input id="busMake" type="text" maxlength="80" /></label>
+            <label class="fleet-field"><span>Model</span><input id="busModel" type="text" maxlength="100" /></label>
+            <label class="fleet-field"><span>VIN / chassis number</span><input id="busVin" type="text" maxlength="80" /></label>
+            <label class="fleet-field"><span>Body manufacturer</span><input id="busBodyBy" type="text" maxlength="80" /></label>
+            <label class="fleet-field"><span>Body model</span><input id="busBodyModel" type="text" maxlength="80" /></label>
+            <label class="fleet-field"><span>Colour</span><input id="busColour" type="text" maxlength="40" /></label>
+            <label class="fleet-field"><span>Registration expiry</span><input id="busRegoExpiry" type="text" maxlength="30" placeholder="DD/MM/YYYY" /></label>
+          </div>
         </div>
 
-        <div style="display:flex; gap:10px; margin-top:12px;">
-          <button id="saveBusBtn">Save Bus</button>
-          <button id="cancelBusBtn" type="button">Cancel</button>
+        <div class="fleet-form-section">
+          <div class="fleet-section-heading"><span>2</span><div><h4>Operating details</h4><p>Accessibility, capacity, fuel and vehicle configuration.</p></div></div>
+          <div class="fleet-form-grid fleet-form-grid-three">
+            <label class="fleet-field"><span>Access type</span><select id="busAccessType">${options(ACCESS_TYPES, "Select access type")}</select></label>
+            <label class="fleet-field"><span>Fuel type</span><select id="busFuelType">${options(FUEL_TYPES, "Select fuel type")}</select></label>
+            <label class="fleet-field"><span>Euro standard</span><input id="busEuro" type="text" maxlength="30" /></label>
+            <label class="fleet-field"><span>AdBlue</span><select id="busAdblue">${options(YES_NO, "Select Yes or No")}</select></label>
+            <label class="fleet-field"><span>Air conditioned</span><select id="busAirConditioned">${options(YES_NO, "Select Yes or No")}</select></label>
+            <label class="fleet-field"><span>Rear door</span><select id="busRearDoor">${options(YES_NO, "Select Yes or No")}</select></label>
+            <label class="fleet-field"><span>Seat capacity</span><input id="busSeatCount" type="number" min="0" inputmode="numeric" /></label>
+            <label class="fleet-field"><span>Standing capacity</span><input id="busStandCount" type="number" min="0" inputmode="numeric" /></label>
+            <label class="fleet-field"><span>CCTV count</span><input id="busCctvCount" type="number" min="0" inputmode="numeric" /></label>
+            <label class="fleet-field"><span>Tare</span><input id="busTare" type="text" maxlength="30" /></label>
+            <label class="fleet-field"><span>GVM</span><input id="busGvm" type="text" maxlength="30" /></label>
+            <label class="fleet-field"><span>Fire suppression</span><select id="busFireSuppression">${options(YES_NO, "Select Yes or No")}</select></label>
+            <label class="fleet-field"><span>Luggage bins</span><select id="busLuggageBins">${options(YES_NO, "Select Yes or No")}</select></label>
+          </div>
         </div>
-      </div>
 
-      <table style="width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <thead>
-          <tr style="text-align:left; border-bottom:1px solid #ddd; background:#f5f5f5">
-            <th style="padding:10px">Fleet No</th>
-            <th style="padding:10px">Rego</th>
-            <th style="padding:10px">Type</th>
-            <th style="padding:10px">Make / Model</th>
-            <th style="padding:10px">Seats</th>
-            <th style="padding:10px">Depot</th>
-            <th style="padding:10px">Status</th>
-          </tr>
-        </thead>
-        <tbody id="busesTableBody"></tbody>
-      </table>
+        <div class="fleet-form-section">
+          <div class="fleet-section-heading"><span>3</span><div><h4>Allocation and status</h4><p>Set the vehicle's current depot and operational availability.</p></div></div>
+          <div class="fleet-form-grid">
+            <label class="fleet-field"><span>Depot</span><select id="busDepot">${options(DEPOTS, "Select depot")}</select></label>
+            <label class="fleet-field"><span>Vehicle status <b>*</b></span><select id="busStatus">${STATUSES.map((status) => `<option value="${status}">${status}</option>`).join("")}</select></label>
+            <label class="fleet-field fleet-full"><span>Notes</span><textarea id="busNotes" maxlength="1000" placeholder="Operational notes, restrictions or vehicle information"></textarea></label>
+          </div>
+        </div>
+
+        <div class="fleet-form-actions">
+          <button id="saveBusBtn" type="button" class="fleet-primary-btn">Save Vehicle</button>
+          <button id="cancelBusBtn" type="button" class="btn">Cancel</button>
+          <button id="deactivateBusBtn" type="button" class="fleet-danger-btn" hidden>Deactivate Vehicle</button>
+        </div>
+      </section>
+
+      <section class="card fleet-directory">
+        <div class="fleet-directory-heading">
+          <div><h3>Fleet Directory</h3><p id="fleetResultCount">Loading vehicles…</p></div>
+          <button id="editBusBtn" type="button" class="btn" disabled><i data-lucide="pencil"></i> Edit Selected</button>
+        </div>
+
+        <div class="fleet-filters">
+          <label class="fleet-search"><span>Search</span><div><i data-lucide="search"></i><input id="busSearch" type="search" placeholder="Fleet number, rego, make or model" /></div></label>
+          <label><span>Depot</span><select id="busDepotFilter"><option value="">All depots</option>${DEPOTS.map((depot) => `<option value="${depot}">${depot}</option>`).join("")}</select></label>
+          <label><span>Status</span><select id="busStatusFilter"><option value="">All statuses</option>${STATUSES.map((status) => `<option value="${status}">${status}</option>`).join("")}</select></label>
+          <button id="clearFleetFilters" type="button" class="btn">Clear filters</button>
+        </div>
+
+        <div class="fleet-table-wrap">
+          <table class="fleet-table">
+            <thead><tr><th>Vehicle</th><th>Access</th><th>Make / model</th><th>Capacity</th><th>Depot</th><th>Status</th></tr></thead>
+            <tbody id="busesTableBody"><tr><td colspan="6"><div class="fleet-empty">Loading vehicles…</div></td></tr></tbody>
+          </table>
+        </div>
+        <div id="fleetMobileList" class="fleet-mobile-list"></div>
+      </section>
     </div>
   `;
 
-  const tbody = document.getElementById("busesTableBody");
-  const searchInput = document.getElementById("busSearch");
-  const formWrap = document.getElementById("busFormWrap");
-  const formTitle = document.getElementById("busFormTitle");
-  const addBtn = document.getElementById("addBusBtn");
-  const editBtn = document.getElementById("editBusBtn");
-  const cancelBtn = document.getElementById("cancelBusBtn");
-  const saveBtn = document.getElementById("saveBusBtn");
-  const importBtn = document.getElementById("importBusesBtn");
-  const importFile = document.getElementById("importBusesFile");
+  window.lucide?.createIcons?.();
+
+  const field = (id) => document.getElementById(id);
+  const tbody = field("busesTableBody");
+  const mobileList = field("fleetMobileList");
+  const searchInput = field("busSearch");
+  const depotFilter = field("busDepotFilter");
+  const statusFilter = field("busStatusFilter");
+  const countEl = field("fleetResultCount");
+  const formWrap = field("busFormWrap");
+  const formTitle = field("busFormTitle");
+  const formKicker = field("busFormKicker");
+  const formSubtitle = field("busFormSubtitle");
+  const pageMessage = field("fleetPageMessage");
+  const formMessage = field("fleetFormMessage");
+  const addBtn = field("addBusBtn");
+  const editBtn = field("editBusBtn");
+  const saveBtn = field("saveBusBtn");
+  const cancelBtn = field("cancelBusBtn");
+  const closeBtn = field("closeBusFormBtn");
+  const deactivateBtn = field("deactivateBusBtn");
+  const importBtn = field("importBusesBtn");
+  const importFile = field("importBusesFile");
+
+  const valueFields = [
+    "busFleetNumber", "busRego", "busAccessType", "busYear", "busMake", "busModel",
+    "busEuro", "busAdblue", "busFuelType", "busVin", "busAirConditioned", "busTare",
+    "busGvm", "busRegoExpiry", "busRearDoor", "busSeatCount", "busStandCount", "busBodyBy",
+    "busBodyModel", "busColour", "busCctvCount", "busFireSuppression", "busLuggageBins",
+    "busDepot", "busNotes"
+  ];
 
   let busesCache = [];
-  let selectedBus = null;
+  let selectedFleetNumber = "";
+  let editingBus = null;
   let editMode = false;
+  let formDirty = false;
+
+  function showPageMessage(message, type = "success") {
+    pageMessage.textContent = message;
+    pageMessage.className = `fleet-message ${type}`;
+    pageMessage.hidden = !message;
+  }
+
+  function showFormMessage(message, type = "error") {
+    formMessage.textContent = message;
+    formMessage.className = `fleet-form-message ${type}`;
+    formMessage.hidden = !message;
+    if (message) formMessage.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
 
   function clearForm() {
-    document.getElementById("busFleetNumber").value = "";
-    document.getElementById("busRego").value = "";
-    document.getElementById("busAccessType").value = "";
-    document.getElementById("busYear").value = "";
-    document.getElementById("busMake").value = "";
-    document.getElementById("busModel").value = "";
-    document.getElementById("busEuro").value = "";
-    document.getElementById("busAdblue").value = "";
-    document.getElementById("busFuelType").value = "";
-    document.getElementById("busVin").value = "";
-    document.getElementById("busAirConditioned").value = "";
-    document.getElementById("busTare").value = "";
-    document.getElementById("busGvm").value = "";
-    document.getElementById("busRegoExpiry").value = "";
-    document.getElementById("busRearDoor").value = "";
-    document.getElementById("busSeatCount").value = "";
-    document.getElementById("busStandCount").value = "";
-    document.getElementById("busBodyBy").value = "";
-    document.getElementById("busBodyModel").value = "";
-    document.getElementById("busColour").value = "";
-    document.getElementById("busCctvCount").value = "";
-    document.getElementById("busFireSuppression").value = "";
-    document.getElementById("busLuggageBins").value = "";
-    document.getElementById("busDepot").value = "";
-    document.getElementById("busStatus").value = "Active";
-    document.getElementById("busNotes").value = "";
+    valueFields.forEach((id) => { if (field(id)) field(id).value = ""; });
+    field("busStatus").value = "Active";
+    formDirty = false;
+    showFormMessage("");
   }
 
   function fillForm(bus) {
-    document.getElementById("busFleetNumber").value = bus.fleetNumber || "";
-    document.getElementById("busRego").value = bus.rego || "";
-    document.getElementById("busAccessType").value = bus.accessType || "";
-    document.getElementById("busYear").value = bus.year || "";
-    document.getElementById("busMake").value = bus.make || "";
-    document.getElementById("busModel").value = bus.model || "";
-    document.getElementById("busEuro").value = bus.euro || "";
-    document.getElementById("busAdblue").value = bus.adblue || "";
-    document.getElementById("busFuelType").value = bus.fuelType || "";
-    document.getElementById("busVin").value = bus.vin || "";
-    document.getElementById("busAirConditioned").value = bus.airConditioned || "";
-    document.getElementById("busTare").value = bus.tare || "";
-    document.getElementById("busGvm").value = bus.gvm || "";
-    document.getElementById("busRegoExpiry").value = bus.regoExpiry || "";
-    document.getElementById("busRearDoor").value = bus.rearDoor || "";
-    document.getElementById("busSeatCount").value = bus.seatCount || "";
-    document.getElementById("busStandCount").value = bus.standCount || "";
-    document.getElementById("busBodyBy").value = bus.bodyBy || "";
-    document.getElementById("busBodyModel").value = bus.bodyModel || "";
-    document.getElementById("busColour").value = bus.colour || "";
-    document.getElementById("busCctvCount").value = bus.cctvCount || "";
-    document.getElementById("busFireSuppression").value = bus.fireSuppression || "";
-    document.getElementById("busLuggageBins").value = bus.luggageBins || "";
-    document.getElementById("busDepot").value = bus.depot || "";
-    document.getElementById("busStatus").value = bus.status || "Active";
-    document.getElementById("busNotes").value = bus.notes || "";
+    const values = {
+      busFleetNumber: bus.fleetNumber, busRego: bus.rego, busAccessType: bus.accessType,
+      busYear: bus.year, busMake: bus.make, busModel: bus.model, busEuro: bus.euro,
+      busAdblue: bus.adblue, busFuelType: bus.fuelType, busVin: bus.vin,
+      busAirConditioned: bus.airConditioned, busTare: bus.tare, busGvm: bus.gvm,
+      busRegoExpiry: bus.regoExpiry, busRearDoor: bus.rearDoor, busSeatCount: bus.seatCount,
+      busStandCount: bus.standCount, busBodyBy: bus.bodyBy, busBodyModel: bus.bodyModel,
+      busColour: bus.colour, busCctvCount: bus.cctvCount, busFireSuppression: bus.fireSuppression,
+      busLuggageBins: bus.luggageBins, busDepot: bus.depot, busStatus: bus.status || "Active",
+      busNotes: bus.notes
+    };
+    Object.entries(values).forEach(([id, value]) => { if (field(id)) field(id).value = value || ""; });
+    formDirty = false;
+    showFormMessage("");
   }
 
-  function parseCsvLine(line) {
-    const result = [];
-    let current = "";
-    let inQuotes = false;
+  function openAddForm() {
+    editMode = false;
+    editingBus = null;
+    clearForm();
+    field("busFleetNumber").disabled = false;
+    formKicker.textContent = "New vehicle";
+    formTitle.textContent = "Add Vehicle";
+    formSubtitle.textContent = "Create a vehicle record and enter its operating specifications.";
+    saveBtn.textContent = "Save Vehicle";
+    deactivateBtn.hidden = true;
+    formWrap.hidden = false;
+    formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => field("busFleetNumber")?.focus(), 250);
+  }
 
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
+  function openEditForm() {
+    if (!selectedFleetNumber) return showPageMessage("Select a vehicle before editing.", "error");
+    const bus = busesCache.find((item) => String(item.fleetNumber) === selectedFleetNumber);
+    if (!bus) return showPageMessage("The selected vehicle could not be found. Refresh and try again.", "error");
 
-      if (ch === '"') {
-        if (inQuotes && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = !inQuotes;
-        }
-      } else if (ch === "," && !inQuotes) {
-        result.push(current.trim());
-        current = "";
-      } else {
-        current += ch;
-      }
+    editMode = true;
+    editingBus = bus;
+    fillForm(bus);
+    field("busFleetNumber").disabled = true;
+    formKicker.textContent = `Fleet ${bus.fleetNumber}`;
+    formTitle.textContent = `Edit ${bus.fleetNumber}`;
+    formSubtitle.textContent = "Update vehicle specifications, allocation and service status.";
+    saveBtn.textContent = "Save Changes";
+    deactivateBtn.hidden = bus.status === "Inactive";
+    formWrap.hidden = false;
+    formWrap.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function closeForm(force = false) {
+    if (!force && formDirty && !confirm("Discard your unsaved vehicle changes?")) return;
+    formWrap.hidden = true;
+    clearForm();
+    editMode = false;
+    editingBus = null;
+    field("busFleetNumber").disabled = false;
+  }
+
+  function filteredBuses() {
+    const query = searchInput.value.trim().toLowerCase();
+    const depot = depotFilter.value;
+    const status = statusFilter.value;
+    return busesCache.filter((bus) => {
+      if (depot && bus.depot !== depot) return false;
+      if (status && bus.status !== status) return false;
+      if (!query) return true;
+      return [bus.fleetNumber, bus.rego, bus.make, bus.model, bus.accessType, bus.vin]
+        .filter(Boolean).join(" ").toLowerCase().includes(query);
+    });
+  }
+
+  function selectBus(fleetNumber) {
+    selectedFleetNumber = String(fleetNumber || "");
+    editBtn.disabled = !selectedFleetNumber;
+    showPageMessage("");
+    renderDirectory();
+  }
+
+  function renderDirectory() {
+    const list = filteredBuses();
+    countEl.textContent = `${list.length} of ${busesCache.length} vehicles`;
+
+    if (!list.some((bus) => String(bus.fleetNumber) === selectedFleetNumber)) {
+      selectedFleetNumber = "";
+      editBtn.disabled = true;
     }
 
-    result.push(current.trim());
-    return result;
-  }
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="6"><div class="fleet-empty">No vehicles match these filters.</div></td></tr>`;
+      mobileList.innerHTML = `<div class="fleet-empty">No vehicles match these filters.</div>`;
+      return;
+    }
 
-  function normalizeYesNo(value) {
-    const v = String(value || "").trim().toUpperCase();
-    if (v === "YES" || v === "Y") return "YES";
-    if (v === "NO" || v === "N") return "NO";
-    return String(value || "").trim();
-  }
+    tbody.innerHTML = list.map((bus) => {
+      const selected = String(bus.fleetNumber) === selectedFleetNumber;
+      const makeModel = [bus.make, bus.model].filter(Boolean).join(" ") || "—";
+      const capacity = bus.seatCount ? `${bus.seatCount} seats${bus.standCount ? ` + ${bus.standCount} standing` : ""}` : "—";
+      return `
+        <tr data-bus-select="${escapeHtml(bus.fleetNumber)}" class="${selected ? "selected" : ""}">
+          <td><div class="fleet-name-cell"><strong>${escapeHtml(bus.fleetNumber || "Unnamed vehicle")}</strong><small>${escapeHtml(bus.rego || "No registration")}</small></div></td>
+          <td><span class="fleet-type-badge">${escapeHtml(bus.accessType || "Not set")}</span></td>
+          <td>${escapeHtml(makeModel)}</td>
+          <td>${escapeHtml(capacity)}</td>
+          <td>${escapeHtml(bus.depot || "—")}</td>
+          <td><span class="fleet-status ${statusClass(bus.status)}">${escapeHtml(bus.status || "Inactive")}</span></td>
+        </tr>`;
+    }).join("");
 
-  function renderTable(list) {
-    tbody.innerHTML = list
-      .map(
-        (b) => `
-          <tr data-id="${b.fleetNumber}" style="border-bottom:1px solid #eee; cursor:pointer">
-            <td style="padding:10px">${b.fleetNumber || ""}</td>
-            <td style="padding:10px">${b.rego || ""}</td>
-            <td style="padding:10px">${b.accessType || ""}</td>
-            <td style="padding:10px">${[b.make || "", b.model || ""].filter(Boolean).join(" ")}</td>
-            <td style="padding:10px">${b.seatCount || ""}</td>
-            <td style="padding:10px">${b.depot || ""}</td>
-            <td style="padding:10px">${b.status || ""}</td>
-          </tr>
-        `
-      )
-      .join("");
+    mobileList.innerHTML = list.map((bus) => {
+      const selected = String(bus.fleetNumber) === selectedFleetNumber;
+      return `
+        <article data-bus-select="${escapeHtml(bus.fleetNumber)}" class="fleet-mobile-card ${selected ? "selected" : ""}">
+          <div class="fleet-mobile-head"><div><strong>${escapeHtml(bus.fleetNumber || "Unnamed vehicle")}</strong><small>${escapeHtml(bus.rego || "No registration")}</small></div><span class="fleet-status ${statusClass(bus.status)}">${escapeHtml(bus.status || "Inactive")}</span></div>
+          <div class="fleet-mobile-meta"><span>${escapeHtml([bus.make, bus.model].filter(Boolean).join(" ") || "Make not set")}</span><span>${escapeHtml(bus.depot || "No depot")}</span><span>${escapeHtml(bus.accessType || "Access not set")}</span></div>
+          ${bus.seatCount ? `<div class="fleet-mobile-capacity">${escapeHtml(bus.seatCount)} seats${bus.standCount ? ` · ${escapeHtml(bus.standCount)} standing` : ""}</div>` : ""}
+        </article>`;
+    }).join("");
 
-    [...tbody.querySelectorAll("tr")].forEach((row) => {
-      row.onclick = () => {
-        selectedBus = row.getAttribute("data-id");
-        [...tbody.querySelectorAll("tr")].forEach((r) => {
-          r.style.background = "";
-          r.style.fontWeight = "400";
-        });
-        row.style.background = "#ffe5e5";
-        row.style.fontWeight = "600";
+    document.querySelectorAll("[data-bus-select]").forEach((element) => {
+      element.onclick = () => selectBus(element.getAttribute("data-bus-select"));
+      element.ondblclick = () => {
+        selectedFleetNumber = element.getAttribute("data-bus-select") || "";
+        openEditForm();
       };
     });
   }
 
-  listenBuses(
+  function readBusForm() {
+    return {
+      fleetNumber: field("busFleetNumber").value.trim().toUpperCase(),
+      rego: field("busRego").value.trim().toUpperCase(),
+      accessType: field("busAccessType").value, year: field("busYear").value.trim(),
+      make: field("busMake").value.trim(), model: field("busModel").value.trim(),
+      euro: field("busEuro").value.trim(), adblue: field("busAdblue").value,
+      fuelType: field("busFuelType").value, vin: field("busVin").value.trim(),
+      airConditioned: field("busAirConditioned").value, tare: field("busTare").value.trim(),
+      gvm: field("busGvm").value.trim(), regoExpiry: field("busRegoExpiry").value,
+      rearDoor: field("busRearDoor").value, seatCount: field("busSeatCount").value.trim(),
+      standCount: field("busStandCount").value.trim(), bodyBy: field("busBodyBy").value.trim(),
+      bodyModel: field("busBodyModel").value.trim(), colour: field("busColour").value.trim(),
+      cctvCount: field("busCctvCount").value.trim(), fireSuppression: field("busFireSuppression").value,
+      luggageBins: field("busLuggageBins").value, depot: field("busDepot").value,
+      status: field("busStatus").value, notes: field("busNotes").value.trim()
+    };
+  }
+
+  function validateBus(bus) {
+    if (!bus.fleetNumber) return "Fleet number is required.";
+    if (!/^[A-Z0-9-]+$/.test(bus.fleetNumber)) return "Fleet number can contain only letters, numbers and hyphens.";
+    if (bus.year && (Number(bus.year) < 1950 || Number(bus.year) > 2100)) return "Enter a valid vehicle year.";
+    if (!bus.status) return "Vehicle status is required.";
+    return "";
+  }
+
+  function busFromCsvRow(row) {
+    const bus = {
+      fleetNumber: (row["fleetnumber"] || row["fleet number"] || row["bus no."] || row["bus no"] || "").trim().toUpperCase(),
+      rego: (row["rego"] || "").trim().toUpperCase(),
+      accessType: (row["accesstype"] || row["access type"] || "").trim().toUpperCase(),
+      year: (row["year"] || "").trim(), make: (row["make"] || "").trim(),
+      model: (row["model"] || row["year & model"] || "").trim(), euro: (row["euro"] || row["euro #"] || "").trim(),
+      adblue: normalizeYesNo(row["adblue"]), fuelType: (row["fueltype"] || row["fuel type"] || "").trim(),
+      vin: (row["vin"] || row["vin/chassis no."] || row["vin / chassis no."] || "").trim(),
+      airConditioned: normalizeYesNo(row["air conditioned"]), tare: (row["tare"] || "").trim(),
+      gvm: (row["gvm"] || "").trim(), regoExpiry: (row["date of rego"] || row["date of rego / expiry"] || row["rego expiry"] || "").trim(),
+      rearDoor: normalizeYesNo(row["rear door"]), seatCount: (row["seat"] || row["seat count"] || "").trim(),
+      standCount: (row["stand"] || row["stand count"] || "").trim(), bodyBy: (row["body by"] || "").trim(),
+      bodyModel: (row["body model"] || "").trim(), colour: (row["colour"] || row["color"] || "").trim(),
+      cctvCount: (row["cctv"] || row["cctv count"] || "").trim(), fireSuppression: normalizeYesNo(row["fire supp"] || row["fire suppression"]),
+      luggageBins: normalizeYesNo(row["luggage bins"] || row["luggage"]), depot: (row["depot"] || "").trim(),
+      status: (row["status"] || "Active").trim(), notes: (row["notes"] || "").trim()
+    };
+    if (!bus.rego) bus.rego = bus.fleetNumber;
+    if (!bus.fuelType) bus.fuelType = String(bus.euro).toUpperCase() === "EV" ? "EV" : "Diesel";
+    return bus;
+  }
+
+  busesUnsub = listenBuses(
     (buses) => {
+      if (!document.getElementById("fleetPage")) {
+        busesUnsub?.();
+        busesUnsub = null;
+        return;
+      }
       busesCache = buses || [];
-      renderTable(busesCache);
+      renderDirectory();
     },
-    (err) => {
-      console.error("Buses error:", err);
-      showError(err?.message || "Failed to load buses");
+    (error) => {
+      console.error("Fleet error", error);
+      showPageMessage(error?.message || "Failed to load the fleet.", "error");
     }
   );
 
-  searchInput.oninput = () => {
-    const q = (searchInput.value || "").toLowerCase().trim();
+  document.querySelectorAll("#busFormWrap input, #busFormWrap select, #busFormWrap textarea").forEach((element) => {
+    element.addEventListener("input", () => { formDirty = true; });
+    element.addEventListener("change", () => { formDirty = true; });
+  });
 
-    const filtered = busesCache.filter((b) =>
-      String(b.fleetNumber || "").toLowerCase().includes(q) ||
-      String(b.rego || "").toLowerCase().includes(q) ||
-      String(b.make || "").toLowerCase().includes(q) ||
-      String(b.model || "").toLowerCase().includes(q) ||
-      String(b.accessType || "").toLowerCase().includes(q)
-    );
+  addBtn.onclick = openAddForm;
+  editBtn.onclick = openEditForm;
+  cancelBtn.onclick = () => closeForm();
+  closeBtn.onclick = () => closeForm();
+  [searchInput, depotFilter, statusFilter].forEach((element) => {
+    element.addEventListener(element === searchInput ? "input" : "change", renderDirectory);
+  });
 
-    renderTable(filtered);
+  field("clearFleetFilters").onclick = () => {
+    searchInput.value = "";
+    depotFilter.value = "";
+    statusFilter.value = "";
+    selectedFleetNumber = "";
+    editBtn.disabled = true;
+    renderDirectory();
   };
 
   importBtn.onclick = () => {
@@ -297,175 +457,94 @@ export function renderBusesPage() {
     importFile.click();
   };
 
-  importFile.onchange = async (e) => {
+  importFile.onchange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    importBtn.disabled = true;
+    importBtn.textContent = "Importing…";
+    showPageMessage("");
+
     try {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      const text = await file.text();
-      const lines = text
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-
-      if (lines.length < 2) {
-        alert("CSV file is empty or missing data.");
-        return;
-      }
-
-      const headers = parseCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
-      const rows = lines.slice(1);
+      const lines = (await file.text()).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+      if (lines.length < 2) throw new Error("The CSV file is empty or has no data rows.");
+      const headers = parseCsvLine(lines[0]).map((header) => header.trim().toLowerCase());
       let savedCount = 0;
+      let skippedCount = 0;
 
-      for (const line of rows) {
-        const cols = parseCsvLine(line);
-
+      for (const line of lines.slice(1)) {
+        const columns = parseCsvLine(line);
         const row = {};
-        headers.forEach((h, i) => {
-          row[h] = cols[i] || "";
-        });
-
-        const bus = {
-          fleetNumber: (row["fleetnumber"] || row["fleet number"] || row["bus no."] || row["bus no"] || "").trim(),
-          rego: (row["rego"] || "").trim(),
-          accessType: (row["accesstype"] || row["access type"] || "").trim().toUpperCase(),
-          year: (row["year"] || "").trim(),
-          make: (row["make"] || "").trim(),
-          model: (row["model"] || row["year & model"] || "").trim(),
-          euro: (row["euro"] || row["euro #"] || "").trim(),
-          adblue: normalizeYesNo(row["adblue"]),
-          fuelType: (row["fueltype"] || row["fuel type"] || "").trim(),
-          vin: (row["vin"] || row["vin/chassis no."] || row["vin / chassis no."] || "").trim(),
-          airConditioned: normalizeYesNo(row["air conditioned"]),
-          tare: (row["tare"] || "").trim(),
-          gvm: (row["gvm"] || "").trim(),
-          regoExpiry: (row["date of rego"] || row["date of rego / expiry"] || row["rego expiry"] || "").trim(),
-          rearDoor: normalizeYesNo(row["rear door"]),
-          seatCount: (row["seat"] || row["seat count"] || "").trim(),
-          standCount: (row["stand"] || row["stand count"] || "").trim(),
-          bodyBy: (row["body by"] || "").trim(),
-          bodyModel: (row["body model"] || "").trim(),
-          colour: (row["colour"] || row["color"] || "").trim(),
-          cctvCount: (row["cctv"] || row["cctv count"] || "").trim(),
-          fireSuppression: normalizeYesNo(row["fire supp"] || row["fire suppression"]),
-          luggageBins: normalizeYesNo(row["luggage bins"] || row["luggage"]),
-          depot: (row["depot"] || "").trim(),
-          status: (row["status"] || "Active").trim(),
-          notes: (row["notes"] || "").trim()
-        };
-
-        if (!bus.fleetNumber) continue;
-
-        if (!bus.rego) {
-          bus.rego = bus.fleetNumber;
+        headers.forEach((header, index) => { row[header] = columns[index] || ""; });
+        const bus = busFromCsvRow(row);
+        if (!bus.fleetNumber) {
+          skippedCount++;
+          continue;
         }
-
-        if (!bus.fuelType) {
-          if (String(bus.euro).toUpperCase() === "EV") {
-            bus.fuelType = "EV";
-          } else {
-            bus.fuelType = "Diesel";
-          }
-        }
-
         await saveBus(bus);
         savedCount++;
       }
 
-      alert(`${savedCount} bus(es) imported successfully.`);
-    } catch (err) {
-      console.error(err);
-      alert(err?.message || "Failed to import CSV.");
+      showPageMessage(`Imported ${savedCount} vehicle${savedCount === 1 ? "" : "s"}${skippedCount ? `; skipped ${skippedCount} row${skippedCount === 1 ? "" : "s"} without a fleet number` : ""}.`, "success");
+    } catch (error) {
+      console.error("Fleet CSV import failed", error);
+      showPageMessage(error?.message || "Failed to import the CSV file.", "error");
+    } finally {
+      importBtn.disabled = false;
+      importBtn.innerHTML = `<i data-lucide="file-up"></i> Import CSV`;
+      window.lucide?.createIcons?.();
     }
-  };
-
-  addBtn.onclick = () => {
-    editMode = false;
-    formTitle.textContent = "Add Bus";
-    clearForm();
-    document.getElementById("busFleetNumber").disabled = false;
-    formWrap.style.display = "block";
-  };
-
-  editBtn.onclick = () => {
-    if (!selectedBus) {
-      alert("Please select a bus first.");
-      return;
-    }
-
-    const bus = busesCache.find(
-      (b) => String(b.fleetNumber) === String(selectedBus)
-    );
-
-    if (!bus) {
-      alert("Selected bus not found.");
-      return;
-    }
-
-    editMode = true;
-    formTitle.textContent = "Edit Bus";
-    fillForm(bus);
-    document.getElementById("busFleetNumber").disabled = true;
-    formWrap.style.display = "block";
-  };
-
-  cancelBtn.onclick = () => {
-    formWrap.style.display = "none";
-    clearForm();
-    editMode = false;
-    document.getElementById("busFleetNumber").disabled = false;
   };
 
   saveBtn.onclick = async () => {
-    try {
-      const bus = {
-        fleetNumber: document.getElementById("busFleetNumber").value.trim(),
-        rego: document.getElementById("busRego").value.trim(),
-        accessType: document.getElementById("busAccessType").value,
-        year: document.getElementById("busYear").value.trim(),
-        make: document.getElementById("busMake").value.trim(),
-        model: document.getElementById("busModel").value.trim(),
-        euro: document.getElementById("busEuro").value.trim(),
-        adblue: document.getElementById("busAdblue").value,
-        fuelType: document.getElementById("busFuelType").value,
-        vin: document.getElementById("busVin").value.trim(),
-        airConditioned: document.getElementById("busAirConditioned").value,
-        tare: document.getElementById("busTare").value.trim(),
-        gvm: document.getElementById("busGvm").value.trim(),
-        regoExpiry: document.getElementById("busRegoExpiry").value.trim(),
-        rearDoor: document.getElementById("busRearDoor").value,
-        seatCount: document.getElementById("busSeatCount").value.trim(),
-        standCount: document.getElementById("busStandCount").value.trim(),
-        bodyBy: document.getElementById("busBodyBy").value.trim(),
-        bodyModel: document.getElementById("busBodyModel").value.trim(),
-        colour: document.getElementById("busColour").value.trim(),
-        cctvCount: document.getElementById("busCctvCount").value.trim(),
-        fireSuppression: document.getElementById("busFireSuppression").value,
-        luggageBins: document.getElementById("busLuggageBins").value,
-        depot: document.getElementById("busDepot").value,
-        status: document.getElementById("busStatus").value,
-        notes: document.getElementById("busNotes").value.trim()
-      };
+    showFormMessage("");
+    const bus = readBusForm();
+    const validationError = validateBus(bus);
+    if (validationError) return showFormMessage(validationError);
 
-      if (!bus.fleetNumber) {
-        alert("Fleet Number is required.");
-        return;
+    try {
+      if (!editMode) {
+        const existing = await getBus(bus.fleetNumber);
+        if (existing) {
+          showFormMessage(`Fleet number ${bus.fleetNumber} already exists. Select that vehicle and use Edit Selected.`);
+          return;
+        }
       }
 
       const wasEditMode = editMode;
-
+      saveBtn.disabled = true;
+      cancelBtn.disabled = true;
+      saveBtn.textContent = "Saving…";
       await saveBus(bus);
+      selectedFleetNumber = bus.fleetNumber;
+      closeForm(true);
+      showPageMessage(wasEditMode ? `${bus.fleetNumber} was updated successfully.` : `${bus.fleetNumber} was added to the fleet.`, "success");
+    } catch (error) {
+      console.error("Failed to save vehicle", error);
+      showFormMessage(error?.message || "Unable to save the vehicle. Please try again.");
+    } finally {
+      saveBtn.disabled = false;
+      cancelBtn.disabled = false;
+      saveBtn.textContent = editMode ? "Save Changes" : "Save Vehicle";
+    }
+  };
 
-      selectedBus = bus.fleetNumber;
-      formWrap.style.display = "none";
-      clearForm();
-      editMode = false;
-      document.getElementById("busFleetNumber").disabled = false;
+  deactivateBtn.onclick = async () => {
+    if (!editingBus) return;
+    if (!confirm(`Deactivate vehicle ${editingBus.fleetNumber}? It will no longer appear as active.`)) return;
+    const busBeingDeactivated = editingBus;
+    deactivateBtn.disabled = true;
+    deactivateBtn.textContent = "Deactivating…";
 
-      alert(wasEditMode ? "Bus updated successfully." : "Bus saved successfully.");
-    } catch (err) {
-      console.error(err);
-      alert(err?.message || "Failed to save bus.");
+    try {
+      await deactivateBus(busBeingDeactivated.fleetNumber);
+      closeForm(true);
+      showPageMessage(`${busBeingDeactivated.fleetNumber} was deactivated.`, "success");
+    } catch (error) {
+      console.error("Failed to deactivate vehicle", error);
+      showFormMessage(error?.message || "Unable to deactivate the vehicle.");
+    } finally {
+      deactivateBtn.disabled = false;
+      deactivateBtn.textContent = "Deactivate Vehicle";
     }
   };
 }

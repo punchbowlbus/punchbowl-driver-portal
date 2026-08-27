@@ -1,8 +1,12 @@
-const CACHE = "pbc-v7"; // bump when you deploy changes
+const CACHE = "pbc-v54"; // Dispatch Pro workspace
 
 const ASSETS = [
   "/",
   "/index.html",
+  "/customers.html",
+  "/enquiries.html",
+  "/enquiry_inbox.html",
+  "/styles.css",
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
@@ -15,12 +19,20 @@ const ASSETS = [
   "/js/config.js",
   "/js/state.js",
   "/js/db.js",
-  "/js/admin.js",
+  "/js/admin_v2.js",
   "/js/driver.js",
 
   // NEW modules you are using now
   "/js/shifts_ui.js",
   "/js/modals.js",
+  "/js/bulk_duty_spans.js",
+  "/js/driver_duty_sheet.js",
+  "/js/customers.js",
+  "/js/enquiries.js",
+  "/js/enquiry_inbox.js",
+  "/js/charter_bookings.js",
+  "/js/incident_reports.js",
+  "/js/customer_search.js",
 ];
 
 self.addEventListener("install", (event) => {

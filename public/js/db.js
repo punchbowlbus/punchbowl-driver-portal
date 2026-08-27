@@ -9,6 +9,7 @@ import {
   updateDoc,
   setDoc,
   getDoc,
+  writeBatch,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
@@ -35,6 +36,15 @@ export function listenShifts({ isAdmin, driverEmail }, onData, onErr) {
     (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     onErr
   );
+}
+
+export async function addShift(data) {
+  return await addDoc(collection(db, "shifts"), {
+    deleted: false,
+    ...data,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
 }
 
 /* =========================================================
@@ -119,7 +129,13 @@ export function listenBlocksByDate(date, onData, onErr) {
 
   return onSnapshot(
     qy,
-    (snap) => onData(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true);
+
+      onData(list);
+    },
     onErr
   );
 }
@@ -151,6 +167,11 @@ export async function addDutySpan(data) {
     serviceDate: String(data.serviceDate || "").trim(),
     driverEmployeeNumber: String(data.driverEmployeeNumber || "").trim(),
     driverName: String(data.driverName || "").trim(),
+
+    dutyType: String(data.dutyType || "Charter").trim(),
+    dutyNumber: String(data.dutyNumber || "").trim(),
+    routeNumber: String(data.routeNumber || "").trim(),
+    routePdfUrl: String(data.routePdfUrl || "").trim(),
 
     startMin: Number(data.startMin || 0),
     endMin: Number(data.endMin || 0),
@@ -253,6 +274,41 @@ export async function updateDutySpan(dutySpanId, patch) {
   await updateDoc(doc(db, "dutySpans", dutySpanId), nextPatch);
 }
 
+export async function transferDutySpanWithBlocks({
+  dutySpanId,
+  blockIds = [],
+  driverEmployeeNumber,
+  driverName
+}) {
+  if (!dutySpanId) throw new Error("Duty span id is required.");
+  if (!driverEmployeeNumber) throw new Error("Target driver is required.");
+
+  const batch = writeBatch(db);
+  const now = serverTimestamp();
+
+  batch.update(doc(db, "dutySpans", dutySpanId), {
+    driverEmployeeNumber: String(driverEmployeeNumber).trim(),
+    driverName: String(driverName || "").trim(),
+    driverAcknowledgment: "Pending",
+    dispatchStatus: "Pending",
+    reassignedAt: now,
+    updatedAt: now
+  });
+
+  [...new Set(blockIds.filter(Boolean).map(String))].forEach((blockId) => {
+    batch.update(doc(db, "blocks", blockId), {
+      assignedDriverEmployeeNumber: String(driverEmployeeNumber).trim(),
+      assignedDriverName: String(driverName || "").trim(),
+      dutySpanId: String(dutySpanId),
+      dispatchStatus: "Assigned",
+      reassignedAt: now,
+      updatedAt: now
+    });
+  });
+
+  await batch.commit();
+}
+
 export async function updateDutySpanDispatchStatus(dutySpanId, dispatchStatus) {
   const nextStatus = normalizeDispatchStatus(dispatchStatus);
 
@@ -317,6 +373,34 @@ export function listenDutySpansByDriverAndDate(driverEmployeeNumber, date, onDat
     collection(db, "dutySpans"),
     where("driverEmployeeNumber", "==", String(driverEmployeeNumber).trim()),
     where("serviceDate", "==", String(date).trim()),
+    orderBy("startMin", "asc")
+  );
+
+  return onSnapshot(
+    qy,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true);
+
+      onData(list);
+    },
+    onErr
+  );
+}
+
+export function listenDutySpansByDriverAndDateRange(driverEmployeeNumber, startDate, endDate, onData, onErr) {
+  if (!driverEmployeeNumber || !startDate || !endDate) {
+    onData([]);
+    return () => {};
+  }
+
+  const qy = query(
+    collection(db, "dutySpans"),
+    where("driverEmployeeNumber", "==", String(driverEmployeeNumber).trim()),
+    where("serviceDate", ">=", String(startDate).trim()),
+    where("serviceDate", "<=", String(endDate).trim()),
+    orderBy("serviceDate", "asc"),
     orderBy("startMin", "asc")
   );
 
@@ -548,6 +632,32 @@ export async function getEmployee(employeeNumber) {
   };
 }
 
+export async function getEmployeeByEmail(email) {
+  if (!email) return null;
+
+  const qy = query(
+    collection(db, "employees"),
+    where("email", "==", String(email).trim().toLowerCase())
+  );
+
+  return new Promise((resolve, reject) => {
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        unsub();
+        if (snap.empty) return resolve(null);
+
+        const docSnap = snap.docs[0];
+        resolve({
+          id: docSnap.id,
+          ...docSnap.data()
+        });
+      },
+      reject
+    );
+  });
+}
+
 export function listenEmployees(onData, onErr) {
   const qy = query(collection(db, "employees"), orderBy("employeeNumber", "asc"));
 
@@ -660,3 +770,4 @@ export async function deactivateBus(fleetNumber) {
     updatedAt: serverTimestamp()
   });
 }
+

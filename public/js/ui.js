@@ -1,5 +1,7 @@
 // public/js/ui.js
 import { escapeHtml, fmtDate } from "./utils.js";
+import { state } from "./state.js";
+import { go } from "./main.js";
 
 /** ✅ Central DOM references (exported) */
 export const els = {
@@ -28,26 +30,51 @@ export function showError(msg) {
 }
 
 /** ✅ Top auth area (exported) */
-export function renderAuth({ currentUser, isAdmin }, onLogin, onLogout) {
-  if (!els.authArea) return;
+export function renderAuth(user, employee, onSignIn, onSignOut) {
+  const authArea = document.getElementById("authArea");
+  if (!authArea) return;
 
-  if (!currentUser) {
-    els.authArea.innerHTML = `<button id="loginBtn">Sign in with Google</button>`;
-    const btn = document.getElementById("loginBtn");
-    if (btn) btn.onclick = onLogin;
+  if (!user) {
+    authArea.innerHTML = `
+      <div class="authWrap">
+        <div class="authTop">
+          <button id="signInBtn" class="signOutBtn">Sign in</button>
+        </div>
+      </div>
+    `;
+
+    const signInBtn = document.getElementById("signInBtn");
+    if (signInBtn && typeof onSignIn === "function") {
+      signInBtn.addEventListener("click", onSignIn);
+    }
     return;
   }
 
-  els.authArea.innerHTML = `
-    <div class="muted">
-      Signed in as <b>${escapeHtml(currentUser.email)}</b>
-      ${isAdmin ? `<span class="pill">Admin</span>` : ``}
-    </div>
-    <button id="logoutBtn">Sign out</button>
-  `;
+  const roleLabel = employee?.role || employee?.accessLevel || "Driver";
+  const empLabel = employee?.employeeNumber
+    ? `Emp: ${employee.employeeNumber}`
+    : "Emp: —";
 
-  const out = document.getElementById("logoutBtn");
-  if (out) out.onclick = onLogout;
+    authArea.innerHTML = `
+      <div class="authWrap">
+        <div class="authTop">
+          <button id="signOutBtn" class="signOutBtn">Sign out</button>
+        </div>
+
+        <div class="authBottom">
+          <div class="empText">${empLabel}</div>
+
+          <div class="signedIn" title="${user.email || ""}">
+            Signed in as ${user.email || ""}
+          </div>
+        </div>
+      </div>
+    `;
+
+  const signOutBtn = document.getElementById("signOutBtn");
+  if (signOutBtn && typeof onSignOut === "function") {
+    signOutBtn.addEventListener("click", onSignOut);
+  }
 }
 
 /** ✅ Tabs (exported) - kept for compatibility */
@@ -77,7 +104,7 @@ export function renderTabs({ currentUser, isAdmin, currentTab }, onDriverTab, on
   if (a) a.onclick = onAdminTab;
 }
 
-/** ✅ Sidebar renderer (UPDATED) */
+/** ✅ Sidebar renderer */
 export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
   if (!els.navArea || !els.adminNavArea) return;
 
@@ -97,7 +124,7 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
 
   const adminQuickItems = isAdmin
     ? [
-        { id: "allShifts", label: "All Jobs", icon: "list" },
+        { id: "adminAllJobs", label: "All Jobs", icon: "list" },
         { id: "driverMonitor", label: "Driver Monitor", icon: "users" },
         { id: "operationsDashboard", label: "Operations Dashboard", icon: "bar-chart-3" },
         { id: "notice", label: "Notice Board", icon: "megaphone" },
@@ -107,15 +134,28 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
       ]
     : [];
 
-  const adminItems = isAdmin
+  const charterItems = isAdmin
+    ? [
+        { id: "charterBookings", label: "Charter Bookings", icon: "notebook-tabs" },
+        { id: "customers", label: "Customers", icon: "building-2" },
+      ]
+    : [];
+
+  const planningItems = isAdmin
     ? [
         { id: "adminDispatchBoard", label: "Dispatch Board", icon: "map" },
-        { id: "adminEmployees", label: "Employees", icon: "user" },
-        { id: "adminBuses", label: "Fleet", icon: "bus" },
         { id: "adminBookings", label: "Job Groups", icon: "layers" },
         { id: "adminBlocks", label: "Blocks", icon: "grid" },
         { id: "adminPermanentRuns", label: "Permanent Runs", icon: "repeat" },
+        { id: "adminBulkDutySpans", label: "Bulk Duty Spans", icon: "layers" },
         { id: "adminBlocksByDate", label: "Blocks By Date", icon: "calendar" },
+      ]
+    : [];
+
+  const administrationItems = isAdmin
+    ? [
+        { id: "adminEmployees", label: "Employees", icon: "user" },
+        { id: "adminBuses", label: "Fleet", icon: "bus" },
         { id: "settings", label: "Settings", icon: "settings" },
       ]
     : [];
@@ -132,6 +172,24 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
       )
       .join("");
 
+  const renderGroup = (id, title, items, defaultOpen = true) => {
+    const storageKey = `pbc-menu-${id}`;
+    const containsActivePage = items.some((item) => item.id === activePage);
+    let isOpen = defaultOpen;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved !== null) isOpen = saved !== "closed";
+    } catch {}
+    if (containsActivePage) isOpen = true;
+    return `
+      <section class="menuSection" data-menu-section="${escapeHtml(id)}">
+        <button class="menuGroupTitle menuGroupToggle" type="button" data-menu-toggle="${escapeHtml(id)}" aria-expanded="${isOpen}">
+          <span>${escapeHtml(title)}</span><i data-lucide="chevron-down"></i>
+        </button>
+        <div class="menuGroupBody" data-menu-body="${escapeHtml(id)}" ${isOpen ? "" : "hidden"}>${renderButtons(items)}</div>
+      </section>`;
+  };
+
   if (!isAdmin) {
     els.navArea.innerHTML = `
       <div class="menuGroupTitle">MENU</div>
@@ -139,28 +197,63 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     `;
     els.adminNavArea.innerHTML = "";
   } else {
-    els.navArea.innerHTML = `
-      <div class="menuGroupTitle">OPERATIONS</div>
-      ${renderButtons(adminQuickItems)}
-    `;
+    els.navArea.innerHTML = renderGroup("operations", "Operations", adminQuickItems, true);
 
     els.adminNavArea.innerHTML = `
-      <div class="menuGroupTitle">MANAGEMENT</div>
-      ${renderButtons(adminItems)}
+      ${renderGroup("charter", "Charter Management", charterItems, true)}
+      ${renderGroup("planning", "Planning & Dispatch", planningItems, true)}
+      ${renderGroup("administration", "Administration", administrationItems, false)}
     `;
   }
 
   const hook = (container) => {
     if (!container) return;
+
     [...container.querySelectorAll("button[data-nav]")].forEach((btn) => {
-      btn.onclick = () => onNav(btn.getAttribute("data-nav"));
+      btn.onclick = () => {
+        onNav(btn.getAttribute("data-nav"));
+
+        if (window.innerWidth <= 650 && window.closeMobileMenu) {
+          window.closeMobileMenu();
+        }
+      };
     });
   };
 
   hook(els.navArea);
   hook(els.adminNavArea);
 
+  [...document.querySelectorAll("[data-menu-toggle]")].forEach((button) => {
+    button.onclick = () => {
+      const id = button.getAttribute("data-menu-toggle");
+      const body = document.querySelector(`[data-menu-body="${id}"]`);
+      if (!body) return;
+      const willOpen = body.hidden;
+      body.hidden = willOpen ? false : true;
+      button.setAttribute("aria-expanded", String(willOpen));
+      try { localStorage.setItem(`pbc-menu-${id}`, willOpen ? "open" : "closed"); } catch {}
+      if (window.lucide) window.lucide.createIcons();
+    };
+  });
+
   if (window.lucide) window.lucide.createIcons();
+}
+
+function getDriverStatusLabel(j) {
+  const dispatchStatus = String(j.dispatchStatus || "").trim();
+  const ack = String(j.driverAcknowledgment || "Pending").trim();
+
+  if (dispatchStatus === "Cancelled") return "Cancelled";
+  if (ack === "Yes") return "Confirmed";
+  if (ack === "No") return "Cannot Do";
+  return "Awaiting Response";
+}
+
+function formatMinutes(mins) {
+  if (typeof mins !== "number") return "-";
+  const h = Math.floor(mins / 60).toString().padStart(2, "0");
+  const m = (mins % 60).toString().padStart(2, "0");
+  return `${h}:${m}`;
 }
 
 /** ✅ Driver My Work page */
@@ -169,15 +262,21 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
 
   const email = (currentUser?.email || "").toLowerCase().trim();
 
-  const mine = (jobs || [])
-    .filter((j) => !j.deleted)
+    const mine = (jobs || [])
+      .filter((j) => !j.deleted)
+      .filter((j) => j.dispatchStatus !== "Pending")
     .filter((j) => {
       if (isAdmin) return true;
+
+      // dutySpans are already filtered in main.js by driverEmployeeNumber + date
+      if (j.driverEmployeeNumber) return true;
 
       const driverEmail = (j.driverEmail || "").toLowerCase().trim();
       return !!email && driverEmail === email;
     })
-    .sort((a, b) => String(a.date || "").localeCompare(String(b.date || "")));
+    .sort((a, b) =>
+      String(a.serviceDate || a.date || "").localeCompare(String(b.serviceDate || b.date || ""))
+    );
 
   if (!mine.length) {
     els.contentArea.innerHTML = `
@@ -197,30 +296,52 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
           ? [j.pdfLink]
           : [];
 
+              let statusLabel = "Confirmed";
+
+        if (j.dispatchStatus === "Cancelled") {
+          statusLabel = "Cancelled";
+        }
+
       return `
-        <div class="card" style="margin-top:10px">
+                    <div
+              class="card jobCard"
+              data-job-id="${escapeHtml(j.id)}"
+              style="
+                margin-top:10px;
+                cursor:pointer;
+                ${j.dispatchStatus === "Cancelled" ? "background:#fff1f1; border:1px solid #e57373;" : ""}
+              "
+            >
           <div class="row">
             <div style="min-width:280px;flex:1">
-              <div class="muted">${escapeHtml(j.jobId || j.id || "-")}</div>
-              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.date))}</div>
-
-              <div style="margin-top:8px">
-                <b>Job:</b> ${escapeHtml(j.jobDescription || "-")}
+              <div class="muted mobileHide">${escapeHtml(j.jobId || j.id || "-")}</div>
+              <div style="font-size:18px;font-weight:900">
+                ${escapeHtml(
+                  j.serviceDate || j.date
+                    ? new Date(j.serviceDate || j.date).toLocaleDateString("en-AU", {
+                        weekday: "long",
+                        day: "2-digit",
+                        month: "long",
+                        year: "numeric"
+                      })
+                    : "-"
+                )}
               </div>
+
+                ${
+                  j.jobDescription
+                    ? `
+                      <div style="margin-top:8px">
+                        <b>Job:</b> ${escapeHtml(j.jobDescription)}
+                      </div>
+                    `
+                    : ``
+                }
 
               <div style="margin-top:8px;font-size:13px">
-                <b>Depot:</b> ${escapeHtml(j.depotStartTime || "-")} → ${escapeHtml(j.depotFinishTime || "-")}
+                <b>Depot:</b> ${escapeHtml(formatMinutes(j.startMin))} → ${escapeHtml(formatMinutes(j.endMin))}
               </div>
 
-              ${
-                j.driverName || j.driverEmail
-                  ? `
-                    <div class="muted" style="margin-top:8px">
-                      <b>Driver:</b> ${escapeHtml(j.driverName || j.driverEmail || "-")}
-                    </div>
-                  `
-                  : ``
-              }
 
               ${
                 links.length
@@ -229,7 +350,7 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
                       ${links
                         .map(
                           (u, i) =>
-                            `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer">PDF ${i + 1}</a>`
+                            `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer" onclick="event.stopPropagation()">PDF ${i + 1}</a>`
                         )
                         .join(" | ")}
                     </div>
@@ -238,18 +359,45 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
               }
             </div>
 
-            <div style="min-width:230px">
-              <div style="font-size:13px;margin-bottom:8px">
-                <b>Status:</b> ${escapeHtml(j.confirmation || "PENDING")}
+              <div style="min-width:230px">
+                <div style="font-size:13px;margin-bottom:8px">
+                  <b>Status:</b> 
+                  <span style="color: ${j.dispatchStatus === "Cancelled" ? "red" : "green"}; font-weight: 600;">
+                    ${escapeHtml(statusLabel)}
+                  </span>
+                  ${j.dispatchStatus === "Cancelled" 
+                    ? `<div style="margin-top:8px; color:#c62828; font-weight:500;">
+                        This job has been cancelled
+                      </div>` 
+                    : ``}
+                </div>
+
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px">
+                  <button 
+                    data-c="${escapeHtml(j.id)}" 
+                    data-v="Yes"
+                    style="
+                      ${j.driverAcknowledgment === "Yes" ? "background:#2e7d32; color:white; border:1px solid #2e7d32;" : ""}
+                      ${j.dispatchStatus === "Cancelled" ? "opacity:0.5; cursor:not-allowed;" : ""}
+                    "
+                    ${j.dispatchStatus === "Cancelled" ? "disabled" : ""}
+                  >
+                    Yes
+                  </button>
+
+                  <button 
+                    data-c="${escapeHtml(j.id)}" 
+                    data-v="No"
+                    style="
+                      ${j.driverAcknowledgment === "No" ? "background:#c62828; color:white; border:1px solid #c62828;" : ""}
+                      ${j.dispatchStatus === "Cancelled" ? "opacity:0.5; cursor:not-allowed;" : ""}
+                    "
+                    ${j.dispatchStatus === "Cancelled" ? "disabled" : ""}
+                  >
+                    No
+                  </button>
+                </div>
               </div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap">
-                <button data-c="${j.id}" data-v="CONFIRMED">Confirm</button>
-                <button data-c="${j.id}" data-v="CANT_DO">Can’t do</button>
-              </div>
-              <div class="muted" style="margin-top:10px">
-                Your confirmation updates automatically.
-              </div>
-            </div>
           </div>
         </div>
       `;
@@ -261,8 +409,26 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
     ${rows}
   `;
 
+  [...els.contentArea.querySelectorAll(".jobCard")].forEach((el) => {
+    el.onclick = () => {
+      const jobId = el.getAttribute("data-job-id");
+
+      const job = (state.driverDutySpans || []).find(j => j.id === jobId);
+
+      if (job?.dispatchStatus === "Cancelled") {
+        return; // ❌ do nothing if cancelled
+      }
+
+      state.selectedJobId = jobId;
+      go("jobDetails");
+    };
+  });
+
   [...els.contentArea.querySelectorAll("button[data-c]")].forEach((btn) => {
-    btn.onclick = () => actions.onConfirm?.(btn.getAttribute("data-c"), btn.getAttribute("data-v"));
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      actions.onConfirm?.(btn.getAttribute("data-c"), btn.getAttribute("data-v"));
+    };
   });
 }
 
@@ -290,7 +456,7 @@ export function renderJobs(jobs, { isAdmin }, actions = {}) {
           <div class="row">
             <div style="min-width:260px">
               <div class="muted">${escapeHtml(j.jobId || j.id)}</div>
-              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.date))}</div>
+              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.serviceDate || j.date))}</div>
 
               <div style="margin-top:8px">${escapeHtml(j.jobDescription || "-")}</div>
 
@@ -326,7 +492,7 @@ export function renderJobs(jobs, { isAdmin }, actions = {}) {
               isAdmin
                 ? `
               <div style="min-width:260px;font-size:13px;color:#444">
-                <div><b>Confirmation:</b> ${escapeHtml(j.confirmation || "PENDING")}</div>
+                <div><b>Acknowledgment:</b> ${escapeHtml(j.driverAcknowledgment || "Pending")}</div>
                 <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
                   <button data-edit="${j.id}">Edit</button>
                   <button data-del="${j.id}">Delete</button>
@@ -335,10 +501,10 @@ export function renderJobs(jobs, { isAdmin }, actions = {}) {
             `
                 : `
               <div style="min-width:230px">
-                <div style="font-size:13px;margin-bottom:8px"><b>Status:</b> ${escapeHtml(j.confirmation || "PENDING")}</div>
+                <div style="font-size:13px;margin-bottom:8px"><b>Status:</b> ${escapeHtml(getDriverStatusLabel(j))}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button data-c="${j.id}" data-v="CONFIRMED">Confirm</button>
-                  <button data-c="${j.id}" data-v="CANT_DO">Can’t do</button>
+                  <button data-c="${j.id}" data-v="Yes">Yes</button>
+                  <button data-c="${j.id}" data-v="No">No</button>
                 </div>
                 <div class="muted" style="margin-top:10px">Your confirmation updates automatically.</div>
               </div>
