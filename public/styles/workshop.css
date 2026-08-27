@@ -146,7 +146,7 @@ tbody tr:hover{background:#fafbfc}
 .status.error{display:block;background:#fff1f1;color:var(--danger);border:1px solid #f3b7b2}
 .empty{padding:22px;text-align:center;color:var(--muted);border:1px dashed var(--border);border-radius:10px;background:#fff}
 
-.dialog{width:min(760px,calc(100vw - 28px));border:0;border-radius:16px;padding:0;box-shadow:0 22px 70px rgba(0,0,0,.25);overflow:hidden}
+.dialog{width:min(760px,calc(100vw - 28px));max-height:calc(100dvh - 24px);border:0;border-radius:16px;padding:0;box-shadow:0 22px 70px rgba(0,0,0,.25);overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .dialog::backdrop{background:rgba(15,23,42,.55)}
 .dialog form{padding:20px}
 .dialog-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin:-20px -20px 18px;padding:18px 20px;background:#f8fafb;border-bottom:1px solid #e7eaee}
@@ -180,4 +180,5 @@ tbody tr:hover{background:#fafbfc}
   .filter-row{flex-direction:column}
   .metric strong{font-size:25px}
   .main-content,.content{padding:10px}
+  .dialog{width:calc(100vw - 12px);max-height:calc(100dvh - 12px)}
 }
