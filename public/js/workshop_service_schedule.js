@@ -11,6 +11,7 @@ import { auth, db } from "./firebase.js";
 let buses = [];
 let selectedBus = null;
 let observer = null;
+let enhancing = false;
 
 function normalize(value) {
   return String(value || "").trim().toLowerCase();
@@ -231,7 +232,6 @@ function ensureDialog() {
         serviceSmallIntervalKm: smallKm,
         serviceMediumIntervalKm: vehicleIsEv ? null : mediumKm,
         serviceLargeIntervalKm: largeKm,
-        // Keep the old field populated for backwards compatibility with the current dashboard.
         serviceIntervalKm: nextInterval,
         lastServiceType: currentLastType,
         lastServiceOdometer: lastServiceKm,
@@ -307,44 +307,51 @@ function serviceIntervalSummary(bus) {
 }
 
 function enhanceFleetRows() {
-  const tbody = document.getElementById("fleetTableBody");
-  if (!tbody) return;
+  if (enhancing) return;
+  enhancing = true;
+  try {
+    const tbody = document.getElementById("fleetTableBody");
+    if (!tbody) return;
 
-  [...tbody.querySelectorAll("tr")].forEach((row) => {
-    const cells = row.querySelectorAll("td");
-    if (cells.length < 8) return;
+    [...tbody.querySelectorAll("tr")].forEach((row) => {
+      const cells = row.querySelectorAll("td");
+      if (cells.length < 8) return;
 
-    const number = String(cells[0]?.querySelector("strong")?.textContent || cells[0]?.textContent || "").trim();
-    const bus = buses.find((item) => normalize(fleetNo(item)) === normalize(number));
-    if (!bus) return;
+      const number = String(cells[0]?.querySelector("strong")?.textContent || cells[0]?.textContent || "").trim();
+      const bus = buses.find((item) => normalize(fleetNo(item)) === normalize(number));
+      if (!bus) return;
 
-    const serviceCell = cells[5];
-    if (serviceCell) {
-      let meta = serviceCell.querySelector(".service-interval-meta");
-      if (!meta) {
-        meta = document.createElement("div");
-        meta.className = "list-meta service-interval-meta";
-        meta.style.marginTop = "5px";
-        serviceCell.appendChild(meta);
+      const serviceCell = cells[5];
+      if (serviceCell) {
+        let meta = serviceCell.querySelector(".service-interval-meta");
+        if (!meta) {
+          meta = document.createElement("div");
+          meta.className = "list-meta service-interval-meta";
+          meta.style.marginTop = "5px";
+          serviceCell.appendChild(meta);
+        }
+        const summary = serviceIntervalSummary(bus);
+        if (meta.textContent !== summary) meta.textContent = summary;
       }
-      meta.textContent = serviceIntervalSummary(bus);
-    }
 
-    const actions = cells[7];
-    if (!actions || actions.querySelector("[data-service-setup]")) return;
+      const actions = cells[7];
+      if (!actions || actions.querySelector("[data-service-setup]")) return;
 
-    actions.style.display = "flex";
-    actions.style.gap = "8px";
-    actions.style.flexWrap = "wrap";
+      actions.style.display = "flex";
+      actions.style.gap = "8px";
+      actions.style.flexWrap = "wrap";
 
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "button secondary";
-    button.dataset.serviceSetup = bus.id;
-    button.textContent = "Service setup";
-    button.addEventListener("click", () => openSchedule(bus));
-    actions.appendChild(button);
-  });
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "button secondary";
+      button.dataset.serviceSetup = bus.id;
+      button.textContent = "Service setup";
+      button.addEventListener("click", () => openSchedule(bus));
+      actions.appendChild(button);
+    });
+  } finally {
+    enhancing = false;
+  }
 }
 
 function watchFleetTable() {
@@ -355,8 +362,15 @@ function watchFleetTable() {
   }
 
   if (observer) observer.disconnect();
-  observer = new MutationObserver(() => enhanceFleetRows());
-  observer.observe(tbody, { childList: true, subtree: true });
+  observer = new MutationObserver((mutations) => {
+    const needsEnhance = mutations.some((mutation) =>
+      [...mutation.addedNodes, ...mutation.removedNodes].some((node) =>
+        node.nodeType === 1 && !node.classList?.contains("service-interval-meta") && !node.matches?.("[data-service-setup]")
+      )
+    );
+    if (needsEnhance) window.requestAnimationFrame(enhanceFleetRows);
+  });
+  observer.observe(tbody, { childList: true });
   enhanceFleetRows();
 }
 
@@ -365,5 +379,5 @@ watchFleetTable();
 
 onSnapshot(collection(db, "buses"), (snapshot) => {
   buses = snapshot.docs.map((snap) => ({ id: snap.id, ...snap.data() }));
-  enhanceFleetRows();
+  window.requestAnimationFrame(enhanceFleetRows);
 });
