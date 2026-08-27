@@ -111,7 +111,6 @@ function loadShifts({ mode } = { mode: "driver" }) {
       state.legsByShiftId = state.legsByShiftId || {};
       state.unsubscribeLegsByShiftId = state.unsubscribeLegsByShiftId || {};
 
-      // Remove leg listeners for shifts that no longer exist
       const currentIds = new Set((shifts || []).map((s) => s.id));
       Object.keys(state.unsubscribeLegsByShiftId).forEach((shiftId) => {
         if (!currentIds.has(shiftId)) {
@@ -123,7 +122,6 @@ function loadShifts({ mode } = { mode: "driver" }) {
         }
       });
 
-      // Add listeners for new shifts
       shifts.forEach((s) => {
         if (state.unsubscribeLegsByShiftId[s.id]) return;
 
@@ -147,14 +145,12 @@ function loadShifts({ mode } = { mode: "driver" }) {
 }
 
 function render() {
-  // My Work page uses the new UI renderer
   if (state.activePage === "myWork") {
     renderMyWork(
       state.shifts || [],
       { currentUser: state.currentUser, isAdmin: state.isAdmin },
       {
         onConfirm: (shiftId, uiValue) => {
-          // UI sends CONFIRMED / CANT_DO; DB expects Yes / No
           const dbValue = uiValue === "CONFIRMED" ? "Yes" : "No";
           setShiftConfirmation(shiftId, dbValue);
         }
@@ -163,7 +159,6 @@ function render() {
     return;
   }
 
-  // Existing shift renderer for charters + admin all-shifts
   const isAdminViewAll = state.isAdmin && state.activePage === "allShifts";
 
   renderShifts(
@@ -211,7 +206,13 @@ export async function go(pageId) {
 
   showError("");
 
-  // Dispatch Board
+  if (pageId === "workshopManagement") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    window.location.href = "./workshop.html";
+    return;
+  }
+
   if (pageId === "adminDispatchBoard") {
     if (!state.isAdmin) return showError("No admin access");
 
@@ -222,7 +223,6 @@ export async function go(pageId) {
     return;
   }
 
-  // Admin pages
   if (
     pageId === "adminEmployees" ||
     pageId === "adminBuses" ||
@@ -247,7 +247,6 @@ export async function go(pageId) {
     return;
   }
 
-  // Admin quick menu
   if (pageId === "allShifts") {
     loadShifts({ mode: "adminAll" });
     return;
@@ -265,7 +264,6 @@ export async function go(pageId) {
     return;
   }
 
-  // Shared menu
   if (pageId === "notice") {
     renderPlaceholder("Notice Board", "Coming soon...");
     return;
@@ -286,7 +284,6 @@ export async function go(pageId) {
     return;
   }
 
-  // Driver menu
   if (pageId === "myWork") {
     loadShifts({ mode: "driver" });
     return;
@@ -297,7 +294,6 @@ export async function go(pageId) {
     return;
   }
 
-  // Fallback
   loadShifts({ mode: "driver" });
 }
 
@@ -320,7 +316,6 @@ onAuthStateChanged(auth, (u) => {
 
   if (!u) return;
 
-  // Default page
   state.activePage = state.isAdmin ? "adminBookings" : "myWork";
   go(state.activePage);
 });
