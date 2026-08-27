@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PBC Mechanic Work Queue</title>
+  <meta name="description" content="Shared mechanic workshop jobs and electronic job cards" />
+  <link rel="icon" type="image/png" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles/workshop.css" />
+  <link rel="stylesheet" href="./styles/mechanic.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">PBC</div>
+      <div>
+        <div class="brand-title">Mechanic Work Queue</div>
+        <div class="brand-sub">Shared workshop jobs and electronic job cards</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="authText">Checking access...</span>
+      <a class="button secondary" href="./index.html">Back to Portal</a>
+      <button id="loginBtn" class="button secondary" type="button" hidden>Sign in</button>
+      <button id="logoutBtn" class="button secondary" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <main class="mechanic-shell">
+    <div id="status" class="status"></div>
+
+    <section id="queueView">
+      <div class="page-head">
+        <div>
+          <h1>Workshop Jobs</h1>
+          <p id="mechanicIdentity">Loading shared workshop queue...</p>
+        </div>
+        <button id="refreshBtn" class="button secondary" type="button">Refresh</button>
+      </div>
+
+      <div class="metrics-grid mechanic-metrics">
+        <article class="metric"><span>Assigned</span><strong id="metricAssigned">0</strong></article>
+        <article class="metric warning"><span>In Progress</span><strong id="metricProgress">0</strong></article>
+        <article class="metric danger"><span>Urgent / Critical</span><strong id="metricUrgent">0</strong></article>
+        <article class="metric"><span>Waiting Approval</span><strong id="metricApproval">0</strong></article>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Shared Mechanic Job Table</h2>
+            <span class="hint">All assigned workshop jobs are visible to the workshop team. Individual mechanic tabs can be added later.</span>
+          </div>
+          <select id="statusFilter">
+            <option value="">All open jobs</option>
+            <option value="Assigned">Assigned</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Waiting Parts">Waiting Parts</option>
+            <option value="Waiting Approval">Waiting Approval</option>
+            <option value="Completed">Completed</option>
+            <option value="Closed">Closed</option>
+          </select>
+        </div>
+        <div id="jobQueue"></div>
+      </section>
+    </section>
+
+    <section id="jobCardView" hidden>
+      <div class="jobcard-toolbar">
+        <button id="backToQueueBtn" class="button secondary" type="button">Back to Workshop Jobs</button>
+        <div id="jobCardStatusBadge"></div>
+      </div>
+
+      <section class="panel jobcard-hero">
+        <div>
+          <div class="eyebrow">Electronic Job Card</div>
+          <h1 id="jobCardTitle">Workshop Job</h1>
+          <div id="jobCardVehicle" class="jobcard-vehicle"></div>
+        </div>
+        <div class="jobcard-meta" id="jobCardMeta"></div>
+      </section>
+
+      <form id="jobCardForm">
+        <div class="two-col jobcard-layout">
+          <section class="panel">
+            <h2>Job Details</h2>
+            <div class="readonly-grid" id="readonlyJobDetails"></div>
+
+            <div class="section-title">Odometer</div>
+            <div class="form-grid">
+              <label>Previous / recorded km
+                <input id="jobPreviousOdometer" readonly />
+              </label>
+              <label>Current odometer
+                <input id="jobCurrentOdometer" type="number" min="0" step="1" placeholder="km" />
+              </label>
+            </div>
+
+            <div class="section-title">Diagnosis & Work</div>
+            <div class="form-grid">
+              <label class="full">Diagnosis / findings
+                <textarea id="diagnosis" placeholder="What did you find?"></textarea>
+              </label>
+              <label class="full">Work carried out
+                <textarea id="workCompleted" placeholder="Describe the repair, service or inspection work completed"></textarea>
+              </label>
+              <label class="full">Further work required
+                <textarea id="furtherWork" placeholder="Anything still requiring attention"></textarea>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2 id="checklistHeading">Job Checklist</h2>
+            <div id="jobChecklist" class="checklist"></div>
+
+            <div class="section-title">Vehicle condition</div>
+            <div class="form-grid">
+              <label>Further work required?
+                <select id="furtherWorkRequired"><option value="No">No</option><option value="Yes">Yes</option></select>
+              </label>
+              <label>Safe to return to service?
+                <select id="safeToReturn"><option value="">Select</option><option value="Yes">Yes</option><option value="No">No</option></select>
+              </label>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel jobcard-section">
+          <div class="panel-head"><h2>Parts Used</h2><button id="addPartBtn" class="button secondary" type="button">Add Part</button></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Part No.</th><th>Description</th><th>Qty</th><th>Supplier / Ref</th><th></th></tr></thead>
+              <tbody id="partsBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel jobcard-section">
+          <h2>Labour</h2>
+          <div class="form-grid">
+            <label>Work started
+              <input id="labourStart" type="datetime-local" />
+            </label>
+            <label>Work finished
+              <input id="labourFinish" type="datetime-local" />
+            </label>
+            <label class="full">Mechanic notes
+              <textarea id="mechanicNotes" placeholder="Final notes for Fleet Manager"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel jobcard-section completion-panel">
+          <div>
+            <h2>Completion</h2>
+            <p>Save progress at any time. Completing the job sends it to the Fleet Manager for approval.</p>
+          </div>
+          <div class="jobcard-actions">
+            <button id="startJobBtn" class="button secondary" type="button">Start Job</button>
+            <button id="waitingPartsBtn" class="button secondary" type="button">Waiting Parts</button>
+            <button id="saveProgressBtn" class="button secondary" type="button">Save Progress</button>
+            <button id="completeJobBtn" class="button primary" type="button">Complete Job</button>
+          </div>
+        </section>
+      </form>
+    </section>
+  </main>
+
+  <script type="module" src="./js/mechanic_work_queue.js"></script>
+</body>
+</html>

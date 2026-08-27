@@ -77,7 +77,7 @@ export function renderTabs({ currentUser, isAdmin, currentTab }, onDriverTab, on
   if (a) a.onclick = onAdminTab;
 }
 
-/** ✅ Sidebar renderer (UPDATED) */
+/** ✅ Sidebar renderer */
 export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
   if (!els.navArea || !els.adminNavArea) return;
 
@@ -111,7 +111,7 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     ? [
         { id: "adminDispatchBoard", label: "Dispatch Board", icon: "map" },
         { id: "adminEmployees", label: "Employees", icon: "user" },
-        { id: "adminBuses", label: "Fleet", icon: "bus" },
+        { id: "workshopManagement", label: "Workshop Management", icon: "wrench" },
         { id: "adminBookings", label: "Job Groups", icon: "layers" },
         { id: "adminBlocks", label: "Blocks", icon: "grid" },
         { id: "adminPermanentRuns", label: "Permanent Runs", icon: "repeat" },
@@ -262,109 +262,6 @@ export function renderMyWork(jobs, { currentUser, isAdmin }, actions = {}) {
   `;
 
   [...els.contentArea.querySelectorAll("button[data-c]")].forEach((btn) => {
-    btn.onclick = () => actions.onConfirm?.(btn.getAttribute("data-c"), btn.getAttribute("data-v"));
+    btn.onclick = () => actions.onConfirm?.(btn.dataset.c, btn.dataset.v);
   });
-}
-
-/** ✅ Legacy Jobs renderer (single clean version) */
-export function renderJobs(jobs, { isAdmin }, actions = {}) {
-  if (!els.contentArea) return;
-
-  const visible = (jobs || []).filter((j) => !j.deleted);
-
-  if (!visible.length) {
-    els.contentArea.innerHTML = `<div>No jobs found.</div>`;
-    return;
-  }
-
-  const rows = visible
-    .map((j) => {
-      const links = Array.isArray(j.pdfLinks)
-        ? j.pdfLinks
-        : j.pdfLink
-          ? [j.pdfLink]
-          : [];
-
-      return `
-        <div class="card" style="margin-top:10px">
-          <div class="row">
-            <div style="min-width:260px">
-              <div class="muted">${escapeHtml(j.jobId || j.id)}</div>
-              <div style="font-size:18px;font-weight:900">${escapeHtml(fmtDate(j.date))}</div>
-
-              <div style="margin-top:8px">${escapeHtml(j.jobDescription || "-")}</div>
-
-              <div style="margin-top:8px;font-size:13px">
-                <b>Depot:</b> ${escapeHtml(j.depotStartTime || "-")} → ${escapeHtml(j.depotFinishTime || "-")}
-              </div>
-
-              ${
-                isAdmin
-                  ? `
-                <div class="muted" style="margin-top:8px">
-                  <b>Driver:</b> ${escapeHtml(j.driverEmail || "-")}
-                  ${j.driverName ? `(${escapeHtml(j.driverName)})` : ""}
-                </div>
-              `
-                  : ""
-              }
-
-              ${
-                links.length
-                  ? `
-                <div style="margin-top:10px">
-                  ${links
-                    .map((u, i) => `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer">PDF ${i + 1}</a>`)
-                    .join(" | ")}
-                </div>
-              `
-                  : ""
-              }
-            </div>
-
-            ${
-              isAdmin
-                ? `
-              <div style="min-width:260px;font-size:13px;color:#444">
-                <div><b>Confirmation:</b> ${escapeHtml(j.confirmation || "PENDING")}</div>
-                <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-                  <button data-edit="${j.id}">Edit</button>
-                  <button data-del="${j.id}">Delete</button>
-                </div>
-              </div>
-            `
-                : `
-              <div style="min-width:230px">
-                <div style="font-size:13px;margin-bottom:8px"><b>Status:</b> ${escapeHtml(j.confirmation || "PENDING")}</div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                  <button data-c="${j.id}" data-v="CONFIRMED">Confirm</button>
-                  <button data-c="${j.id}" data-v="CANT_DO">Can’t do</button>
-                </div>
-                <div class="muted" style="margin-top:10px">Your confirmation updates automatically.</div>
-              </div>
-            `
-            }
-          </div>
-        </div>
-      `;
-    })
-    .join("");
-
-  els.contentArea.innerHTML = `
-    <h3 style="margin:0 0 10px">${isAdmin ? "All Jobs (Admin view)" : "Your Jobs"}</h3>
-    ${rows}
-  `;
-
-  if (!isAdmin) {
-    [...els.contentArea.querySelectorAll("button[data-c]")].forEach((btn) => {
-      btn.onclick = () => actions.onConfirm?.(btn.getAttribute("data-c"), btn.getAttribute("data-v"));
-    });
-  } else {
-    [...els.contentArea.querySelectorAll("button[data-edit]")].forEach((btn) => {
-      btn.onclick = () => actions.onEdit?.(btn.getAttribute("data-edit"));
-    });
-    [...els.contentArea.querySelectorAll("button[data-del]")].forEach((btn) => {
-      btn.onclick = () => actions.onDelete?.(btn.getAttribute("data-del"));
-    });
-  }
 }
