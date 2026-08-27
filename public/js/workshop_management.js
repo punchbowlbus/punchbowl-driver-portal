@@ -19,6 +19,7 @@ import {
 
 import { auth, db, provider } from "./firebase.js";
 import { ADMIN_EMAILS } from "./config.js";
+import { getEmployeeByEmail } from "./db.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -38,7 +39,17 @@ let odometerReadings = [];
 let unsubscribers = [];
 
 function normalizeEmail(v) { return String(v || "").trim().toLowerCase(); }
-function isAdmin(email) { return ADMIN_EMAILS.map(normalizeEmail).includes(normalizeEmail(email)); }
+function isSuperAdmin(email) { return ADMIN_EMAILS.map(normalizeEmail).includes(normalizeEmail(email)); }
+function hasWorkshopManagerAccess(employee) {
+  if (!employee) return false;
+  const status = String(employee.status || "").trim().toLowerCase();
+  const department = String(employee.department || "").trim().toLowerCase();
+  const role = String(employee.role || "").trim().toLowerCase();
+  const accessLevel = String(employee.accessLevel || "").trim().toLowerCase();
+  if (status !== "active") return false;
+  if (accessLevel === "super admin") return true;
+  return department === "workshop" && (role === "manager" || role === "fleet manager");
+}
 function esc(v) { return String(v ?? "").replace(/[&<>'"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[m])); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 function fmtKm(v) { const n = num(v); return n == null ? "—" : `${Math.round(n).toLocaleString("en-AU")} km`; }
@@ -245,15 +256,38 @@ $("createJobBtn").addEventListener("click", () => openJobDialog()); $("dashboard
 $("closeJobDialog").addEventListener("click", () => els.jobDialog.close()); $("cancelJobBtn").addEventListener("click", () => els.jobDialog.close());
 els.loginBtn.addEventListener("click", () => signInWithPopup(auth,provider)); els.logoutBtn.addEventListener("click", () => signOut(auth));
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   if (!user) {
     stopListeners(); els.authText.textContent = "Not signed in"; els.loginBtn.hidden = false; els.logoutBtn.hidden = true;
-    showStatus("Sign in with an authorised admin account to use Workshop Management.", "error"); return;
+    showStatus("Sign in with an authorised Fleet Manager account to use Workshop Management.", "error"); return;
   }
-  const allowed = isAdmin(user.email);
-  els.authText.textContent = allowed ? `Admin: ${user.email}` : `Signed in: ${user.email}`;
-  els.loginBtn.hidden = true; els.logoutBtn.hidden = false;
-  if (!allowed) { stopListeners(); showStatus("Your account does not have Workshop Management access.", "error"); return; }
-  clearStatus(); startListeners();
+
+  els.loginBtn.hidden = true;
+  els.logoutBtn.hidden = false;
+
+  let employee = null;
+  if (!isSuperAdmin(user.email)) {
+    try {
+      employee = await getEmployeeByEmail(user.email);
+    } catch (err) {
+      console.error("Workshop employee lookup failed", err);
+      stopListeners();
+      els.authText.textContent = `Signed in: ${user.email}`;
+      showStatus("Unable to verify your employee access. Please try again or contact the Super Admin.", "error");
+      return;
+    }
+  }
+
+  const allowed = isSuperAdmin(user.email) || hasWorkshopManagerAccess(employee);
+  els.authText.textContent = isSuperAdmin(user.email) ? `Super Admin: ${user.email}` : `Fleet Manager: ${user.email}`;
+
+  if (!allowed) {
+    stopListeners();
+    showStatus("Your employee record does not have Fleet Manager access to Workshop Management.", "error");
+    return;
+  }
+
+  clearStatus();
+  startListeners();
 });
