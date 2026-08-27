@@ -7,11 +7,9 @@ export const FIREBASE_CONFIG = {
   appId: "1:352420537161:web:4ec51dcb476934a9373098"
 };
 
+// Permanent Super Admin bypass. All other portal access is controlled by the Employees collection.
 export const ADMIN_EMAILS = [
-  "info@punchbowlbus.com",
-  "nalin.rajapaksha82@gmail.com",
-  "nalin@punchbowlbus.com.au",
-  "christine@punchbowlbus.com.au"
+  "nalin.rajapaksha82@gmail.com"
 ];
 
 /**
