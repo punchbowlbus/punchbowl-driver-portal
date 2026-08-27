@@ -14,6 +14,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
 
 import { auth, db, provider } from "./firebase.js";
+import { ADMIN_EMAILS } from "./config.js";
+import { getEmployeeByEmail } from "./db.js";
 import { getRequirementTemplate } from "./workshop_service_requirements.js";
 
 const $ = (id) => document.getElementById(id);
@@ -33,6 +35,17 @@ let jobsUnsub = null;
 let busesUnsub = null;
 
 function normalize(v) { return String(v || "").trim().toLowerCase(); }
+function isSuperAdmin(email) { return ADMIN_EMAILS.map(normalize).includes(normalize(email)); }
+function hasMechanicAccess(employee) {
+  if (!employee) return false;
+  const status = normalize(employee.status);
+  const department = normalize(employee.department);
+  const role = normalize(employee.role);
+  const accessLevel = normalize(employee.accessLevel);
+  if (status !== "active") return false;
+  if (accessLevel === "super admin") return true;
+  return department === "workshop" && ["mechanic", "manager", "fleet manager"].includes(role);
+}
 function esc(v) { return String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[m])); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
 function fmtDate(v) {
@@ -298,6 +311,11 @@ function startListeners() {
   busesUnsub = onSnapshot(collection(db, "buses"), (snap) => { buses = snap.docs.map((d) => ({ id:d.id, ...d.data() })); });
 }
 
+function stopListeners() {
+  if (jobsUnsub) { try { jobsUnsub(); } catch {} jobsUnsub = null; }
+  if (busesUnsub) { try { busesUnsub(); } catch {} busesUnsub = null; }
+}
+
 els.statusFilter.addEventListener("change", renderQueue);
 els.refreshBtn.addEventListener("click", () => renderQueue());
 els.backToQueueBtn.addEventListener("click", () => { selectedJob = null; els.jobCardView.hidden = true; els.queueView.hidden = false; clearStatus(); });
@@ -309,21 +327,48 @@ els.completeJobBtn.addEventListener("click", () => saveJobCard("Waiting Approval
 els.loginBtn.addEventListener("click", () => signInWithPopup(auth, provider));
 els.logoutBtn.addEventListener("click", () => signOut(auth));
 
-onAuthStateChanged(auth, (user) => {
+onAuthStateChanged(auth, async (user) => {
   currentUser = user;
   if (!user) {
+    stopListeners();
     els.authText.textContent = "Not signed in";
     els.loginBtn.hidden = false;
     els.logoutBtn.hidden = true;
-    els.mechanicIdentity.textContent = "Sign in to view the shared workshop queue.";
+    els.mechanicIdentity.textContent = "Sign in with an authorised Workshop employee account.";
     els.jobQueue.innerHTML = `<div class="empty">Sign in to load workshop jobs.</div>`;
-    if (jobsUnsub) jobsUnsub();
-    if (busesUnsub) busesUnsub();
     return;
   }
-  els.authText.textContent = `Signed in: ${user.email}`;
+
   els.loginBtn.hidden = true;
   els.logoutBtn.hidden = false;
-  els.mechanicIdentity.textContent = "Shared workshop table · all assigned jobs visible to workshop staff";
+
+  let employee = null;
+  if (!isSuperAdmin(user.email)) {
+    try {
+      employee = await getEmployeeByEmail(user.email);
+    } catch (err) {
+      console.error("Mechanic employee lookup failed", err);
+      stopListeners();
+      els.authText.textContent = `Signed in: ${user.email}`;
+      els.mechanicIdentity.textContent = "Employee access could not be verified.";
+      els.jobQueue.innerHTML = `<div class="empty">Unable to verify Workshop access.</div>`;
+      return;
+    }
+  }
+
+  const allowed = isSuperAdmin(user.email) || hasMechanicAccess(employee);
+  if (!allowed) {
+    stopListeners();
+    els.authText.textContent = `Signed in: ${user.email}`;
+    els.mechanicIdentity.textContent = "Your employee record does not have Mechanic access.";
+    els.jobQueue.innerHTML = `<div class="empty">Mechanic access is controlled from Administration → Employees.</div>`;
+    showStatus("Your account does not have access to the Mechanic Work Queue.", "error");
+    return;
+  }
+
+  const roleLabel = isSuperAdmin(user.email) ? "Super Admin" : (employee?.role || "Workshop");
+  els.authText.textContent = `${roleLabel}: ${user.email}`;
+  els.mechanicIdentity.textContent = `${employee?.displayName || user.email} · Workshop ${employee?.role || "Super Admin"}`;
+  clearStatus();
   startListeners();
 });
