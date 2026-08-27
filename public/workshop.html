@@ -146,13 +146,13 @@
 
   <dialog id="jobDialog" class="dialog">
     <form id="jobForm" method="dialog">
-      <div class="dialog-head"><div><h2>Create Workshop Job</h2><p>Choose the job type and assign it to a mechanic.</p></div><button id="closeJobDialog" class="icon-button" type="button">×</button></div>
+      <div class="dialog-head"><div><h2>Create Workshop Job</h2><p>Choose the job type. Leave mechanic unassigned to send it to the shared Workshop queue.</p></div><button id="closeJobDialog" class="icon-button" type="button">×</button></div>
       <div class="form-grid">
         <label>Bus<select id="jobBus" required><option value="">Select bus</option></select></label>
         <label>Job type<select id="jobType" required><option value="Defect Repair">Defect Repair</option><option value="Scheduled Service">Scheduled Service</option><option value="Safety Inspection">Safety Inspection</option><option value="Preventive Maintenance">Preventive Maintenance</option><option value="Breakdown Repair">Breakdown Repair</option><option value="Tyres">Tyres</option><option value="Electrical">Electrical</option><option value="Body Repair">Body Repair</option><option value="Other">Other</option></select></label>
         <label>Priority<select id="jobPriority"><option>Normal</option><option>High</option><option>Urgent</option><option>Safety Critical</option></select></label>
         <label>Due date<input id="jobDueDate" type="date" /></label>
-        <label class="full">Assigned mechanic<input id="jobMechanic" placeholder="Mechanic name or employee number" /></label>
+        <label class="full">Assigned mechanic<select id="jobMechanic"><option value="">Unassigned — Shared Workshop Queue</option></select></label>
         <label class="full">Reported fault / work requested<textarea id="jobFault" required placeholder="Describe the fault, service or inspection required"></textarea></label>
         <label class="full">Fleet Manager notes<textarea id="jobManagerNotes" placeholder="Instructions for workshop"></textarea></label>
       </div>
@@ -162,6 +162,7 @@
 
   <script type="module" src="./js/workshop_display_stability.js"></script>
   <script type="module" src="./js/workshop_management.js?v=20260827-access3"></script>
+  <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js"></script>
   <script type="module" src="./js/workshop_manager_approval.js"></script>
   <script type="module" src="./js/workshop_fleet_pro.js"></script>
