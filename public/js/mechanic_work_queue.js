@@ -14,6 +14,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
 
 import { auth, db, provider } from "./firebase.js";
+import { getRequirementTemplate } from "./workshop_service_requirements.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -43,8 +44,6 @@ function showStatus(message, type="success") { els.status.className = `status ${
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
 
 const CHECKLISTS = {
-  "Scheduled Service": ["Engine oil","Oil filter","Fuel filter","Coolant level / condition","Brake system","Steering","Suspension","Tyres and wheel nuts","Lights and electrical","Doors and interlocks","Windscreen / wipers","Fluid leaks","Safety equipment","Road test"],
-  "Safety Inspection": ["Service brakes","Park brake","Steering","Suspension","Tyres","Wheel security","Headlights / indicators","Brake lights","Doors / emergency exits","Seat belts","Wheelchair equipment","Fire extinguisher","First aid / emergency equipment","Body and structural condition","Leaks","Road test"],
   "Defect Repair": ["Reported fault confirmed","Root cause identified","Repair completed","Related components checked","Fault cleared / retested","Road test where required"],
   "Preventive Maintenance": ["Visual inspection","Fluid levels","Belts / hoses","Brakes","Tyres","Electrical","Doors","Leaks","Safety equipment","Road test"],
   "Breakdown Repair": ["Breakdown cause identified","Repair completed","Related systems checked","Warning lights cleared","Road test / functional test"],
@@ -55,6 +54,10 @@ const CHECKLISTS = {
 };
 
 function openJobs() { return jobs.filter((j) => !["Completed","Closed","Cancelled"].includes(j.status)); }
+
+function categoryLabel(job) {
+  return job.serviceType || job.inspectionType || job.jobCategory || "";
+}
 
 function renderQueue() {
   const status = els.statusFilter.value;
@@ -80,7 +83,7 @@ function renderQueue() {
           <tr>
             <td><strong>${esc(j.jobNumber || j.id)}</strong><div class="list-meta">${esc(j.reportedFault || "")}</div></td>
             <td><strong>${esc(j.fleetNumber || "—")}</strong><div class="list-meta">${esc(j.rego || "")}</div></td>
-            <td>${esc(j.jobType || "Workshop Job")}</td>
+            <td>${esc(j.jobType || "Workshop Job")}${categoryLabel(j) ? `<div class="list-meta"><strong>${esc(categoryLabel(j))}</strong></div>` : ""}</td>
             <td><span class="badge ${/urgent|critical/i.test(j.priority || "") ? "bad" : /high/i.test(j.priority || "") ? "warn" : "info"}">${esc(j.priority || "Normal")}</span></td>
             <td>${esc(j.assignedMechanic || j.assignedMechanicName || j.assignedMechanicEmployeeNumber || "Unassigned")}</td>
             <td>${esc(j.status || "New")}</td>
@@ -101,11 +104,68 @@ function currentBusOdo(job) {
   return num(b?.currentOdometer ?? b?.odometer ?? b?.odometerKm ?? job.currentOdometer);
 }
 
+function requirementData(job) {
+  if (Array.isArray(job.assignedChecklist?.items) && job.assignedChecklist.items.length) {
+    return {
+      title: job.assignedChecklist.templateTitle || `${categoryLabel(job) || job.jobType} Checklist`,
+      source: job.assignedChecklist.templateSource || "Assigned workshop checklist",
+      schedule: job.assignedChecklist.schedule || "",
+      items: job.assignedChecklist.items
+    };
+  }
+  const template = getRequirementTemplate(job.serviceTemplateKey);
+  return template || null;
+}
+
+function savedChecklistValue(saved, key, item) {
+  return saved[key] ?? saved[item] ?? "";
+}
+
+function renderRequirementChecklist(job, requirement) {
+  const saved = job.jobCard?.checklist || {};
+  const grouped = new Map();
+  requirement.items.forEach((item, index) => {
+    const section = item.section || "General";
+    if (!grouped.has(section)) grouped.set(section, []);
+    grouped.get(section).push({ ...item, index });
+  });
+
+  els.checklistHeading.textContent = `${requirement.title} · ${requirement.items.length} required items`;
+  const schedule = requirement.schedule ? `<div class="hint" style="margin-bottom:12px"><strong>Schedule:</strong> ${esc(requirement.schedule)}</div>` : "";
+  const source = `<div class="hint" style="margin-bottom:12px">Requirements assigned from ${esc(requirement.source || "Punchbowl Bus service document")}.</div>`;
+
+  els.jobChecklist.innerHTML = schedule + source + [...grouped.entries()].map(([section, items], groupIndex) => `
+    <details class="requirement-group" ${groupIndex < 2 ? "open" : ""} style="border:1px solid #e4e7ec;border-radius:10px;margin:0 0 10px;overflow:hidden">
+      <summary style="cursor:pointer;padding:12px 14px;font-weight:800;background:#f8fafc">${esc(section)} <span class="hint">(${items.length})</span></summary>
+      <div style="padding:4px 12px 10px">
+        ${items.map(({id,item,action,index}) => {
+          const key = String(id || `${job.serviceTemplateKey || job.jobType}-${index + 1}`);
+          const current = savedChecklistValue(saved, key, item);
+          return `<div class="check-row" style="align-items:center">
+            <label for="check_${index}"><strong>${esc(item)}</strong>${action ? `<div class="list-meta">Action: ${esc(action)}</div>` : ""}</label>
+            <select id="check_${index}" data-check-key="${esc(key)}" data-check-item="${esc(item)}" data-required-work="1">
+              <option value="">Select result</option>
+              <option value="Pass" ${current === "Pass" ? "selected" : ""}>Completed / Pass</option>
+              <option value="Attention" ${current === "Attention" ? "selected" : ""}>Attention required</option>
+              <option value="N/A" ${current === "N/A" ? "selected" : ""}>N/A</option>
+            </select>
+          </div>`;
+        }).join("")}
+      </div>
+    </details>`).join("");
+}
+
 function renderChecklist(job) {
+  const requirement = requirementData(job);
+  if (requirement) {
+    renderRequirementChecklist(job, requirement);
+    return;
+  }
+
   const items = CHECKLISTS[job.jobType] || CHECKLISTS.Other;
   els.checklistHeading.textContent = `${job.jobType || "Workshop"} Checklist`;
   const saved = job.jobCard?.checklist || {};
-  els.jobChecklist.innerHTML = items.map((item, i) => `<div class="check-row"><label for="check_${i}">${esc(item)}</label><select id="check_${i}" data-check-item="${esc(item)}"><option value="">Select</option><option value="Pass" ${saved[item] === "Pass" ? "selected" : ""}>Pass</option><option value="Attention" ${saved[item] === "Attention" ? "selected" : ""}>Attention</option><option value="N/A" ${saved[item] === "N/A" ? "selected" : ""}>N/A</option></select></div>`).join("");
+  els.jobChecklist.innerHTML = items.map((item, i) => `<div class="check-row"><label for="check_${i}">${esc(item)}</label><select id="check_${i}" data-check-key="${esc(item)}" data-check-item="${esc(item)}"><option value="">Select</option><option value="Pass" ${saved[item] === "Pass" ? "selected" : ""}>Pass</option><option value="Attention" ${saved[item] === "Attention" ? "selected" : ""}>Attention</option><option value="N/A" ${saved[item] === "N/A" ? "selected" : ""}>N/A</option></select></div>`).join("");
 }
 
 function partRow(part={}) {
@@ -123,10 +183,11 @@ function openJob(id) {
   clearStatus();
   els.queueView.hidden = true;
   els.jobCardView.hidden = false;
-  els.jobCardTitle.textContent = `${job.jobNumber || job.id} · ${job.jobType || "Workshop Job"}`;
+  const category = categoryLabel(job);
+  els.jobCardTitle.textContent = `${job.jobNumber || job.id} · ${job.jobType || "Workshop Job"}${category ? ` · ${category}` : ""}`;
   els.jobCardVehicle.textContent = `${job.fleetNumber || "Bus"}${job.rego ? ` · ${job.rego}` : ""}`;
   els.jobCardStatusBadge.innerHTML = `<span class="badge info">${esc(job.status || "New")}</span>`;
-  els.jobCardMeta.innerHTML = `<div><strong>Priority:</strong> ${esc(job.priority || "Normal")}</div><div><strong>Due:</strong> ${esc(fmtDate(job.dueDate))}</div><div><strong>Assigned:</strong> ${esc(job.assignedMechanic || job.assignedMechanicName || "Unassigned")}</div>`;
+  els.jobCardMeta.innerHTML = `<div><strong>Priority:</strong> ${esc(job.priority || "Normal")}</div><div><strong>Due:</strong> ${esc(fmtDate(job.dueDate))}</div><div><strong>Assigned:</strong> ${esc(job.assignedMechanic || job.assignedMechanicName || "Unassigned")}</div>${category ? `<div><strong>Category:</strong> ${esc(category)}</div>` : ""}`;
   els.readonlyJobDetails.innerHTML = `<div class="readonly-field"><div class="readonly-label">Requested work</div><div class="readonly-value">${esc(job.reportedFault || "—")}</div></div><div class="readonly-field"><div class="readonly-label">Fleet Manager notes</div><div class="readonly-value">${esc(job.managerNotes || "—")}</div></div>`;
   const previous = currentBusOdo(job);
   els.jobPreviousOdometer.value = previous == null ? "" : String(previous);
@@ -153,7 +214,7 @@ function openJob(id) {
 
 function collectJobCard() {
   const checklist = {};
-  els.jobChecklist.querySelectorAll("[data-check-item]").forEach((el) => { checklist[el.dataset.checkItem] = el.value; });
+  els.jobChecklist.querySelectorAll("[data-check-key]").forEach((el) => { checklist[el.dataset.checkKey] = el.value; });
   const partsUsed = [...els.partsBody.querySelectorAll("tr")].map((tr) => ({
     partNumber: tr.querySelector(".part-number")?.value.trim() || "",
     description: tr.querySelector(".part-description")?.value.trim() || "",
@@ -185,6 +246,9 @@ async function saveJobCard(status, message) {
     if (!card.diagnosis) return showStatus("Enter diagnosis / findings before completing the job.", "error");
     if (!card.workCompleted) return showStatus("Enter work carried out before completing the job.", "error");
     if (!card.safeToReturn) return showStatus("Select whether the vehicle is safe to return to service.", "error");
+    const required = [...els.jobChecklist.querySelectorAll("[data-required-work='1']")];
+    const incomplete = required.filter((el) => !el.value);
+    if (incomplete.length) return showStatus(`Complete all service / inspection requirements before sending for approval. ${incomplete.length} item${incomplete.length === 1 ? " is" : "s are"} still unanswered.`, "error");
   }
   const payload = { jobCard: card, status, updatedAt: serverTimestamp(), updatedByEmail: normalize(currentUser?.email) };
   if (status === "In Progress" && !selectedJob.startedAt) payload.startedAt = serverTimestamp();
