@@ -2,6 +2,8 @@ import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.9.
 import { db } from "./firebase.js";
 
 let jobsByNumber = new Map();
+let tableObserver = null;
+let rendering = false;
 
 function asDate(value) {
   if (!value) return null;
@@ -39,12 +41,14 @@ function jobEnd(job) {
 function ensureHeaders(table) {
   const row = table?.querySelector("thead tr");
   if (!row) return;
+
   if (!row.querySelector('[data-job-time-head="start"]')) {
     const th = document.createElement("th");
     th.dataset.jobTimeHead = "start";
     th.textContent = "Job Start";
     row.appendChild(th);
   }
+
   if (!row.querySelector('[data-job-time-head="end"]')) {
     const th = document.createElement("th");
     th.dataset.jobTimeHead = "end";
@@ -57,40 +61,55 @@ function cleanJobNumber(cell) {
   return cell?.querySelector("strong")?.textContent?.trim() || cell?.textContent?.trim() || "";
 }
 
+function setCellText(cell, value) {
+  if (!cell) return;
+  if (cell.dataset.renderedValue === value) return;
+  cell.dataset.renderedValue = value;
+  cell.textContent = value;
+  cell.classList.add("job-time-value");
+}
+
 function renderTimes() {
-  const tbody = document.getElementById("jobsTableBody");
-  const table = tbody?.closest("table");
-  if (!tbody || !table) return;
+  if (rendering) return;
+  rendering = true;
 
-  ensureHeaders(table);
+  try {
+    const tbody = document.getElementById("jobsTableBody");
+    const table = tbody?.closest("table");
+    if (!tbody || !table) return;
 
-  [...tbody.querySelectorAll("tr")].forEach((row) => {
-    if (row.querySelector(".empty")) {
-      const td = row.querySelector("td");
-      if (td) td.colSpan = 9;
-      return;
-    }
+    ensureHeaders(table);
 
-    const jobNo = cleanJobNumber(row.cells?.[0]);
-    const job = jobsByNumber.get(jobNo);
+    [...tbody.querySelectorAll("tr")].forEach((row) => {
+      if (row.querySelector(".empty")) {
+        const td = row.querySelector("td");
+        if (td && td.colSpan !== 9) td.colSpan = 9;
+        return;
+      }
 
-    let startCell = row.querySelector('[data-job-time-cell="start"]');
-    if (!startCell) {
-      startCell = document.createElement("td");
-      startCell.dataset.jobTimeCell = "start";
-      row.appendChild(startCell);
-    }
+      const jobNo = cleanJobNumber(row.cells?.[0]);
+      const job = jobsByNumber.get(jobNo) || {};
 
-    let endCell = row.querySelector('[data-job-time-cell="end"]');
-    if (!endCell) {
-      endCell = document.createElement("td");
-      endCell.dataset.jobTimeCell = "end";
-      row.appendChild(endCell);
-    }
+      let startCell = row.querySelector('[data-job-time-cell="start"]');
+      if (!startCell) {
+        startCell = document.createElement("td");
+        startCell.dataset.jobTimeCell = "start";
+        row.appendChild(startCell);
+      }
 
-    startCell.innerHTML = `<span class="job-time-value">${formatDateTime(jobStart(job || {}))}</span>`;
-    endCell.innerHTML = `<span class="job-time-value">${formatDateTime(jobEnd(job || {}))}</span>`;
-  });
+      let endCell = row.querySelector('[data-job-time-cell="end"]');
+      if (!endCell) {
+        endCell = document.createElement("td");
+        endCell.dataset.jobTimeCell = "end";
+        row.appendChild(endCell);
+      }
+
+      setCellText(startCell, formatDateTime(jobStart(job)));
+      setCellText(endCell, formatDateTime(jobEnd(job)));
+    });
+  } finally {
+    rendering = false;
+  }
 }
 
 function injectStyles() {
@@ -98,7 +117,7 @@ function injectStyles() {
   const style = document.createElement("style");
   style.id = "workshopJobTimeStyles";
   style.textContent = `
-    .job-time-value{white-space:nowrap;font-size:12px;color:#344054;font-weight:700}
+    #jobsView td.job-time-value{white-space:nowrap;font-size:12px;color:#344054;font-weight:700}
     @media(max-width:900px){
       #jobsView .table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
       #jobsView table{min-width:1180px}
@@ -107,10 +126,26 @@ function injectStyles() {
   document.head.appendChild(style);
 }
 
-const tableObserver = new MutationObserver(renderTimes);
+function scheduleRender() {
+  window.requestAnimationFrame(renderTimes);
+}
+
 function watchTable() {
   const tbody = document.getElementById("jobsTableBody");
-  if (!tbody) return setTimeout(watchTable, 250);
+  if (!tbody) {
+    setTimeout(watchTable, 250);
+    return;
+  }
+
+  if (tableObserver) tableObserver.disconnect();
+  tableObserver = new MutationObserver((mutations) => {
+    const hasExternalRowChange = mutations.some((m) =>
+      [...m.addedNodes, ...m.removedNodes].some((node) =>
+        node.nodeType === 1 && !node.matches?.('[data-job-time-cell]')
+      )
+    );
+    if (hasExternalRowChange) scheduleRender();
+  });
   tableObserver.observe(tbody, { childList:true, subtree:true });
   renderTimes();
 }
@@ -120,7 +155,7 @@ onSnapshot(collection(db, "workshopJobs"), (snap) => {
     const job = { id:d.id, ...d.data() };
     return [String(job.jobNumber || job.id), job];
   }));
-  renderTimes();
+  scheduleRender();
 });
 
 injectStyles();
