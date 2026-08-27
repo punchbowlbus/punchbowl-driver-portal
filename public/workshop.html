@@ -85,11 +85,7 @@
         <section class="panel table-panel">
           <div class="table-wrap">
             <table>
-              <thead>
-                <tr>
-                  <th>Fleet</th><th>Rego</th><th>Vehicle</th><th>Depot</th><th>Odometer</th><th>Service</th><th>Status</th><th></th>
-                </tr>
-              </thead>
+              <thead><tr><th>Fleet</th><th>Rego</th><th>Vehicle</th><th>Depot</th><th>Odometer</th><th>Service</th><th>Status</th><th></th></tr></thead>
               <tbody id="fleetTableBody"></tbody>
             </table>
           </div>
@@ -98,49 +94,28 @@
 
       <section id="odometerView" class="view">
         <div class="page-head">
-          <div>
-            <h1>Odometer Management</h1>
-            <p>Enter a new reading. Previous readings remain locked in history.</p>
-          </div>
+          <div><h1>Odometer Management</h1><p>Enter a new reading. Previous readings remain locked in history.</p></div>
         </div>
         <div class="two-col odometer-layout">
           <section class="panel">
             <h2>Update Odometer</h2>
             <form id="odometerForm" class="form-grid">
-              <label class="full">Bus
-                <select id="odometerBus" required><option value="">Select bus</option></select>
-              </label>
-              <label>Previous reading
-                <input id="previousOdometer" readonly placeholder="Locked" />
-              </label>
-              <label>Current reading
-                <input id="currentOdometer" type="number" min="0" step="1" required placeholder="km" />
-              </label>
-              <label>Reading date
-                <input id="odometerDate" type="date" required />
-              </label>
-              <label>Source
-                <select id="odometerSource"><option>Fleet Manager</option><option>Workshop Job</option><option>Driver Check</option><option>Fuel Entry</option><option>Other</option></select>
-              </label>
-              <label class="full">Notes
-                <textarea id="odometerNotes" placeholder="Optional notes"></textarea>
-              </label>
+              <label class="full">Bus<select id="odometerBus" required><option value="">Select bus</option></select></label>
+              <label>Previous reading<input id="previousOdometer" readonly placeholder="Locked" /></label>
+              <label>Current reading<input id="currentOdometer" type="number" min="0" step="1" required placeholder="km" /></label>
+              <label>Reading date<input id="odometerDate" type="date" required /></label>
+              <label>Source<select id="odometerSource"><option>Fleet Manager</option><option>Workshop Job</option><option>Driver Check</option><option>Fuel Entry</option><option>Other</option></select></label>
+              <label class="full">Notes<textarea id="odometerNotes" placeholder="Optional notes"></textarea></label>
               <div class="form-actions full"><button class="button primary" type="submit">Save Reading</button></div>
             </form>
           </section>
-          <section class="panel">
-            <div class="panel-head"><h2>Recent Odometer Readings</h2><span class="hint">Permanent history</span></div>
-            <div id="odometerHistory" class="list-stack"></div>
-          </section>
+          <section class="panel"><div class="panel-head"><h2>Recent Odometer Readings</h2><span class="hint">Permanent history</span></div><div id="odometerHistory" class="list-stack"></div></section>
         </div>
       </section>
 
       <section id="jobsView" class="view">
         <div class="page-head">
-          <div>
-            <h1>Workshop Jobs</h1>
-            <p>Create, assign and track electronic workshop job cards.</p>
-          </div>
+          <div><h1>Workshop Jobs</h1><p>Create, assign and track electronic workshop job cards.</p></div>
           <button id="createJobBtn" class="button primary" type="button">Create Job</button>
         </div>
         <section class="panel table-panel">
@@ -186,5 +161,6 @@
   <script type="module" src="./js/workshop_fleet_pro.js"></script>
   <script type="module" src="./js/workshop_fleet_polish.js"></script>
   <script type="module" src="./js/workshop_action_messages.js"></script>
+  <script type="module" src="./js/workshop_job_times.js"></script>
 </body>
 </html>
