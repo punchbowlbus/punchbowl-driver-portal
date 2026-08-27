@@ -104,6 +104,31 @@ function currentBusOdo(job) {
   return num(b?.currentOdometer ?? b?.odometer ?? b?.odometerKm ?? job.currentOdometer);
 }
 
+function busIsEv(bus) {
+  return /\b(ev|electric)\b/i.test(String(bus?.fuelType || bus?.fuel || bus?.powertrain || bus?.serviceProgram || ""));
+}
+
+function legacyTemplateKey(job) {
+  const existing = String(job.serviceTemplateKey || "").trim().toLowerCase();
+  if (existing) return existing;
+
+  const bus = jobBus(job);
+  const prefix = busIsEv(bus) ? "ev" : "diesel";
+  const type = String(job.jobType || "").trim().toLowerCase();
+  const category = String(categoryLabel(job) || "").trim().toLowerCase();
+
+  if (type === "safety inspection") {
+    return category.includes("rms") ? `${prefix}-rms` : `${prefix}-90day`;
+  }
+
+  if (type === "scheduled service" && ["small", "medium", "large"].includes(category)) {
+    if (prefix === "ev" && category === "medium") return "";
+    return `${prefix}-${category}`;
+  }
+
+  return "";
+}
+
 function requirementData(job) {
   if (Array.isArray(job.assignedChecklist?.items) && job.assignedChecklist.items.length) {
     return {
@@ -113,8 +138,13 @@ function requirementData(job) {
       items: job.assignedChecklist.items
     };
   }
-  const template = getRequirementTemplate(job.serviceTemplateKey);
-  return template || null;
+  const templateKey = legacyTemplateKey(job);
+  const template = getRequirementTemplate(templateKey);
+  if (!template) return null;
+  if (!job.serviceTemplateKey && String(job.jobType || "").trim().toLowerCase() === "safety inspection") {
+    return { ...template, source: `${template.source} · legacy Safety Inspection job matched from vehicle type` };
+  }
+  return template;
 }
 
 function savedChecklistValue(saved, key, item) {
