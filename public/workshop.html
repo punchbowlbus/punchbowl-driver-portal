@@ -7,6 +7,7 @@
   <meta name="description" content="Fleet Manager workshop management, fleet maintenance and job cards" />
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
   <link rel="stylesheet" href="./styles/workshop.css" />
+  <link rel="stylesheet" href="./styles/workshop_driver_defects.css" />
 </head>
 <body>
   <header class="topbar">
@@ -34,7 +35,7 @@
       <button class="nav-item" data-view="jobs" type="button">Workshop Jobs</button>
       <button class="nav-item" data-view="history" type="button">Job Card History</button>
       <div class="side-divider"></div>
-      <button class="nav-item disabled" type="button" disabled>Driver Defects <span>Next</span></button>
+      <button class="nav-item" data-view="defects" type="button">Driver Defects</button>
       <button class="nav-item disabled" type="button" disabled>Mechanic Work Queue <span>Next</span></button>
       <button class="nav-item disabled" type="button" disabled>Safety Checks <span>Next</span></button>
       <button class="nav-item disabled" type="button" disabled>Reports <span>Next</span></button>
@@ -118,6 +119,28 @@
         <div class="page-head"><div><h1>Job Card History</h1><p>Completed and closed workshop records retained against the vehicle.</p></div></div>
         <section class="panel"><div id="historyList" class="list-stack"></div></section>
       </section>
+
+      <section id="defectsView" class="view">
+        <div class="page-head">
+          <div><h1>Driver Defects</h1><p>Review the existing driver defect reports from the main portal.</p></div>
+          <button id="refreshWorkshopDefects" class="button secondary" type="button">Refresh</button>
+        </div>
+        <div class="defect-tabs">
+          <button type="button" class="active" data-defect-tab="overview">Overview</button>
+          <button type="button" data-defect-tab="open">Open Reports</button>
+          <button type="button" data-defect-tab="completed">Completed</button>
+        </div>
+        <section id="workshopDefectSummary" class="defect-summary"></section>
+        <section class="panel table-panel">
+          <div class="defect-filters">
+            <label>Search<input id="workshopDefectSearch" type="search" placeholder="Report, bus, driver or description" /></label>
+            <label>Date<input id="workshopDefectDate" type="date" /></label>
+            <label>Category<select id="workshopDefectCategory"><option value="">All categories</option></select></label>
+            <label>Safety<select id="workshopDefectSafety"><option value="">All reports</option><option value="No">Unsafe to drive</option><option value="Yes">Safe to drive</option></select></label>
+          </div>
+          <div id="workshopDefectList" class="defect-list"><div class="defect-empty">Open Driver Defects to load reports.</div></div>
+        </section>
+      </section>
     </main>
   </div>
 
@@ -146,5 +169,6 @@
   <script type="module" src="./js/workshop_job_times.js"></script>
   <script type="module" src="./js/workshop_job_categories.js"></script>
   <script type="module" src="./js/workshop_job_remove.js"></script>
+  <script type="module" src="./js/workshop_driver_defects.js"></script>
 </body>
 </html>
