@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PBC Workshop Management</title>
-  <meta name="description" content="Fleet maintenance and workshop management workspace" />
+  <title>Punchbowl Bus Company Workshop Management</title>
+  <meta name="description" content="Fleet Manager workshop management, fleet maintenance and job cards" />
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
   <link rel="stylesheet" href="./styles/workshop.css" />
 </head>
@@ -14,7 +14,7 @@
       <div class="brand-mark">PBC</div>
       <div>
         <div class="brand-title">Workshop Management</div>
-        <div class="brand-sub">Fleet maintenance, job cards and vehicle history</div>
+        <div class="brand-sub">Fleet maintenance &amp; electronic job cards</div>
       </div>
     </div>
     <div class="top-actions">
@@ -27,36 +27,32 @@
 
   <div class="app-shell">
     <aside class="sidebar">
-      <button class="nav-item active" data-view="dashboard">Dashboard</button>
-      <button class="nav-item" data-view="fleet">Fleet</button>
-      <button class="nav-item" data-view="odometer">Odometer</button>
-      <button class="nav-item" data-view="jobs">Workshop Jobs</button>
-      <button class="nav-item" data-view="history">Job Card History</button>
-      <div class="sidebar-note">
-        <strong>Planned next</strong>
-        <span>Driver Defects</span>
-        <span>Mechanic Work Queue</span>
-        <span>Safety Checks</span>
-        <span>Reports</span>
-      </div>
+      <div class="side-title">Fleet Manager</div>
+      <button class="nav-item active" data-view="dashboard" type="button">Dashboard</button>
+      <button class="nav-item" data-view="fleet" type="button">Fleet</button>
+      <button class="nav-item" data-view="odometer" type="button">Odometer</button>
+      <button class="nav-item" data-view="jobs" type="button">Workshop Jobs</button>
+      <button class="nav-item" data-view="history" type="button">Job Card History</button>
+      <div class="side-divider"></div>
+      <button class="nav-item disabled" type="button" disabled>Driver Defects <span>Next</span></button>
+      <button class="nav-item disabled" type="button" disabled>Mechanic Work Queue <span>Next</span></button>
+      <button class="nav-item disabled" type="button" disabled>Safety Checks <span>Next</span></button>
+      <button class="nav-item disabled" type="button" disabled>Reports <span>Next</span></button>
     </aside>
 
-    <main class="content">
+    <main class="main-content">
       <div id="status" class="status"></div>
 
       <section id="dashboardView" class="view active">
         <div class="page-head">
-          <div>
-            <h1>Fleet Manager Dashboard</h1>
-            <p>Live workshop workload, fleet condition and maintenance due.</p>
-          </div>
+          <div><h1>Fleet Manager Dashboard</h1><p>Live fleet condition, workshop workload and maintenance due.</p></div>
           <button id="dashboardCreateJobBtn" class="button primary" type="button">Create Workshop Job</button>
         </div>
 
         <div class="metrics-grid">
           <article class="metric"><span>Total Fleet</span><strong id="metricFleet">0</strong></article>
-          <article class="metric"><span>Workshop</span><strong id="metricWorkshop">0</strong></article>
-          <article class="metric"><span>Out of Service</span><strong id="metricOut">0</strong></article>
+          <article class="metric warning"><span>Workshop</span><strong id="metricWorkshop">0</strong></article>
+          <article class="metric danger"><span>Out of Service</span><strong id="metricOut">0</strong></article>
           <article class="metric"><span>Open Jobs</span><strong id="metricOpenJobs">0</strong></article>
           <article class="metric warning"><span>Service Due Soon</span><strong id="metricDueSoon">0</strong></article>
           <article class="metric danger"><span>Service Overdue</span><strong id="metricOverdue">0</strong></article>
@@ -64,11 +60,11 @@
 
         <div class="two-col">
           <section class="panel">
-            <div class="panel-head"><h2>Maintenance Due</h2><span class="hint">Based on latest odometer and service schedule</span></div>
+            <div class="panel-head"><h2>Maintenance Due</h2><span class="hint">Next service by km/date</span></div>
             <div id="maintenanceDueList" class="list-stack"></div>
           </section>
           <section class="panel">
-            <div class="panel-head"><h2>Open Workshop Jobs</h2><span class="hint">Newest jobs requiring attention</span></div>
+            <div class="panel-head"><h2>Open Workshop Jobs</h2><span class="hint">Most recent</span></div>
             <div id="dashboardJobsList" class="list-stack"></div>
           </section>
         </div>
@@ -76,16 +72,13 @@
 
       <section id="fleetView" class="view">
         <div class="page-head">
-          <div>
-            <h1>Fleet Register</h1>
-            <p>Operational workshop view of every vehicle.</p>
-          </div>
-          <input id="fleetSearch" class="search-input" placeholder="Search fleet, rego, make, model or depot" />
+          <div><h1>Fleet Register</h1><p>Workshop-facing view of the existing fleet collection.</p></div>
+          <input id="fleetSearch" class="search-input" placeholder="Search fleet, rego, make, depot" />
         </div>
         <section class="panel table-panel">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Fleet</th><th>Rego</th><th>Vehicle</th><th>Depot</th><th>Odometer</th><th>Service</th><th>Status</th><th></th></tr></thead>
+              <thead><tr><th>Fleet</th><th>Rego</th><th>Vehicle</th><th>Depot</th><th>Odometer</th><th>Service</th><th>Status</th><th>Action</th></tr></thead>
               <tbody id="fleetTableBody"></tbody>
             </table>
           </div>
@@ -93,16 +86,13 @@
       </section>
 
       <section id="odometerView" class="view">
-        <div class="page-head">
-          <div><h1>Odometer Management</h1><p>Enter a new reading. Previous readings remain locked in history.</p></div>
-        </div>
-        <div class="two-col odometer-layout">
+        <div class="page-head"><div><h1>Odometer Management</h1><p>Record odometer updates and retain permanent reading history.</p></div></div>
+        <div class="two-col">
           <section class="panel">
-            <h2>Update Odometer</h2>
             <form id="odometerForm" class="form-grid">
-              <label class="full">Bus<select id="odometerBus" required><option value="">Select bus</option></select></label>
-              <label>Previous reading<input id="previousOdometer" readonly placeholder="Locked" /></label>
-              <label>Current reading<input id="currentOdometer" type="number" min="0" step="1" required placeholder="km" /></label>
+              <label>Bus<select id="odometerBus" required><option value="">Select bus</option></select></label>
+              <label>Previous odometer<input id="previousOdometer" readonly /></label>
+              <label>Current odometer<input id="currentOdometer" type="number" min="0" required /></label>
               <label>Reading date<input id="odometerDate" type="date" required /></label>
               <label>Source<select id="odometerSource"><option>Fleet Manager</option><option>Workshop Job</option><option>Driver Check</option><option>Fuel Entry</option><option>Other</option></select></label>
               <label class="full">Notes<textarea id="odometerNotes" placeholder="Optional notes"></textarea></label>
@@ -114,21 +104,13 @@
       </section>
 
       <section id="jobsView" class="view">
-        <div class="page-head">
-          <div><h1>Workshop Jobs</h1><p>Create, assign and track electronic workshop job cards.</p></div>
-          <button id="createJobBtn" class="button primary" type="button">Create Job</button>
-        </div>
+        <div class="page-head"><div><h1>Workshop Jobs</h1><p>Create, assign and track electronic workshop job cards.</p></div><button id="createJobBtn" class="button primary" type="button">Create Job</button></div>
         <section class="panel table-panel">
           <div class="filter-row">
             <input id="jobSearch" class="search-input" placeholder="Search job, bus, mechanic or fault" />
             <select id="jobStatusFilter"><option value="">All statuses</option><option>New</option><option>Assigned</option><option>In Progress</option><option>Waiting Parts</option><option>Waiting Approval</option><option>Completed</option><option>Closed</option><option>Cancelled</option></select>
           </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Job</th><th>Bus</th><th>Type</th><th>Priority</th><th>Assigned</th><th>Status</th><th>Due</th></tr></thead>
-              <tbody id="jobsTableBody"></tbody>
-            </table>
-          </div>
+          <div class="table-wrap"><table><thead><tr><th>Job</th><th>Bus</th><th>Type</th><th>Priority</th><th>Assigned</th><th>Status</th><th>Due</th></tr></thead><tbody id="jobsTableBody"></tbody></table></div>
         </section>
       </section>
 
@@ -162,5 +144,6 @@
   <script type="module" src="./js/workshop_fleet_polish.js"></script>
   <script type="module" src="./js/workshop_action_messages.js"></script>
   <script type="module" src="./js/workshop_job_times.js"></script>
+  <script type="module" src="./js/workshop_job_categories.js"></script>
 </body>
 </html>
