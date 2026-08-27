@@ -1,6 +1,20 @@
 // Adds Workshop Management to the current Administration menu without changing the rest of the portal UI.
+// Driver defect reporting remains available to drivers, but admin defect management now lives in Workshop Management.
+
+function removeAdminDefectLink() {
+  const navArea = document.getElementById("navArea");
+  if (!navArea) return;
+
+  const operationsBody = navArea.querySelector('[data-menu-body="operations"]');
+  if (!operationsBody) return;
+
+  const defectButton = operationsBody.querySelector('button[data-nav="defectReport"]');
+  if (defectButton) defectButton.remove();
+}
 
 function installWorkshopLink() {
+  removeAdminDefectLink();
+
   const adminNavArea = document.getElementById("adminNavArea");
   if (!adminNavArea) return;
 
