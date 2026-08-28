@@ -1,10 +1,40 @@
-// Keep Fleet Manager Review truthful for jobs that have not been completed yet.
-// The legacy review renderer falls back to updatedAt for "Mechanic completed",
-// which makes a newly-created/assigned job look completed on the creation date.
+import {
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query
+} from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import { db } from "./firebase.js";
+
+let jobsByNumber = new Map();
+
+function fmtDateTime(v) {
+  if (!v) return "—";
+  const d = typeof v?.toDate === "function" ? v.toDate() : new Date(v);
+  if (Number.isNaN(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-AU", {
+    day:"2-digit",
+    month:"short",
+    year:"numeric",
+    hour:"numeric",
+    minute:"2-digit"
+  }).format(d);
+}
+
+function reviewParts() {
+  const subtitle = document.getElementById("wmReviewSubtitle")?.textContent || "";
+  return subtitle.split("·").map((v) => v.trim()).filter(Boolean);
+}
+
+function currentJob() {
+  const parts = reviewParts();
+  const jobNumber = parts[0] || "";
+  return jobsByNumber.get(jobNumber) || null;
+}
 
 function reviewStatus() {
-  const subtitle = document.getElementById("wmReviewSubtitle")?.textContent || "";
-  const parts = subtitle.split("·").map((v) => v.trim()).filter(Boolean);
+  const parts = reviewParts();
   return parts.at(-1) || "";
 }
 
@@ -13,16 +43,18 @@ function setReviewVisibility() {
   if (!dialog) return;
 
   const status = reviewStatus();
-  const completedStatuses = new Set(["Waiting Approval", "Completed", "Closed"]);
   const waitingApproval = status === "Waiting Approval";
+  const job = currentJob();
 
   const labels = [...dialog.querySelectorAll(".wm-review-label")];
-  const completedLabel = labels.find((el) => el.textContent.trim().toLowerCase() === "mechanic completed");
-  const completedValue = completedLabel?.parentElement?.querySelector(".wm-review-value");
+  const dateLabel = labels.find((el) => {
+    const text = el.textContent.trim().toLowerCase();
+    return text === "mechanic completed" || text === "job created";
+  });
+  const dateValue = dateLabel?.parentElement?.querySelector(".wm-review-value");
 
-  if (completedValue && !completedStatuses.has(status)) {
-    completedValue.textContent = "Not completed";
-  }
+  if (dateLabel) dateLabel.textContent = "Job created";
+  if (dateValue) dateValue.textContent = fmtDateTime(job?.createdAt);
 
   const decisionTitle = [...dialog.querySelectorAll(".section-title")]
     .find((el) => el.textContent.trim() === "Fleet Manager Decision");
@@ -36,6 +68,18 @@ function setReviewVisibility() {
   if (returnBtn) returnBtn.style.display = waitingApproval ? "" : "none";
   if (closeBtn) closeBtn.style.display = waitingApproval ? "" : "none";
 }
+
+onSnapshot(
+  query(collection(db,"workshopJobs"), orderBy("createdAt","desc"), limit(300)),
+  (snap) => {
+    jobsByNumber = new Map(snap.docs.map((d) => {
+      const job = { id:d.id, ...d.data() };
+      return [String(job.jobNumber || job.id), job];
+    }));
+    setReviewVisibility();
+  },
+  () => {}
+);
 
 const observer = new MutationObserver(() => setReviewVisibility());
 observer.observe(document.documentElement, { childList:true, subtree:true, characterData:true });
