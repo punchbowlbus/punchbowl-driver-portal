@@ -38,6 +38,12 @@ function reviewStatus() {
   return parts.at(-1) || "";
 }
 
+function setTextIfChanged(el, value) {
+  if (!el) return;
+  const next = String(value ?? "");
+  if (el.textContent !== next) el.textContent = next;
+}
+
 function setReviewVisibility() {
   const dialog = document.getElementById("fleetManagerReviewDialog");
   if (!dialog) return;
@@ -53,20 +59,21 @@ function setReviewVisibility() {
   });
   const dateValue = dateLabel?.parentElement?.querySelector(".wm-review-value");
 
-  if (dateLabel) dateLabel.textContent = "Job created";
-  if (dateValue) dateValue.textContent = fmtDateTime(job?.createdAt);
+  setTextIfChanged(dateLabel, "Job created");
+  setTextIfChanged(dateValue, fmtDateTime(job?.createdAt));
 
   const decisionTitle = [...dialog.querySelectorAll(".section-title")]
     .find((el) => el.textContent.trim() === "Fleet Manager Decision");
   const decisionForm = decisionTitle?.nextElementSibling;
 
-  if (decisionTitle) decisionTitle.hidden = !waitingApproval;
-  if (decisionForm) decisionForm.hidden = !waitingApproval;
+  if (decisionTitle && decisionTitle.hidden !== !waitingApproval) decisionTitle.hidden = !waitingApproval;
+  if (decisionForm && decisionForm.hidden !== !waitingApproval) decisionForm.hidden = !waitingApproval;
 
   const returnBtn = document.getElementById("wmReturnMechanic");
   const closeBtn = document.getElementById("wmApproveClose");
-  if (returnBtn) returnBtn.style.display = waitingApproval ? "" : "none";
-  if (closeBtn) closeBtn.style.display = waitingApproval ? "" : "none";
+  const targetDisplay = waitingApproval ? "" : "none";
+  if (returnBtn && returnBtn.style.display !== targetDisplay) returnBtn.style.display = targetDisplay;
+  if (closeBtn && closeBtn.style.display !== targetDisplay) closeBtn.style.display = targetDisplay;
 }
 
 onSnapshot(
@@ -81,8 +88,10 @@ onSnapshot(
   () => {}
 );
 
+// Only watch for dialog/content insertion. Do not watch characterData, because
+// changing the review text itself would continuously retrigger the observer.
 const observer = new MutationObserver(() => setReviewVisibility());
-observer.observe(document.documentElement, { childList:true, subtree:true, characterData:true });
+observer.observe(document.body, { childList:true, subtree:true });
 
 document.addEventListener("click", () => setTimeout(setReviewVisibility, 0), true);
 setReviewVisibility();
