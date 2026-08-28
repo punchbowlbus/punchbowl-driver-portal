@@ -20,7 +20,13 @@ function syncOpenJob() {
   if (!job) return;
 
   const badge = document.getElementById("jobCardStatusBadge");
-  if (badge) badge.innerHTML = `<span class="badge info">${String(job.status || "New")}</span>`;
+  if (badge) {
+    const nextStatus = String(job.status || "New");
+    const currentStatus = badge.textContent?.trim() || "";
+    if (currentStatus !== nextStatus) {
+      badge.innerHTML = `<span class="badge info">${nextStatus}</span>`;
+    }
+  }
 
   const locked = ["Completed", "Closed", "Waiting Approval"].includes(job.status);
   const start = document.getElementById("startJobBtn");
@@ -28,10 +34,11 @@ function syncOpenJob() {
   const save = document.getElementById("saveProgressBtn");
   const complete = document.getElementById("completeJobBtn");
 
-  if (start) start.disabled = locked || job.status === "In Progress";
-  if (parts) parts.disabled = locked;
-  if (save) save.disabled = locked;
-  if (complete) complete.disabled = locked;
+  const startDisabled = locked || job.status === "In Progress";
+  if (start && start.disabled !== startDisabled) start.disabled = startDisabled;
+  if (parts && parts.disabled !== locked) parts.disabled = locked;
+  if (save && save.disabled !== locked) save.disabled = locked;
+  if (complete && complete.disabled !== locked) complete.disabled = locked;
 }
 
 onSnapshot(
@@ -42,5 +49,5 @@ onSnapshot(
   }
 );
 
-const observer = new MutationObserver(() => syncOpenJob());
-observer.observe(document.body, { childList:true, subtree:true });
+// Re-check after normal user actions such as opening a job card.
+document.addEventListener("click", () => setTimeout(syncOpenJob, 0), true);
