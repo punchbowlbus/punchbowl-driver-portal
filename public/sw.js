@@ -1,4 +1,4 @@
-const CACHE = "pbc-v54"; // Dispatch Pro workspace
+const CACHE = "pbc-v55"; // Refresh cached assets after Workshop updates
 
 const ASSETS = [
   "/",
@@ -41,8 +41,6 @@ self.addEventListener("install", (event) => {
     try {
       await cache.addAll(ASSETS);
     } catch (e) {
-      // ✅ don't fail the install if one file is missing
-      // (you might rename modules during development)
       console.log("SW precache warning:", e);
     }
     self.skipWaiting();
@@ -61,17 +59,18 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Only handle our own domain
   if (url.origin !== location.origin) return;
 
   const isHTML = req.mode === "navigate" || req.destination === "document";
   const isJS = req.destination === "script";
+  const isCSS = req.destination === "style";
 
-  // ✅ Network-first for HTML + JS (prevents old code mismatch)
-  if (isHTML || isJS) {
+  // Network-first for HTML, JS and CSS so Workshop updates appear without
+  // requiring Ctrl+F5 after every deploy.
+  if (isHTML || isJS || isCSS) {
     event.respondWith((async () => {
       try {
-        const fresh = await fetch(req);
+        const fresh = await fetch(req, { cache: "no-store" });
         const cache = await caches.open(CACHE);
         cache.put(req, fresh.clone());
         return fresh;
@@ -82,7 +81,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // ✅ Cache-first for everything else (icons, manifest, etc.)
   event.respondWith((async () => {
     const cached = await caches.match(req);
     if (cached) return cached;
