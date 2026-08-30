@@ -89,7 +89,7 @@
               <label>Previous / recorded km<input id="jobPreviousOdometer" readonly /></label>
               <label>Current odometer<input id="jobCurrentOdometer" type="number" min="0" step="1" placeholder="km" /></label>
             </div>
-            <div class="section-title">Diagnosis & Work</div>
+            <div class="section-title">Diagnosis &amp; Work</div>
             <div class="form-grid">
               <label class="full">Diagnosis / findings<textarea id="diagnosis" placeholder="What did you find?"></textarea></label>
               <label class="full">Work carried out<textarea id="workCompleted" placeholder="Describe the repair, service or inspection work completed"></textarea></label>
@@ -114,6 +114,19 @@
           <div class="table-wrap"><table><thead><tr><th>Part No.</th><th>Description</th><th>Qty</th><th>Supplier / Ref</th><th></th></tr></thead><tbody id="partsBody"></tbody></table></div>
         </section>
 
+        <section class="panel jobcard-section job-photo-section">
+          <div class="panel-head">
+            <div>
+              <h2>Job Photos</h2>
+              <span class="hint">Optional. Add photos when required for damage, repairs, parts, inspection findings or completed work.</span>
+            </div>
+            <button id="jobPhotoButton" class="button secondary" type="button">Take / Add Photo</button>
+          </div>
+          <input id="jobPhotoInput" type="file" accept="image/*" capture="environment" multiple hidden />
+          <div id="jobPhotoStatus" class="job-photo-status" aria-live="polite"></div>
+          <div id="jobPhotoGallery" class="job-photo-gallery"><div class="job-photo-empty">No photos added. Photos are optional.</div></div>
+        </section>
+
         <input id="labourStart" type="hidden" />
         <input id="labourFinish" type="hidden" />
 
@@ -135,5 +148,6 @@
   <script type="module" src="./js/mechanic_status_sync.js"></script>
   <script type="module" src="./js/mechanic_pre_rms.js"></script>
   <script type="module" src="./js/mechanic_checklist_colours.js"></script>
+  <script type="module" src="./js/mechanic_job_photos.js"></script>
 </body>
 </html>
