@@ -8,6 +8,7 @@ import {
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import {
+  deleteObject,
   getDownloadURL,
   ref,
   uploadBytes
@@ -18,9 +19,11 @@ const MAX_PHOTOS = 6;
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.78;
 const RETENTION_DAYS = 180;
+const PHOTO_EDITABLE_STATUSES = new Set(["New", "Assigned", "In Progress", "Waiting Parts"]);
 
 let jobs = [];
 let uploading = false;
+let removingPhoto = false;
 
 function esc(v) {
   return String(v ?? "").replace(/[&<>'\"]/g, (m) => ({
@@ -50,6 +53,10 @@ function photoList(job) {
   return Array.isArray(job?.workshopPhotos) ? job.workshopPhotos.filter((p) => p?.url) : [];
 }
 
+function photosEditable(job) {
+  return PHOTO_EDITABLE_STATUSES.has(String(job?.status || ""));
+}
+
 function renderPhotos() {
   const wrap = document.getElementById("jobPhotoGallery");
   const input = document.getElementById("jobPhotoInput");
@@ -64,13 +71,13 @@ function renderPhotos() {
   }
 
   const photos = photoList(job);
-  const locked = ["Completed", "Closed"].includes(job.status);
+  const editable = photosEditable(job);
   const atLimit = photos.length >= MAX_PHOTOS;
   if (button) {
-    button.disabled = uploading || locked || atLimit;
+    button.disabled = uploading || removingPhoto || !editable || atLimit;
     button.textContent = atLimit ? `Photo limit reached (${MAX_PHOTOS})` : "Take / Add Photo";
   }
-  if (input) input.disabled = uploading || locked || atLimit;
+  if (input) input.disabled = uploading || removingPhoto || !editable || atLimit;
 
   if (!photos.length) {
     wrap.innerHTML = `<div class="job-photo-empty">No photos added. Photos are optional. Maximum ${MAX_PHOTOS} photos, automatically compressed before upload.</div>`;
@@ -78,10 +85,17 @@ function renderPhotos() {
   }
 
   wrap.innerHTML = photos.map((photo, index) => `
-    <a class="job-photo-card" href="${esc(photo.url)}" target="_blank" rel="noopener" title="Open photo ${index + 1}">
-      <img src="${esc(photo.url)}" alt="Workshop job photo ${index + 1}" loading="lazy" />
-      <span>Photo ${index + 1}</span>
-    </a>`).join("");
+    <div class="job-photo-card" style="position:relative">
+      <a href="${esc(photo.url)}" target="_blank" rel="noopener" title="Open photo ${index + 1}" style="display:block;color:inherit;text-decoration:none">
+        <img src="${esc(photo.url)}" alt="Workshop job photo ${index + 1}" loading="lazy" />
+        <span>Photo ${index + 1}</span>
+      </a>
+      ${editable ? `<button class="button secondary job-photo-remove" type="button" data-remove-photo="${index}" style="margin-top:8px;width:100%;border-color:#efc2bf;color:#a51d16">Remove Photo</button>` : ""}
+    </div>`).join("");
+
+  wrap.querySelectorAll("[data-remove-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => removePhoto(Number(btn.dataset.removePhoto)));
+  });
 }
 
 function safeFileName(name) {
@@ -129,6 +143,7 @@ async function compressImage(file) {
 async function uploadSelected(file) {
   const job = currentJob();
   if (!job) throw new Error("Open a job card before adding a photo.");
+  if (!photosEditable(job)) throw new Error("Photos are locked after the Job Card is submitted for approval.");
   if (!file?.type?.startsWith("image/")) throw new Error("Please choose an image file.");
   if (photoList(job).length >= MAX_PHOTOS) throw new Error(`Maximum ${MAX_PHOTOS} photos per job card.`);
 
@@ -170,10 +185,52 @@ async function uploadSelected(file) {
   });
 }
 
+async function removePhoto(index) {
+  if (uploading || removingPhoto) return;
+  const job = currentJob();
+  if (!job) return setMessage("Open a job card before removing a photo.", "error");
+  if (!photosEditable(job)) return setMessage("Photos are locked after the Job Card is submitted for approval.", "error");
+
+  const photos = photoList(job);
+  const photo = photos[index];
+  if (!photo) return setMessage("Photo could not be found.", "error");
+  if (!window.confirm(`Remove Photo ${index + 1}? You can take another photo after removing it.`)) return;
+
+  removingPhoto = true;
+  renderPhotos();
+  setMessage(`Removing Photo ${index + 1}...`);
+
+  try {
+    if (photo.storagePath) {
+      try {
+        await deleteObject(ref(storage, photo.storagePath));
+      } catch (error) {
+        if (error?.code !== "storage/object-not-found") throw error;
+      }
+    }
+
+    const remaining = Array.isArray(job.workshopPhotos)
+      ? job.workshopPhotos.filter((p) => p !== photo && p?.storagePath !== photo.storagePath)
+      : [];
+
+    await updateDoc(doc(db, "workshopJobs", job.id), {
+      workshopPhotos: remaining
+    });
+    setMessage("Photo removed. You can take another photo now.", "success");
+  } catch (error) {
+    console.error("Workshop photo removal failed", error);
+    setMessage(error?.message || "Unable to remove photo.", "error");
+  } finally {
+    removingPhoto = false;
+    renderPhotos();
+  }
+}
+
 async function handleFiles(files) {
-  if (uploading) return;
+  if (uploading || removingPhoto) return;
   const job = currentJob();
   if (!job) return setMessage("Open a job card before adding a photo.", "error");
+  if (!photosEditable(job)) return setMessage("Photos are locked after the Job Card is submitted for approval.", "error");
 
   const remaining = Math.max(0, MAX_PHOTOS - photoList(job).length);
   const list = [...(files || [])].slice(0, remaining);
