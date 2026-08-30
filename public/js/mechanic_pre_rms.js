@@ -6,9 +6,9 @@ const PRE_RMS_ITEMS = [
   "Brake Test",
   "Tyres",
   "Inspect",
-  "Wash",
   "Lights",
-  "Seat"
+  "Seat",
+  "Wash"
 ];
 
 function esc(v) {
