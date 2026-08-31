@@ -16,6 +16,9 @@
   --pbc-info-bg:#eef4ff;
 }
 
+/* Always respect HTML hidden state, even on elements styled as .button. */
+[hidden]{display:none!important}
+
 /* Consistent form typography and spacing */
 .form-grid label,
 .readonly-label,
