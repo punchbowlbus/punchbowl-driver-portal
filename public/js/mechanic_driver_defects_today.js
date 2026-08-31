@@ -35,7 +35,7 @@ function isDone(r) {
 function dayLabel(dateValue, today, yesterday) {
   if (dateValue === today) return "Today";
   if (dateValue === yesterday) return "Yesterday";
-  return dateValue || "Date unknown";
+  return dateValue || "Earlier";
 }
 
 function render(reports) {
@@ -47,16 +47,23 @@ function render(reports) {
   const yesterday = yesterdayString();
   const list = reports
     .map((r) => ({ ...r, _reportDate: reportDate(r) }))
-    .filter((r) => r.deleted !== true && (r._reportDate === today || r._reportDate === yesterday))
+    .filter((r) => {
+      if (r.deleted === true) return false;
+      const recent = r._reportDate === today || r._reportDate === yesterday;
+      return recent || !isDone(r);
+    })
     .sort((a,b) => {
-      if (a._reportDate !== b._reportDate) return b._reportDate.localeCompare(a._reportDate);
+      const aDone = isDone(a) ? 1 : 0;
+      const bDone = isDone(b) ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone;
+      if (a._reportDate !== b._reportDate) return String(b._reportDate || "").localeCompare(String(a._reportDate || ""));
       return (b.createdAt?.toMillis?.() || Date.parse(b.reportedAtIso || "") || 0) - (a.createdAt?.toMillis?.() || Date.parse(a.reportedAtIso || "") || 0);
     });
 
-  if (count) count.textContent = String(list.length);
+  if (count) count.textContent = String(list.filter((r) => !isDone(r)).length);
 
   if (!list.length) {
-    wrap.innerHTML = `<div class="empty">No driver defect reports submitted yesterday or today.</div>`;
+    wrap.innerHTML = `<div class="empty">No recent or open driver defect reports.</div>`;
     return;
   }
 
