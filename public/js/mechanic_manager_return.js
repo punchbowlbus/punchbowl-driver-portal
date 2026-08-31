@@ -6,6 +6,7 @@ import { getEmployeeByEmail } from "./db.js";
 const link = document.getElementById("backToWorkshopManagement");
 const norm = (v) => String(v || "").trim().toLowerCase();
 const isSuperAdmin = (email) => ADMIN_EMAILS.map(norm).includes(norm(email));
+const openedFromWorkshop = new URLSearchParams(window.location.search).get("from") === "workshop";
 
 function canReturnToWorkshop(employee) {
   if (!employee) return false;
@@ -19,7 +20,11 @@ function canReturnToWorkshop(employee) {
 onAuthStateChanged(auth, async (user) => {
   if (!link) return;
   link.hidden = true;
-  if (!user) return;
+
+  // The return link is contextual, not a general mechanic-page navigation link.
+  // It is only available when an authorised manager entered this page from
+  // Workshop Management using mechanic.html?from=workshop.
+  if (!user || !openedFromWorkshop) return;
 
   if (isSuperAdmin(user.email)) {
     link.hidden = false;
