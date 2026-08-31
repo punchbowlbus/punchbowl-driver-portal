@@ -19,18 +19,29 @@ function esc(v) {
 
 function isPreRmsOpen() {
   const title = document.getElementById("jobCardTitle")?.textContent || "";
-  return /\bpre\s*rms\s*check\b/i.test(title);
+  const jobCardView = document.getElementById("jobCardView");
+  return !jobCardView?.hidden && /\bpre\s*rms\s*check\b/i.test(title);
+}
+
+function hasRenderedPreRmsChecklist(wrap) {
+  return wrap.querySelectorAll('select[id^="pre_rms_"]').length === PRE_RMS_ITEMS.length;
 }
 
 function renderPreRmsChecklist() {
-  if (!isPreRmsOpen()) return;
+  const wrap = document.getElementById("jobChecklist");
+  if (!wrap) return;
+
+  if (!isPreRmsOpen()) {
+    delete wrap.dataset.preRmsReady;
+    return;
+  }
 
   const heading = document.getElementById("checklistHeading");
-  const wrap = document.getElementById("jobChecklist");
-  if (!heading || !wrap) return;
+  if (!heading) return;
 
-  // Do not overwrite values after the mechanic starts using this checklist.
-  if (wrap.dataset.preRmsReady === "1") return;
+  // Only skip rendering when the actual six-item Pre RMS checklist is still present.
+  // The main mechanic renderer can replace the checklist when a job is reopened.
+  if (wrap.dataset.preRmsReady === "1" && hasRenderedPreRmsChecklist(wrap)) return;
 
   const existingValues = {};
   wrap.querySelectorAll("[data-check-key]").forEach((el) => {
@@ -65,11 +76,7 @@ function renderPreRmsChecklist() {
 // The mechanic page changes views without a full page reload, so re-check
 // after normal clicks. No MutationObserver is used to avoid render loops.
 document.addEventListener("click", () => {
-  setTimeout(() => {
-    const wrap = document.getElementById("jobChecklist");
-    if (wrap && !isPreRmsOpen()) delete wrap.dataset.preRmsReady;
-    renderPreRmsChecklist();
-  }, 30);
+  setTimeout(renderPreRmsChecklist, 30);
 }, true);
 
 setTimeout(renderPreRmsChecklist, 100);
