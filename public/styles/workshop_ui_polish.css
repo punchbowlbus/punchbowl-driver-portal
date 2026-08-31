@@ -1,0 +1,219 @@
+/* Shared professional UI treatment for Workshop Management and Mechanic Job Cards. */
+
+:root{
+  --pbc-red:#c62828;
+  --pbc-red-dark:#a61e1e;
+  --pbc-text:#172033;
+  --pbc-muted:#667085;
+  --pbc-border:#dfe3e8;
+  --pbc-surface:#ffffff;
+  --pbc-soft:#f8fafc;
+  --pbc-success:#1f6b24;
+  --pbc-success-bg:#edf8ef;
+  --pbc-danger:#b42318;
+  --pbc-danger-bg:#fff1f1;
+  --pbc-info:#175cd3;
+  --pbc-info-bg:#eef4ff;
+}
+
+/* Consistent form typography and spacing */
+.form-grid label,
+.readonly-label,
+.section-title,
+th{
+  letter-spacing:.02em;
+}
+
+.form-grid label{
+  font-size:12px;
+  color:#475467;
+  font-weight:800;
+}
+
+.form-grid input,
+.form-grid select,
+.form-grid textarea,
+.search-input,
+.filter-row select{
+  border:1px solid #cfd4dc;
+  border-radius:10px;
+  background:#fff;
+  color:var(--pbc-text);
+  font-size:14px;
+  box-shadow:0 1px 2px rgba(16,24,40,.02);
+}
+
+.form-grid input:focus,
+.form-grid select:focus,
+.form-grid textarea:focus,
+.search-input:focus,
+.filter-row select:focus{
+  outline:none;
+  border-color:var(--pbc-red);
+  box-shadow:0 0 0 3px rgba(198,40,40,.10);
+}
+
+/* One button language across Workshop + Mechanic */
+.button{
+  min-height:40px;
+  padding:9px 14px;
+  border-radius:9px;
+  font-size:13px;
+  font-weight:800;
+  box-shadow:none;
+}
+.button.primary{
+  background:var(--pbc-red);
+  border-color:var(--pbc-red);
+  color:#fff;
+}
+.button.primary:hover{
+  background:var(--pbc-red-dark);
+  border-color:var(--pbc-red-dark);
+}
+.button.secondary{
+  background:#fff;
+  border-color:#cfd4dc;
+  color:#344054;
+}
+.button.secondary:hover{
+  background:#f9fafb;
+  border-color:#98a2b3;
+}
+.button:disabled{
+  opacity:.5;
+  cursor:not-allowed;
+}
+
+/* Consistent system messages */
+.status,
+.job-photo-status{
+  border-radius:10px;
+  font-size:13px;
+  font-weight:800;
+  line-height:1.4;
+}
+.status.success,
+.job-photo-status[data-type="success"]{
+  color:var(--pbc-success);
+  background:var(--pbc-success-bg);
+  border:1px solid #b7dfbd;
+  padding:10px 12px;
+}
+.status.error,
+.job-photo-status[data-type="error"]{
+  color:var(--pbc-danger);
+  background:var(--pbc-danger-bg);
+  border:1px solid #f2b8b5;
+  padding:10px 12px;
+}
+
+/* Job card information hierarchy: job number is important, but not oversized. */
+.jobcard-hero{
+  padding:18px 20px;
+  border-radius:14px;
+  align-items:center;
+}
+.jobcard-hero .eyebrow{
+  font-size:10px;
+  color:#667085;
+  letter-spacing:.10em;
+}
+.jobcard-hero h1,
+#jobCardTitle{
+  margin:4px 0 5px;
+  font-size:clamp(20px,2vw,26px)!important;
+  line-height:1.15;
+  letter-spacing:-.015em;
+  color:#172033;
+}
+.jobcard-vehicle,
+#jobCardVehicle{
+  font-size:16px!important;
+  font-weight:850;
+  color:#344054;
+}
+.jobcard-meta,
+#jobCardMeta{
+  min-width:220px;
+  gap:4px;
+  font-size:12px!important;
+  color:#344054;
+  line-height:1.35;
+}
+.jobcard-meta strong,
+#jobCardMeta strong{
+  color:#172033;
+}
+
+/* Cleaner panels */
+.panel{
+  border:1px solid var(--pbc-border);
+  border-radius:14px;
+  box-shadow:0 4px 14px rgba(16,24,40,.035);
+}
+.panel h2{
+  font-size:17px;
+  letter-spacing:-.01em;
+}
+.readonly-field{
+  background:#f8fafc;
+  border:1px solid #e4e7ec;
+  border-radius:10px;
+  padding:11px 12px;
+}
+.readonly-label{
+  font-size:10px;
+  color:#667085;
+  letter-spacing:.055em;
+}
+.readonly-value{
+  margin-top:4px;
+  font-size:14px;
+  color:#172033;
+}
+
+/* Tables and actions */
+th{
+  font-size:10px;
+  color:#667085;
+  background:#f8fafc;
+}
+td{
+  font-size:12px;
+  color:#344054;
+}
+.dialog-actions,
+.form-actions,
+.jobcard-actions{
+  gap:8px;
+}
+
+/* Checklist stays compact and readable */
+.check-row{
+  padding:9px 0;
+}
+.check-row label{
+  font-size:13px;
+  color:#172033;
+}
+.check-row select{
+  font-size:12px;
+  font-weight:800;
+}
+
+/* Photo card messages should not look like a tiny narrow card. */
+.job-photo-empty{
+  width:100%;
+  min-height:64px;
+  display:flex;
+  align-items:center;
+  padding:14px 16px;
+  line-height:1.45;
+}
+
+@media(max-width:760px){
+  .jobcard-hero{align-items:flex-start;padding:15px}
+  .jobcard-meta,#jobCardMeta{min-width:0;width:100%;font-size:12px!important}
+  .jobcard-hero h1,#jobCardTitle{font-size:20px!important}
+}
