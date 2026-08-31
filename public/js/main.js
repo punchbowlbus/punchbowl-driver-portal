@@ -58,6 +58,11 @@ function isAdminEmail(email) {
       state.unsubscribeJobDetailsBlocks = null;
     }
 
+    if (state.unsubscribeDriverMonitor) {
+      state.unsubscribeDriverMonitor();
+      state.unsubscribeDriverMonitor = null;
+    }
+
     if (state.unsubscribeLegsByShiftId) {
     Object.values(state.unsubscribeLegsByShiftId).forEach((fn) => {
       try {
@@ -574,7 +579,9 @@ if (pageId === "adminAllJobs") {
 
   if (pageId === "driverMonitor") {
     if (!state.isAdmin) return showError("No admin access");
-    renderPlaceholder("Driver Monitor", "Coming soon...");
+    stopAllListeners();
+    const mod = await import("./driver_monitor.js?v=1");
+    mod.renderDriverMonitorPage();
     return;
   }
 
