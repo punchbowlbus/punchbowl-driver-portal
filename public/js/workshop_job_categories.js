@@ -119,7 +119,7 @@ async function refreshCategoryUi() {
   const bus = await selectedBus();
   const vehicleIsEv = isEv(bus);
 
-  if (!bus || !["Scheduled Service", "Safety Inspection"].includes(type)) {
+  if (!bus || type !== "Scheduled Service") {
     wrap.hidden = true;
     select.required = false;
     select.innerHTML = "";
@@ -129,27 +129,16 @@ async function refreshCategoryUi() {
   wrap.hidden = false;
   select.required = true;
   $("jobVehicleTypeBadge").textContent = vehicleIsEv ? "Electric (EV)" : "Diesel";
-
-  if (type === "Scheduled Service") {
-    $("jobCategoryTitle").textContent = "Service category";
-    $("jobCategoryHelp").textContent = "Choose the service level to assign to the mechanic.";
-    const categories = vehicleIsEv ? ["Small", "Large"] : ["Small", "Medium", "Large"];
-    const suggested = categories.includes(bus.nextServiceType) ? bus.nextServiceType : categories[0];
-    select.innerHTML = categories.map((x) => `<option value="${x}" ${x === suggested ? "selected" : ""}>${x} Service</option>`).join("");
-    $("jobNextDueWrap").hidden = false;
-    $("jobCategoryNote").textContent = vehicleIsEv
-      ? "EV sequence: Small → Large → Small."
-      : "Diesel sequence: Small → Medium → Large → Small.";
-    refreshDuePreview(bus);
-  } else {
-    $("jobCategoryTitle").textContent = "Inspection category";
-    $("jobCategoryHelp").textContent = "Choose the inspection sheet the mechanic must complete.";
-    select.innerHTML = `
-      <option value="90 Day Safety Inspection">90 Day Safety Inspection</option>
-      <option value="RMS Inspection">RMS Inspection</option>`;
-    $("jobNextDueWrap").hidden = true;
-    $("jobCategoryNote").textContent = "The correct Diesel or EV inspection checklist will be attached to the electronic Job Card.";
-  }
+  $("jobCategoryTitle").textContent = "Service category";
+  $("jobCategoryHelp").textContent = "Choose the service level to assign to the mechanic.";
+  const categories = vehicleIsEv ? ["Small", "Large"] : ["Small", "Medium", "Large"];
+  const suggested = categories.includes(bus.nextServiceType) ? bus.nextServiceType : categories[0];
+  select.innerHTML = categories.map((x) => `<option value="${x}" ${x === suggested ? "selected" : ""}>${x} Service</option>`).join("");
+  $("jobNextDueWrap").hidden = false;
+  $("jobCategoryNote").textContent = vehicleIsEv
+    ? "EV sequence: Small → Large → Small."
+    : "Diesel sequence: Small → Medium → Large → Small.";
+  refreshDuePreview(bus);
 }
 
 async function refreshDuePreview(busArg = null) {
@@ -174,9 +163,7 @@ async function refreshDuePreview(busArg = null) {
 function templateKey(bus, jobType, category) {
   const prefix = isEv(bus) ? "ev" : "diesel";
   if (jobType === "Scheduled Service") return `${prefix}-${String(category || "").toLowerCase()}`;
-  if (jobType === "Safety Inspection") {
-    return category === "RMS Inspection" ? `${prefix}-rms` : `${prefix}-90day`;
-  }
+  if (jobType === "90 Day Safety Check") return `${prefix}-90day`;
   return "";
 }
 
@@ -191,9 +178,9 @@ async function createJobWithCategory(event) {
   if (!bus) return showStatus("Select a bus for this job.", "error");
 
   const jobType = $("jobType")?.value || "";
-  const categoryRequired = ["Scheduled Service", "Safety Inspection"].includes(jobType);
+  const categoryRequired = jobType === "Scheduled Service";
   const category = categoryRequired ? String($("jobCategory")?.value || "").trim() : "";
-  if (categoryRequired && !category) return showStatus("Select the service or inspection category to assign.", "error");
+  if (categoryRequired && !category) return showStatus("Select the service category to assign.", "error");
 
   const fault = String($("jobFault")?.value || "").trim();
   if (!fault) return showStatus("Describe the work required.", "error");
@@ -227,7 +214,7 @@ async function createJobWithCategory(event) {
     jobType,
     jobCategory:category,
     serviceType:jobType === "Scheduled Service" ? category : "",
-    inspectionType:jobType === "Safety Inspection" ? category : "",
+    inspectionType:jobType === "90 Day Safety Check" ? "90 Day Safety Check" : "",
     serviceProgram:jobType === "Scheduled Service" ? (vehicleIsEv ? "EV" : "Diesel") : "",
     serviceTemplateKey:requirementKey,
     assignedChecklist,
