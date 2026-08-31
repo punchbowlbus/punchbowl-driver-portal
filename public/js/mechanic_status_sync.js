@@ -28,17 +28,30 @@ function syncOpenJob() {
     }
   }
 
-  const locked = ["Completed", "Closed", "Waiting Approval"].includes(job.status);
+  const status = String(job.status || "New");
+  const locked = ["Completed", "Closed", "Waiting Approval"].includes(status);
+  const notStarted = ["New", "Assigned"].includes(status);
+  const waitingForParts = status === "Waiting Parts";
+  const inProgress = status === "In Progress";
+
   const start = document.getElementById("startJobBtn");
   const parts = document.getElementById("waitingPartsBtn");
   const save = document.getElementById("saveProgressBtn");
   const complete = document.getElementById("completeJobBtn");
 
-  const startDisabled = locked || job.status === "In Progress";
-  if (start && start.disabled !== startDisabled) start.disabled = startDisabled;
-  if (parts && parts.disabled !== locked) parts.disabled = locked;
-  if (save && save.disabled !== locked) save.disabled = locked;
-  if (complete && complete.disabled !== locked) complete.disabled = locked;
+  if (start) {
+    start.textContent = waitingForParts ? "Resume Job" : "Start Job";
+    start.disabled = locked || inProgress;
+  }
+
+  // A job can only be placed on hold for parts after it has actually started.
+  if (parts) parts.disabled = locked || !inProgress;
+
+  // Assigned/New jobs must use Start Job first. Waiting Parts jobs must use Resume Job first.
+  if (save) save.disabled = locked || notStarted || waitingForParts;
+
+  // Completion is only available while work is actively In Progress.
+  if (complete) complete.disabled = locked || !inProgress;
 }
 
 onSnapshot(
