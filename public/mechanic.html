@@ -46,6 +46,16 @@
         <article class="metric"><span>Waiting Approval</span><strong id="metricApproval">0</strong></article>
       </div>
 
+      <section class="panel mechanic-defects-panel">
+        <div class="panel-head">
+          <div>
+            <h2>Today's Driver Defects <span id="mechanicTodayDefectCount" class="badge info">0</span></h2>
+            <span class="hint">Driver defect reports submitted today are shown here live for the workshop team.</span>
+          </div>
+        </div>
+        <div id="mechanicTodayDefects" class="mechanic-defect-list"><div class="empty">Loading today's driver defect reports...</div></div>
+      </section>
+
       <section class="panel">
         <div class="panel-head">
           <div>
@@ -147,6 +157,7 @@
 
   <script type="module" src="./js/mechanic_work_queue.js"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
+  <script type="module" src="./js/mechanic_driver_defects_today.js"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>
   <script type="module" src="./js/mechanic_status_sync.js"></script>
   <script type="module" src="./js/mechanic_pre_rms.js"></script>
