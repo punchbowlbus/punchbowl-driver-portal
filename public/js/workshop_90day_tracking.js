@@ -15,6 +15,10 @@ const esc = (v) => String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<"
 let buses = [];
 let jobs = [];
 let pendingFleetSave = null;
+let maintenanceObserver = null;
+let fleetObserver = null;
+let maintenanceEnhanceTimer = null;
+let fleetEnhanceTimer = null;
 
 function fleetNo(bus) {
   return String(bus?.fleetNumber || bus?.busNumber || bus?.number || bus?.id || "").trim();
@@ -57,9 +61,16 @@ function safetyState(bus) {
   const days = daysUntil(due);
   if (days == null) return { kind:"unset", days:null, detail:"90 Day Safety Check date not set" };
   if (days < 0) return { kind:"overdue", days, detail:`Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"}` };
-  if (days === 0) return { kind:"overdue", days, detail:"90 Day Safety Check due today" };
+  if (days === 0) return { kind:"overdue", days, detail:"Due today" };
   if (days <= 7) return { kind:"soon", days, detail:`Due in ${days} day${days === 1 ? "" : "s"}` };
   return { kind:"ok", days, detail:`Due in ${days} days` };
+}
+
+function stateBadge(state) {
+  if (state.kind === "overdue") return `<span class="badge bad">${state.days === 0 ? "DUE TODAY" : "OVERDUE"}</span>`;
+  if (state.kind === "soon") return `<span class="badge warn">DUE SOON</span>`;
+  if (state.kind === "ok") return `<span class="badge good">ON TRACK</span>`;
+  return `<span class="badge">NOT SET</span>`;
 }
 
 function ensureDashboardUi() {
@@ -73,14 +84,54 @@ function ensureDashboardUi() {
       <article class="metric danger"><span>90 Day Overdue</span><strong id="metric90DayOverdue">0</strong></article>`);
   }
 
-  const twoCol = dashboard.querySelector(".two-col");
-  if (twoCol && !$("safety90DueList")) {
-    twoCol.insertAdjacentHTML("beforeend", `
-      <section class="panel" id="safety90Panel">
-        <div class="panel-head"><h2>90 Day Safety Checks</h2><span class="hint">Warning starts 7 days before due</span></div>
-        <div id="safety90DueList" class="list-stack"></div>
-      </section>`);
-  }
+  // 90 Day warnings now live inside the main Maintenance Due panel.
+  $("safety90Panel")?.remove();
+  const maintenance = $("maintenanceDueList")?.closest(".panel");
+  const hint = maintenance?.querySelector(".panel-head .hint");
+  if (hint) hint.textContent = "Service and 90 Day Safety Check due";
+}
+
+function dueSafetyBuses() {
+  return buses
+    .map((bus) => ({ bus, state:safetyState(bus) }))
+    .filter((x) => x.state.kind === "overdue" || x.state.kind === "soon")
+    .sort((a,b) => String(a.bus.next90DaySafetyCheckDate || "").localeCompare(String(b.bus.next90DaySafetyCheckDate || "")));
+}
+
+function augmentMaintenanceDue() {
+  ensureDashboardUi();
+  const wrap = $("maintenanceDueList");
+  if (!wrap) return;
+
+  const due = dueSafetyBuses();
+  const signature = due.map(({bus,state}) => `${bus.id}:${state.kind}:${bus.next90DaySafetyCheckDate || ""}`).join("|");
+  const existing = [...wrap.querySelectorAll("[data-safety90-dashboard]")];
+  if (wrap.dataset.safety90Signature === signature && existing.length === due.length) return;
+
+  existing.forEach((el) => el.remove());
+  wrap.dataset.safety90Signature = signature;
+
+  if (!due.length) return;
+
+  [...wrap.querySelectorAll(".empty")].forEach((el) => {
+    if (/no buses currently due based on recorded schedules/i.test(el.textContent || "")) el.remove();
+  });
+
+  due.forEach(({bus,state}) => {
+    const item = document.createElement("div");
+    item.className = "list-item";
+    item.dataset.safety90Dashboard = bus.id || fleetNo(bus);
+    item.innerHTML = `
+      <div class="list-top">
+        <div>
+          <div class="list-title">${esc(fleetNo(bus))} · 90 Day Safety Check</div>
+          <div class="list-meta">Last check: ${esc(fmtDate(bus.last90DaySafetyCheckDate))} · Next due: ${esc(fmtDate(bus.next90DaySafetyCheckDate))}</div>
+        </div>
+        ${stateBadge(state)}
+      </div>
+      <div class="list-meta">${esc(state.detail)}</div>`;
+    wrap.appendChild(item);
+  });
 }
 
 function renderDashboardSafety() {
@@ -88,31 +139,80 @@ function renderDashboardSafety() {
   const list = buses.map((bus) => ({ bus, state:safetyState(bus) }));
   const overdue = list.filter((x) => x.state.kind === "overdue");
   const soon = list.filter((x) => x.state.kind === "soon");
-  const unset = list.filter((x) => x.state.kind === "unset");
 
   if ($("metric90DayDueSoon")) $("metric90DayDueSoon").textContent = String(soon.length);
   if ($("metric90DayOverdue")) $("metric90DayOverdue").textContent = String(overdue.length);
+  augmentMaintenanceDue();
+}
 
-  const wrap = $("safety90DueList");
-  if (!wrap) return;
-  const due = [...overdue, ...soon].sort((a,b) => String(a.bus.next90DaySafetyCheckDate || "").localeCompare(String(b.bus.next90DaySafetyCheckDate || "")));
+function findBusForFleetRow(row) {
+  const key = row?.cells?.[0]?.querySelector("strong")?.textContent?.trim()
+    || row?.cells?.[0]?.textContent?.split(/\s+/)?.[0]
+    || "";
+  return buses.find((bus) => norm(fleetNo(bus)) === norm(key));
+}
 
-  if (!due.length && !unset.length) {
-    wrap.innerHTML = `<div class="empty">All recorded 90 Day Safety Checks are on track.</div>`;
-    return;
+function ensureFleetSafetyColumn() {
+  const table = $("fleetTableBody")?.closest("table");
+  if (!table) return;
+  const headRow = table.querySelector("thead tr");
+  if (headRow && !headRow.querySelector("[data-safety90-head]")) {
+    const th = document.createElement("th");
+    th.dataset.safety90Head = "1";
+    th.textContent = "90 DAY SAFETY";
+    const serviceHead = [...headRow.children].find((cell) => /service/i.test(cell.textContent || ""));
+    if (serviceHead) serviceHead.insertAdjacentElement("afterend", th);
+    else headRow.appendChild(th);
+  }
+}
+
+function enhanceFleetRows() {
+  ensureFleetSafetyColumn();
+  const body = $("fleetTableBody");
+  if (!body) return;
+
+  [...body.querySelectorAll("tr")].forEach((row) => {
+    const bus = findBusForFleetRow(row);
+    if (!bus) return;
+
+    const state = safetyState(bus);
+    let cell = row.querySelector("[data-safety90-cell]");
+    if (!cell) {
+      cell = document.createElement("td");
+      cell.dataset.safety90Cell = "1";
+      const serviceCell = row.cells[5];
+      if (serviceCell) serviceCell.insertAdjacentElement("afterend", cell);
+      else row.appendChild(cell);
+    }
+
+    const signature = `${bus.next90DaySafetyCheckDate || ""}:${state.kind}:${state.days}`;
+    if (cell.dataset.signature === signature) return;
+    cell.dataset.signature = signature;
+    cell.innerHTML = `
+      ${stateBadge(state)}
+      <div class="list-meta" style="margin-top:4px">${esc(state.detail)}</div>
+      <div class="list-meta">Due: ${esc(fmtDate(bus.next90DaySafetyCheckDate))}</div>`;
+  });
+}
+
+function observeRenderedAreas() {
+  const maintenance = $("maintenanceDueList");
+  if (maintenance && !maintenanceObserver) {
+    maintenanceObserver = new MutationObserver(() => {
+      clearTimeout(maintenanceEnhanceTimer);
+      maintenanceEnhanceTimer = setTimeout(augmentMaintenanceDue, 0);
+    });
+    maintenanceObserver.observe(maintenance, { childList:true, subtree:true });
   }
 
-  const dueHtml = due.map(({bus,state}) => `
-    <div class="list-item">
-      <div class="list-top">
-        <div><div class="list-title">${esc(fleetNo(bus))}</div><div class="list-meta">Last check: ${esc(fmtDate(bus.last90DaySafetyCheckDate))} · Next due: ${esc(fmtDate(bus.next90DaySafetyCheckDate))}</div></div>
-        <span class="badge ${state.kind === "overdue" ? "bad" : "warn"}">${state.kind === "overdue" ? "OVERDUE" : "DUE SOON"}</span>
-      </div>
-      <div class="list-meta">${esc(state.detail)}</div>
-    </div>`).join("");
-
-  const unsetHtml = unset.length ? `<div class="list-item"><div class="list-title">Setup required</div><div class="list-meta">${unset.length} vehicle${unset.length === 1 ? "" : "s"} do not have a Last 90 Day Safety Check date yet. Open Fleet → vehicle → Edit Vehicle to set the starting date.</div></div>` : "";
-  wrap.innerHTML = dueHtml + unsetHtml;
+  const fleetBody = $("fleetTableBody");
+  if (fleetBody && !fleetObserver) {
+    fleetObserver = new MutationObserver(() => {
+      clearTimeout(fleetEnhanceTimer);
+      fleetEnhanceTimer = setTimeout(enhanceFleetRows, 0);
+    });
+    fleetObserver.observe(fleetBody, { childList:true, subtree:true });
+  }
 }
 
 function ensureFleetEditorFields() {
@@ -158,7 +258,7 @@ function enhanceFleetDetails() {
   card.innerHTML = `<h3>90 Day Safety Check</h3><div class="wf-kv">
     <span>Last check</span><span>${esc(fmtDate(bus.last90DaySafetyCheckDate))}</span>
     <span>Next due</span><span>${esc(fmtDate(bus.next90DaySafetyCheckDate))}</span>
-    <span>Status</span><span><span class="badge ${state.kind === "overdue" ? "bad" : state.kind === "soon" ? "warn" : state.kind === "ok" ? "good" : ""}">${esc(state.kind === "overdue" ? "OVERDUE" : state.kind === "soon" ? "DUE SOON" : state.kind === "ok" ? "ON TRACK" : "NOT SET")}</span></span>
+    <span>Status</span><span>${stateBadge(state)}</span>
     <span>Detail</span><span>${esc(state.detail)}</span>
   </div>`;
   grid.insertBefore(card, grid.children[3] || null);
@@ -193,6 +293,8 @@ function wireFleetEditor() {
     setTimeout(() => {
       ensureFleetEditorFields();
       enhanceFleetDetails();
+      enhanceFleetRows();
+      augmentMaintenanceDue();
     }, 30);
   }, true);
 
@@ -237,7 +339,12 @@ async function applyClosed90DayJobs() {
 onSnapshot(collection(db, "buses"), (snap) => {
   buses = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
   renderDashboardSafety();
-  setTimeout(() => { ensureFleetEditorFields(); enhanceFleetDetails(); }, 30);
+  setTimeout(() => {
+    ensureFleetEditorFields();
+    enhanceFleetDetails();
+    enhanceFleetRows();
+    observeRenderedAreas();
+  }, 30);
   applyClosed90DayJobs();
 });
 
@@ -247,4 +354,8 @@ onSnapshot(collection(db, "workshopJobs"), (snap) => {
 });
 
 wireFleetEditor();
-setTimeout(renderDashboardSafety, 100);
+setTimeout(() => {
+  renderDashboardSafety();
+  enhanceFleetRows();
+  observeRenderedAreas();
+}, 100);
