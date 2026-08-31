@@ -12,6 +12,12 @@ function localDateString(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
+function yesterdayString() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return localDateString(d);
+}
+
 function reportDate(r) {
   if (r.defectDate) return String(r.defectDate).slice(0, 10);
   const d = r.createdAt?.toDate?.() || (r.reportedAtIso ? new Date(r.reportedAtIso) : null);
@@ -26,20 +32,31 @@ function isDone(r) {
   return ["completed", "closed"].includes(String(r.status || "").toLowerCase());
 }
 
+function dayLabel(dateValue, today, yesterday) {
+  if (dateValue === today) return "Today";
+  if (dateValue === yesterday) return "Yesterday";
+  return dateValue || "Date unknown";
+}
+
 function render(reports) {
   const wrap = document.getElementById("mechanicTodayDefects");
   const count = document.getElementById("mechanicTodayDefectCount");
   if (!wrap) return;
 
   const today = localDateString();
+  const yesterday = yesterdayString();
   const list = reports
-    .filter((r) => r.deleted !== true && reportDate(r) === today)
-    .sort((a,b) => (b.createdAt?.toMillis?.() || Date.parse(b.reportedAtIso || "") || 0) - (a.createdAt?.toMillis?.() || Date.parse(a.reportedAtIso || "") || 0));
+    .map((r) => ({ ...r, _reportDate: reportDate(r) }))
+    .filter((r) => r.deleted !== true && (r._reportDate === today || r._reportDate === yesterday))
+    .sort((a,b) => {
+      if (a._reportDate !== b._reportDate) return b._reportDate.localeCompare(a._reportDate);
+      return (b.createdAt?.toMillis?.() || Date.parse(b.reportedAtIso || "") || 0) - (a.createdAt?.toMillis?.() || Date.parse(a.reportedAtIso || "") || 0);
+    });
 
   if (count) count.textContent = String(list.length);
 
   if (!list.length) {
-    wrap.innerHTML = `<div class="empty">No driver defect reports submitted today.</div>`;
+    wrap.innerHTML = `<div class="empty">No driver defect reports submitted yesterday or today.</div>`;
     return;
   }
 
@@ -50,7 +67,7 @@ function render(reports) {
       <div class="mechanic-defect-head">
         <div>
           <strong>${esc(r.reportNumber || r.id)}</strong>
-          <span>${esc(busLabel(r))}</span>
+          <span>${esc(busLabel(r))} · ${esc(dayLabel(r._reportDate, today, yesterday))}</span>
         </div>
         <div class="mechanic-defect-badges">
           <span class="badge ${unsafe ? "bad" : "good"}">${unsafe ? "Unsafe to drive" : "Safe to drive"}</span>
@@ -69,7 +86,7 @@ function render(reports) {
 onSnapshot(collection(db, "defectReports"), (snap) => {
   render(snap.docs.map((d) => ({ id:d.id, ...d.data() })));
 }, (error) => {
-  console.error("Unable to load today's driver defects", error);
+  console.error("Unable to load recent driver defects", error);
   const wrap = document.getElementById("mechanicTodayDefects");
-  if (wrap) wrap.innerHTML = `<div class="empty">Unable to load today's driver defect reports.</div>`;
+  if (wrap) wrap.innerHTML = `<div class="empty">Unable to load recent driver defect reports.</div>`;
 });
