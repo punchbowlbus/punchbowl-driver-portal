@@ -172,15 +172,13 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
       )
       .join("");
 
-  const renderGroup = (id, title, items, defaultOpen = true) => {
+  const renderGroup = (id, title, items, defaultOpen = false) => {
     const storageKey = `pbc-menu-${id}`;
-    const containsActivePage = items.some((item) => item.id === activePage);
     let isOpen = defaultOpen;
     try {
       const saved = localStorage.getItem(storageKey);
       if (saved !== null) isOpen = saved !== "closed";
     } catch {}
-    if (containsActivePage) isOpen = true;
     return `
       <section class="menuSection" data-menu-section="${escapeHtml(id)}">
         <button class="menuGroupTitle menuGroupToggle" type="button" data-menu-toggle="${escapeHtml(id)}" aria-expanded="${isOpen}">
@@ -197,11 +195,11 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     `;
     els.adminNavArea.innerHTML = "";
   } else {
-    els.navArea.innerHTML = renderGroup("operations", "Operations", adminQuickItems, true);
+    els.navArea.innerHTML = renderGroup("operations", "Operations", adminQuickItems, false);
 
     els.adminNavArea.innerHTML = `
-      ${renderGroup("charter", "Charter Management", charterItems, true)}
-      ${renderGroup("planning", "Planning & Dispatch", planningItems, true)}
+      ${renderGroup("charter", "Charter Management", charterItems, false)}
+      ${renderGroup("planning", "Planning & Dispatch", planningItems, false)}
       ${renderGroup("administration", "Administration", administrationItems, false)}
     `;
   }
@@ -229,6 +227,18 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
       const body = document.querySelector(`[data-menu-body="${id}"]`);
       if (!body) return;
       const willOpen = body.hidden;
+
+      if (willOpen) {
+        document.querySelectorAll("[data-menu-body]").forEach((otherBody) => {
+          const otherId = otherBody.getAttribute("data-menu-body");
+          if (otherId === id) return;
+          otherBody.hidden = true;
+          const otherButton = document.querySelector(`[data-menu-toggle="${otherId}"]`);
+          otherButton?.setAttribute("aria-expanded", "false");
+          try { localStorage.setItem(`pbc-menu-${otherId}`, "closed"); } catch {}
+        });
+      }
+
       body.hidden = willOpen ? false : true;
       button.setAttribute("aria-expanded", String(willOpen));
       try { localStorage.setItem(`pbc-menu-${id}`, willOpen ? "open" : "closed"); } catch {}

@@ -1298,7 +1298,14 @@ state.isDriver =
 // ✅ KEEP THIS
 if (state.isAdmin) {
   await registerPortalNotifications(state.employee);
-  state.activePage = "adminBookings";
+
+  try {
+    ["operations", "charter", "planning", "administration"].forEach((group) => {
+      localStorage.setItem(`pbc-menu-${group}`, "closed");
+    });
+  } catch {}
+
+  state.activePage = "operationsDashboard";
   go(state.activePage);
   return;
 }
@@ -1307,7 +1314,7 @@ if (state.isAdmin) {
 if (state.isDriver) {
   await registerPortalNotifications(state.employee);
 
-  state.activePage = "myWork";
+  state.activePage = "notice";
   go(state.activePage);
   return;
 }
