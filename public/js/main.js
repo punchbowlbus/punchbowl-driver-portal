@@ -63,6 +63,11 @@ function isAdminEmail(email) {
       state.unsubscribeDriverMonitor = null;
     }
 
+    if (state.unsubscribeOperationsDashboard) {
+      state.unsubscribeOperationsDashboard();
+      state.unsubscribeOperationsDashboard = null;
+    }
+
     if (state.unsubscribeLegsByShiftId) {
     Object.values(state.unsubscribeLegsByShiftId).forEach((fn) => {
       try {
@@ -587,7 +592,9 @@ if (pageId === "adminAllJobs") {
 
   if (pageId === "operationsDashboard") {
     if (!state.isAdmin) return showError("No admin access");
-    renderPlaceholder("Operations Dashboard", "Coming soon...");
+    stopAllListeners();
+    const mod = await import("./operations_dashboard.js?v=1");
+    mod.renderOperationsDashboardPage({ onNavigate: go });
     return;
   }
 
