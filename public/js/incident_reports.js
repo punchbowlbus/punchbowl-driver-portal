@@ -9,6 +9,7 @@ import { auth, db, storage } from "./firebase.js";
 import { state } from "./state.js";
 import { els, showError } from "./ui.js";
 import { escapeHtml } from "./utils.js";
+import { openDriverCollisionClaim, collisionAdminSection, bindCollisionAdmin } from "./collision_claim.js";
 
 const MAX_PHOTOS = 3;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
@@ -99,6 +100,7 @@ function renderRecentReports(reports) {
       <h4>${escapeHtml(report.category || "Incident")}</h4>
       <p>${escapeHtml(formatDate(report.incidentDate, report.incidentTime))}</p>
       <small>${escapeHtml(report.location || "Location not recorded")} · Urgency: ${escapeHtml(report.urgency || "Standard")}</small>
+      ${report.category === "Collision" ? `<button type="button" class="incident-collision-continue" data-collision-report-id="${escapeHtml(report.id)}">${report.collisionClaimStatus === "Submitted for review" || report.collisionClaimStatus === "Ready to print" ? "View Motor Claim" : "Continue Motor Claim"}</button>` : ""}
     </article>`).join("");
 }
 
@@ -183,6 +185,8 @@ function adminReportDetail(report, staff) {
       <div class="incident-admin-statement"><span>Immediate actions</span><p>${escapeHtml(report.immediateActions || "No actions supplied.")}</p></div>
       ${adminPhotos(report)}
     </section>
+
+    ${collisionAdminSection(report)}
 
     <section class="incident-admin-section incident-admin-review">
       <h4>Investigation and actions</h4>
@@ -277,6 +281,7 @@ async function renderIncidentAdminCRM() {
     detail.innerHTML = adminReportDetail(report, staff);
     window.lucide?.createIcons?.();
     if (!report) return;
+    bindCollisionAdmin(report, {message: adminMessage, changed: () => { renderSummary(); renderList(); }});
     const saveBtn = document.getElementById("incidentAdminSave");
     const closeBtn = document.getElementById("incidentAdminClose");
 
@@ -456,7 +461,16 @@ export async function renderIncidentReportPage() {
   }
 
   async function refreshRecent() {
-    try { renderRecentReports(await loadMyReports(auth.currentUser?.uid || "")); }
+    try {
+      const recent = await loadMyReports(auth.currentUser?.uid || "");
+      renderRecentReports(recent);
+      document.querySelectorAll("[data-collision-report-id]").forEach((button) => {
+        button.onclick = () => {
+          const report = recent.find((item) => item.id === button.dataset.collisionReportId);
+          if (report) openDriverCollisionClaim(report, {onSaved: refreshRecent});
+        };
+      });
+    }
     catch (error) { console.error("Unable to load recent incident reports", error); field("incidentRecentList").innerHTML = `<div class="incident-empty">Unable to load recent reports.</div>`; }
   }
   await refreshRecent();
@@ -509,7 +523,7 @@ export async function renderIncidentReportPage() {
         uploadedPhotos.push({url: await getDownloadURL(photoRef), storagePath, fileName: file.name, contentType: file.type, size: file.size});
       }
       submitBtn.textContent = "Saving report…";
-      await setDoc(reportRef, {
+      const reportRecord = {
         schemaVersion: 1, reportNumber, status: "Submitted", urgency,
         incidentDate, incidentTime, category, location, injury, emergencyServices, policeContacted,
         policeReference: policeContacted === "Yes" ? policeReferenceEl.value.trim() : "", safeToContinue,
@@ -521,12 +535,15 @@ export async function renderIncidentReportPage() {
         reportedByUid: auth.currentUser?.uid || "", reportedByEmail: auth.currentUser?.email || "",
         reportedByName: reporterName, reportedByEmployeeNumber: employeeNumber, reportedAtIso: new Date().toISOString(),
         assignedToEmail: "", adminSeverity: "", adminNotes: "", deleted: false,
+        collisionClaimStatus: category === "Collision" ? "Not started" : "",
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
-      });
+      };
+      await setDoc(reportRef, reportRecord);
       showMessage(`${reportNumber} submitted successfully.`, "success");
       [categoryEl, locationEl, injuryEl, emergencyEl, policeEl, policeReferenceEl, safeToContinueEl, peopleEl, witnessesEl, descriptionEl, actionsEl].forEach((input) => { input.value = ""; });
       busEl.value = ""; photosEl.value = ""; declarationEl.checked = false; photoHelpEl.textContent = "Choose up to 3 images · maximum 8 MB each"; warningEl.hidden = true; policeReferenceField.hidden = true; renderPhotoPreview([]);
       dateEl.value = localDateString(); timeEl.value = localTimeString(); await refreshRecent(); messageEl.scrollIntoView({behavior: "smooth", block: "center"});
+      if (category === "Collision") openDriverCollisionClaim({id: reportRef.id, ...reportRecord}, {onSaved: refreshRecent});
     } catch (error) {
       console.error("Failed to submit incident report", error); await Promise.allSettled(uploadedRefs.map((photoRef) => deleteObject(photoRef))); showMessage(error?.message || "Failed to submit the incident report. Please try again.");
     } finally {

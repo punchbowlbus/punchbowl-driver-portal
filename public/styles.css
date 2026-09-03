@@ -5364,3 +5364,16 @@ body.dispatch-board-fullscreen { overflow: hidden; }
   .dispatch-pro-workarea.details-collapsed { grid-template-columns: 285px minmax(0,1fr) 58px; }
   .dispatch-unassigned-axis-row { grid-template-columns:285px minmax(0,1fr); }
 }
+/* Collision claim extension: isolated from the standard Incident Report layout. */
+.incident-collision-continue{margin-top:12px;width:100%;border:1px solid #c9232d;border-radius:10px;background:#fff5f5;color:#a91f27;font-weight:800;padding:9px 12px;cursor:pointer}
+.incident-collision-continue:hover{background:#ffe9ea}
+.collision-overlay{position:fixed;inset:0;z-index:10000;background:rgba(10,22,44,.64);display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow:auto}
+.collision-dialog{width:min(1120px,100%);background:#f5f7fb;border-radius:18px;box-shadow:0 24px 80px rgba(0,0,0,.28);padding:22px}
+.collision-claim-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;background:#fff;border:1px solid #d8deea;border-radius:14px;padding:20px;margin-bottom:14px}
+.collision-claim-head h2{margin:3px 0 5px;color:#0f1f3a}.collision-claim-head p{margin:0;color:#5b6780}
+.collision-progress{display:flex;align-items:center;gap:12px;background:#edf8f2;border:1px solid #bce4cf;border-radius:12px;padding:12px 16px;margin-bottom:14px;color:#156b44;font-weight:750}.collision-progress b{height:2px;background:#65b992;flex:1}
+.collision-section{background:#fff}.collision-section textarea{min-height:105px}
+.collision-actions{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;background:rgba(245,247,251,.96);border-top:1px solid #d8deea;padding:14px 0 2px;backdrop-filter:blur(6px)}
+.collision-admin-section{border-left:4px solid #c9232d}.collision-admin-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.collision-admin-title h4,.collision-admin-title p{margin:0}.collision-admin-title p{color:#69748a;font-size:12px;margin-top:4px}.collision-admin-title>span{border-radius:999px;background:#fff0f1;color:#a91f27;padding:6px 10px;font-weight:800;font-size:12px}
+.collision-admin-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}.collision-pdf-note{display:block;color:#69748a;margin-top:9px}
+@media(max-width:720px){.collision-overlay{padding:0}.collision-dialog{border-radius:0;padding:12px;min-height:100vh}.collision-claim-head{position:sticky;top:0;z-index:2}.collision-claim-head p{font-size:12px}.collision-progress{font-size:11px}.collision-actions{display:grid;grid-template-columns:1fr 1fr}.collision-actions .btn{justify-content:center}}
