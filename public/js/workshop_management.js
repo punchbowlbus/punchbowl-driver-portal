@@ -28,8 +28,8 @@ const els = {
   odometerForm: $("odometerForm"), odometerBus: $("odometerBus"), previousOdometer: $("previousOdometer"), currentOdometer: $("currentOdometer"), odometerDate: $("odometerDate"), odometerSource: $("odometerSource"), odometerNotes: $("odometerNotes"), odometerHistory: $("odometerHistory"),
   jobsTableBody: $("jobsTableBody"), jobSearch: $("jobSearch"), jobStatusFilter: $("jobStatusFilter"),
   jobDialog: $("jobDialog"), jobForm: $("jobForm"), jobBus: $("jobBus"), jobType: $("jobType"), jobPriority: $("jobPriority"), jobDueDate: $("jobDueDate"), jobMechanic: $("jobMechanic"), jobFault: $("jobFault"), jobManagerNotes: $("jobManagerNotes"),
-  maintenanceDueList: $("maintenanceDueList"), dashboardJobsList: $("dashboardJobsList"), historyList: $("historyList"),
-  metricFleet: $("metricFleet"), metricWorkshop: $("metricWorkshop"), metricOut: $("metricOut"), metricOpenJobs: $("metricOpenJobs"), metricDueSoon: $("metricDueSoon"), metricOverdue: $("metricOverdue")
+  maintenanceDueList: $("maintenanceDueList"), dashboardJobsList: $("dashboardJobsList"), regoRenewalList: $("regoRenewalList"), historyList: $("historyList"),
+  metricFleet: $("metricFleet"), metricWorkshop: $("metricWorkshop"), metricOut: $("metricOut"), metricOpenJobs: $("metricOpenJobs"), metricDueSoon: $("metricDueSoon"), metricOverdue: $("metricOverdue"), metricRegoDue: $("metricRegoDue"), metricRegoExpired: $("metricRegoExpired")
 };
 
 let currentUser = null;
@@ -64,6 +64,28 @@ function fmtDate(v) {
   return Number.isNaN(d.getTime()) ? String(v) : new Intl.DateTimeFormat("en-AU", { day:"2-digit", month:"short", year:"numeric" }).format(d);
 }
 function todayStr() { return new Date().toLocaleDateString("en-CA"); }
+function isoDate(v) {
+  const value = String(v || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+function regoState(bus) {
+  const expiryValue = bus.regoExpiryDate || (/^\d{4}-\d{2}-\d{2}$/.test(String(bus.regoExpiry || "")) ? bus.regoExpiry : "");
+  const expiry = isoDate(expiryValue);
+  if (!expiry) return { kind:"missing", label:bus.regoExpiry ? "DATE NEEDS YEAR" : "NOT SET", detail:bus.regoExpiry || "Add next expiry date" };
+  const today = isoDate(todayStr());
+  const warningDate = new Date(today); warningDate.setMonth(warningDate.getMonth() + 3);
+  const days = Math.ceil((expiry - today) / 86400000);
+  if (days < 0) return { kind:"expired", label:"EXPIRED", detail:`${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`, expiryValue };
+  if (expiry <= warningDate) return { kind:"due", label:days <= 30 ? "DUE SOON" : "DUE WITHIN 3 MONTHS", detail:`Due in ${days} day${days === 1 ? "" : "s"}`, expiryValue };
+  return { kind:"ok", label:"ON TRACK", detail:`Due in ${days} days`, expiryValue };
+}
+function regoBadge(bus) {
+  const state = regoState(bus);
+  const cls = state.kind === "expired" ? "bad" : state.kind === "due" || state.kind === "missing" ? "warn" : "good";
+  return `<span class="badge ${cls}">${esc(state.label)}</span><div class="list-meta">${esc(state.detail)}</div>${state.expiryValue ? `<div class="list-meta">${esc(fmtDate(state.expiryValue))}</div>` : ""}`;
+}
 function showStatus(message, type="success") { els.status.className = `status ${type}`; els.status.textContent = message; }
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
 
@@ -120,7 +142,7 @@ function populateBusSelects() {
 function renderFleet() {
   const term = String(els.fleetSearch.value || "").trim().toLowerCase();
   const list = buses.filter((b) => [fleetNo(b), b.rego, b.make, b.model, b.depot, b.status].some((v) => String(v || "").toLowerCase().includes(term)));
-  if (!list.length) { els.fleetTableBody.innerHTML = `<tr><td colspan="8"><div class="empty">No matching vehicles.</div></td></tr>`; return; }
+  if (!list.length) { els.fleetTableBody.innerHTML = `<tr><td colspan="9"><div class="empty">No matching vehicles.</div></td></tr>`; return; }
   els.fleetTableBody.innerHTML = list.map((b) => `
     <tr>
       <td><strong>${esc(fleetNo(b))}</strong></td>
@@ -129,6 +151,7 @@ function renderFleet() {
       <td>${esc(b.depot || "—")}</td>
       <td>${esc(fmtKm(currentOdo(b)))}</td>
       <td>${serviceBadge(b)}</td>
+      <td>${regoBadge(b)}</td>
       <td><span class="badge ${/out of service/i.test(b.status || "") ? "bad" : /workshop/i.test(b.status || "") ? "warn" : "good"}">${esc(b.status || "Active")}</span></td>
       <td><button class="button secondary" data-odo-bus="${esc(busId(b))}">Update km</button></td>
     </tr>`).join("");
@@ -142,18 +165,28 @@ function renderDashboard() {
   const overdue = maint.filter((x) => x.state.overdue);
   const dueSoon = maint.filter((x) => !x.state.overdue && x.state.dueSoon);
   const openJobs = workshopJobs.filter((j) => !["Completed","Closed","Cancelled"].includes(j.status));
+  const regoStates = buses.map(regoState);
   els.metricFleet.textContent = buses.length;
   els.metricWorkshop.textContent = buses.filter((b) => /workshop/i.test(b.status || "")).length;
   els.metricOut.textContent = buses.filter((b) => /out of service/i.test(b.status || "")).length;
   els.metricOpenJobs.textContent = openJobs.length;
   els.metricDueSoon.textContent = dueSoon.length;
   els.metricOverdue.textContent = overdue.length;
+  els.metricRegoDue.textContent = regoStates.filter((state) => state.kind === "due").length;
+  els.metricRegoExpired.textContent = regoStates.filter((state) => state.kind === "expired").length;
 
   const dueList = [...overdue, ...dueSoon].slice(0,12);
   els.maintenanceDueList.innerHTML = dueList.length ? dueList.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))}</div><div class="list-meta">Current: ${esc(fmtKm(currentOdo(bus)))} · Next service: ${esc(fmtKm(nextServiceOdo(bus)))}</div></div><span class="badge ${state.overdue ? "bad" : "warn"}">${state.overdue ? "OVERDUE" : "DUE SOON"}</span></div><div class="list-meta">${esc(state.detail)}</div></div>`).join("") : `<div class="empty">No buses currently due based on recorded schedules.</div>`;
 
   els.dashboardJobsList.innerHTML = openJobs.length ? openJobs.map(jobCardSummary).join("") : `<div class="empty">No open workshop jobs.</div>`;
+  const regoAlerts = buses.map((bus) => ({bus, state:regoState(bus)}))
+    .filter(({state}) => state.kind === "expired" || state.kind === "due")
+    .sort((a,b) => String(a.state.expiryValue).localeCompare(String(b.state.expiryValue)));
+  const missingRegoDates = regoStates.filter((state) => state.kind === "missing").length;
+  const missingNote = missingRegoDates ? `<div class="empty">${missingRegoDates} vehicle${missingRegoDates === 1 ? "" : "s"} need a full registration expiry date including the year.</div>` : "";
+  els.regoRenewalList.innerHTML = regoAlerts.length ? regoAlerts.map(({bus,state}) => `
+    <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · ${esc(bus.rego || "No registration")}</div><div class="list-meta">Next expiry: ${esc(fmtDate(state.expiryValue))} · ${esc(state.detail)}</div></div><span class="badge ${state.kind === "expired" ? "bad" : "warn"}">${esc(state.label)}</span></div></div>`).join("") + missingNote : missingNote || `<div class="empty">No registration renewals due within the next 3 months.</div>`;
 }
 
 function jobCardSummary(j) {

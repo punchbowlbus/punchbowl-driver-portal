@@ -58,6 +58,8 @@
           <article class="metric"><span>Open Jobs</span><strong id="metricOpenJobs">0</strong></article>
           <article class="metric warning"><span>Service Due Soon</span><strong id="metricDueSoon">0</strong></article>
           <article class="metric danger"><span>Service Overdue</span><strong id="metricOverdue">0</strong></article>
+          <article class="metric warning"><span>Rego Due Within 3 Months</span><strong id="metricRegoDue">0</strong></article>
+          <article class="metric danger"><span>Rego Expired</span><strong id="metricRegoExpired">0</strong></article>
         </div>
 
         <div class="two-col">
@@ -70,6 +72,10 @@
             <div id="dashboardJobsList" class="list-stack dashboard-open-jobs-scroll"></div>
           </section>
         </div>
+        <section class="panel">
+          <div class="panel-head"><h2>Registration Renewals</h2><span class="hint">Warnings begin 3 months before expiry</span></div>
+          <div id="regoRenewalList" class="list-stack"></div>
+        </section>
       </section>
 
       <section id="fleetView" class="view">
@@ -80,7 +86,7 @@
         <section class="panel table-panel">
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Fleet</th><th>Rego</th><th>Vehicle</th><th>Depot</th><th>Odometer</th><th>Service</th><th>Status</th><th>Action</th></tr></thead>
+              <thead><tr><th>Fleet</th><th>Rego</th><th>Vehicle</th><th>Depot</th><th>Odometer</th><th>Service</th><th>Registration Expiry</th><th>Status</th><th>Action</th></tr></thead>
               <tbody id="fleetTableBody"></tbody>
             </table>
           </div>
@@ -183,7 +189,7 @@
   </dialog>
 
   <script type="module" src="./js/workshop_display_stability.js"></script>
-  <script type="module" src="./js/workshop_management.js?v=20260908-defect-job-card"></script>
+  <script type="module" src="./js/workshop_management.js?v=20260908-rego-tracking"></script>
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js"></script>
@@ -191,7 +197,7 @@
   <script type="module" src="./js/workshop_review_status_fix.js"></script>
   <script type="module" src="./js/workshop_checklist_labels.js"></script>
   <script type="module" src="./js/workshop_job_photos_preview.js"></script>
-  <script type="module" src="./js/workshop_fleet_pro.js"></script>
+  <script type="module" src="./js/workshop_fleet_pro.js?v=20260908-rego-tracking"></script>
   <script type="module" src="./js/workshop_fleet_polish.js"></script>
   <script type="module" src="./js/workshop_action_messages.js"></script>
   <script type="module" src="./js/workshop_job_categories.js"></script>

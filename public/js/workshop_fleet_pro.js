@@ -21,6 +21,26 @@ const fmtDateTime = (v) => {
   const d = typeof v?.toDate === "function" ? v.toDate() : new Date(v);
   return Number.isNaN(d.getTime()) ? String(v) : new Intl.DateTimeFormat("en-AU", {day:"2-digit", month:"short", year:"numeric", hour:"numeric", minute:"2-digit"}).format(d);
 };
+const isoDateValue = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || "").trim()) ? String(v).trim() : "";
+const normalizeCsvDate = (v) => {
+  const value = String(v || "").trim();
+  if (isoDateValue(value)) return value;
+  const match = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+  return match ? `${match[3]}-${String(match[2]).padStart(2,"0")}-${String(match[1]).padStart(2,"0")}` : "";
+};
+const displayDate = (v) => {
+  const value = isoDateValue(v);
+  if (!value) return "—";
+  return new Intl.DateTimeFormat("en-AU", {day:"2-digit", month:"short", year:"numeric"}).format(new Date(`${value}T00:00:00`));
+};
+const oneYearAfter = (v) => {
+  const value = isoDateValue(v);
+  if (!value) return "";
+  const [year, month, day] = value.split("-").map(Number);
+  const next = new Date(year + 1, month - 1, day);
+  if (next.getMonth() !== month - 1) next.setDate(0);
+  return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2,"0")}-${String(next.getDate()).padStart(2,"0")}`;
+};
 
 let buses = [];
 let defects = [];
@@ -64,6 +84,7 @@ function injectStyles() {
     .wf-empty{color:#667085;font-size:13px;padding:8px 0}
     .wf-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.wf-form label{display:grid;gap:5px;font-size:12px;font-weight:800;color:#667085}.wf-form input,.wf-form select,.wf-form textarea{width:100%;border:1px solid #cfd6dd;border-radius:9px;padding:10px;background:#fff;color:#1f2933}.wf-form textarea{min-height:86px}.wf-full{grid-column:1/-1}
     .wf-section-title{grid-column:1/-1;font-size:14px;font-weight:900;color:#1f2933;border-bottom:1px solid #e5e7eb;padding:8px 0 5px;margin-top:4px}
+    .wf-legacy-rego{grid-column:1/-1;padding:10px 12px;border:1px solid #f5c26b;border-radius:9px;background:#fff8e8;color:#7a4b00;font-size:12px}
     .wf-file{display:none}
     @media(max-width:900px){.wf-grid{grid-template-columns:1fr}.wf-card.wide{grid-column:auto}.wf-form{grid-template-columns:1fr}.wf-full,.wf-section-title{grid-column:auto}.wf-kv{grid-template-columns:120px 1fr}}
   `;
@@ -134,7 +155,7 @@ function openBus(bus) {
     </div>
     <div class="wf-grid">
       <section class="wf-card"><h3>Vehicle Identity</h3><div class="wf-kv">
-        <span>Fleet number</span><span>${esc(fleetNo(bus))}</span><span>Registration</span><span>${esc(bus.rego || "—")}</span><span>Year</span><span>${esc(bus.year || "—")}</span><span>Make</span><span>${esc(bus.make || "—")}</span><span>Model</span><span>${esc(bus.model || "—")}</span><span>VIN / chassis</span><span>${esc(bus.vin || "—")}</span><span>Body</span><span>${esc([bus.bodyBy,bus.bodyModel].filter(Boolean).join(" ") || "—")}</span><span>Colour</span><span>${esc(bus.colour || "—")}</span><span>Rego expiry</span><span>${esc(bus.regoExpiry || "—")}</span>
+        <span>Fleet number</span><span>${esc(fleetNo(bus))}</span><span>Registration</span><span>${esc(bus.rego || "—")}</span><span>Year</span><span>${esc(bus.year || "—")}</span><span>Make</span><span>${esc(bus.make || "—")}</span><span>Model</span><span>${esc(bus.model || "—")}</span><span>VIN / chassis</span><span>${esc(bus.vin || "—")}</span><span>Body</span><span>${esc([bus.bodyBy,bus.bodyModel].filter(Boolean).join(" ") || "—")}</span><span>Colour</span><span>${esc(bus.colour || "—")}</span><span>Rego last renewed</span><span>${esc(displayDate(bus.regoLastRenewedDate))}</span><span>Next rego expiry</span><span>${esc(isoDateValue(bus.regoExpiryDate) ? displayDate(bus.regoExpiryDate) : (bus.regoExpiry || "—"))}</span>
       </div></section>
       <section class="wf-card"><h3>Operating Specifications</h3><div class="wf-kv">
         <span>Fuel</span><span>${esc(bus.fuelType || "—")}</span><span>Access</span><span>${esc(bus.accessType || "—")}</span><span>Euro</span><span>${esc(bus.euro || "—")}</span><span>AdBlue</span><span>${esc(bus.adblue || "—")}</span><span>Air conditioned</span><span>${esc(bus.airConditioned || "—")}</span><span>Rear door</span><span>${esc(bus.rearDoor || "—")}</span><span>Seats</span><span>${esc(bus.seatCount ?? "—")}</span><span>Standing</span><span>${esc(bus.standCount ?? "—")}</span><span>CCTV</span><span>${esc(bus.cctvCount ?? "—")}</span><span>Fire suppression</span><span>${esc(bus.fireSuppression || "—")}</span><span>Luggage bins</span><span>${esc(bus.luggageBins || "—")}</span><span>Tare / GVM</span><span>${esc(bus.tare || "—")} / ${esc(bus.gvm || "—")}</span>
@@ -192,7 +213,9 @@ function editorFields(bus = {}) {
       <label>Body manufacturer<input id="wfBodyBy" value="${esc(bus.bodyBy || "")}"></label>
       <label>Body model<input id="wfBodyModel" value="${esc(bus.bodyModel || "")}"></label>
       <label>Colour<input id="wfColour" value="${esc(bus.colour || "")}"></label>
-      <label>Registration expiry<input id="wfRegoExpiry" value="${esc(bus.regoExpiry || "")}"></label>
+      <label>Rego last renewed<input id="wfRegoLastRenewedDate" type="date" value="${esc(isoDateValue(bus.regoLastRenewedDate))}"></label>
+      <label>Next rego expiry<input id="wfRegoExpiryDate" type="date" value="${esc(isoDateValue(bus.regoExpiryDate || bus.regoExpiry))}"></label>
+      ${bus.regoExpiry && !isoDateValue(bus.regoExpiryDate || bus.regoExpiry) ? `<div class="wf-legacy-rego">Previous expiry entry: <strong>${esc(bus.regoExpiry)}</strong>. Please enter the full next expiry date including the year.</div>` : ""}
       <div class="wf-section-title">Operating details</div>
       <label>Access type<select id="wfAccessType"><option value="">Select</option>${opt(bus.accessType,["STEPS","WHEEL CHAIR","LOW FLOOR"])}</select></label>
       <label>Fuel type<select id="wfFuelType"><option value="">Select</option>${opt(bus.fuelType,["Diesel","EV","Hybrid"])}</select></label>
@@ -221,6 +244,10 @@ function openEditor(bus = null) {
   $("wfEditBody").innerHTML = editorFields(bus || {});
   $("wfCloseEdit").onclick = () => $("wfEditDialog").close();
   $("wfCancelEdit").onclick = () => $("wfEditDialog").close();
+  $("wfRegoLastRenewedDate")?.addEventListener("change", (event) => {
+    const expiry = $("wfRegoExpiryDate");
+    if (expiry && !expiry.value) expiry.value = oneYearAfter(event.target.value);
+  });
   if ($("wfBusDialog")?.open) $("wfBusDialog").close();
   $("wfEditDialog").showModal();
 }
@@ -235,11 +262,14 @@ async function saveVehicle(event) {
   if (!fleetNumber) return toast("Fleet number is required.", "error");
   const existing = buses.find((b) => norm(fleetNo(b)) === norm(fleetNumber));
   if (creating && existing) return toast(`Fleet number ${fleetNumber} already exists.`, "error");
+  const renewedDate = val("wfRegoLastRenewedDate");
+  const expiryDate = val("wfRegoExpiryDate");
+  if (renewedDate && expiryDate && expiryDate <= renewedDate) return toast("Next registration expiry must be after the last renewed date.", "error");
   if (!window.confirm(`${creating ? "Create" : "Save changes to"} vehicle ${fleetNumber}?`)) return;
 
   const payload = {
     fleetNumber,
-    rego:val("wfRego"), year:nullableNumber("wfYear"), make:val("wfMake"), model:val("wfModel"), vin:val("wfVin"), bodyBy:val("wfBodyBy"), bodyModel:val("wfBodyModel"), colour:val("wfColour"), regoExpiry:val("wfRegoExpiry"),
+    rego:val("wfRego"), year:nullableNumber("wfYear"), make:val("wfMake"), model:val("wfModel"), vin:val("wfVin"), bodyBy:val("wfBodyBy"), bodyModel:val("wfBodyModel"), colour:val("wfColour"), regoLastRenewedDate:val("wfRegoLastRenewedDate"), regoExpiryDate:val("wfRegoExpiryDate"),
     accessType:val("wfAccessType"), fuelType:val("wfFuelType"), euro:val("wfEuro"), adblue:val("wfAdblue"), airConditioned:val("wfAirConditioned"), rearDoor:val("wfRearDoor"), seatCount:nullableNumber("wfSeatCount"), standCount:nullableNumber("wfStandCount"), cctvCount:nullableNumber("wfCctvCount"), tare:val("wfTare"), gvm:val("wfGvm"), fireSuppression:val("wfFireSuppression"), luggageBins:val("wfLuggageBins"),
     depot:val("wfDepot"), status:val("wfStatus") || "Active", notes:val("wfNotes"), updatedAt:serverTimestamp(), updatedByEmail:norm(auth.currentUser?.email)
   };
@@ -276,7 +306,8 @@ async function importCsv(file) {
   rows.forEach((r) => {
     const fn = pick(r,map,["Fleet Number","Fleet","Bus Number","Number"]); if(!fn) return;
     const existing = buses.find((b)=>norm(fleetNo(b))===norm(fn)); const ref=doc(db,"buses",existing?.id||fn);
-    const payload={fleetNumber:fn, rego:pick(r,map,["Registration","Rego"]), year:Number(pick(r,map,["Year"]))||null, make:pick(r,map,["Make"]), model:pick(r,map,["Model"]), vin:pick(r,map,["VIN","Chassis","VIN / chassis number"]), accessType:pick(r,map,["Access Type","Access"]), fuelType:pick(r,map,["Fuel Type","Fuel"]), euro:pick(r,map,["Euro","Euro Standard"]), adblue:pick(r,map,["AdBlue"]), airConditioned:pick(r,map,["Air Conditioned","Aircon"]), rearDoor:pick(r,map,["Rear Door"]), seatCount:Number(pick(r,map,["Seat Count","Seats"]))||null, standCount:Number(pick(r,map,["Stand Count","Standing"]))||null, bodyBy:pick(r,map,["Body By","Body Manufacturer"]), bodyModel:pick(r,map,["Body Model"]), colour:pick(r,map,["Colour","Color"]), cctvCount:Number(pick(r,map,["CCTV Count","CCTV"]))||null, fireSuppression:pick(r,map,["Fire Suppression"]), luggageBins:pick(r,map,["Luggage Bins"]), tare:pick(r,map,["Tare"]), gvm:pick(r,map,["GVM"]), regoExpiry:pick(r,map,["Rego Expiry","Registration Expiry"]), depot:pick(r,map,["Depot"]), status:pick(r,map,["Status"])||"Active", notes:pick(r,map,["Notes"]), updatedAt:serverTimestamp(), updatedByEmail:norm(auth.currentUser?.email)};
+    const legacyRegoExpiry=pick(r,map,["Rego Expiry","Registration Expiry"]);
+    const payload={fleetNumber:fn, rego:pick(r,map,["Registration","Rego"]), year:Number(pick(r,map,["Year"]))||null, make:pick(r,map,["Make"]), model:pick(r,map,["Model"]), vin:pick(r,map,["VIN","Chassis","VIN / chassis number"]), accessType:pick(r,map,["Access Type","Access"]), fuelType:pick(r,map,["Fuel Type","Fuel"]), euro:pick(r,map,["Euro","Euro Standard"]), adblue:pick(r,map,["AdBlue"]), airConditioned:pick(r,map,["Air Conditioned","Aircon"]), rearDoor:pick(r,map,["Rear Door"]), seatCount:Number(pick(r,map,["Seat Count","Seats"]))||null, standCount:Number(pick(r,map,["Stand Count","Standing"]))||null, bodyBy:pick(r,map,["Body By","Body Manufacturer"]), bodyModel:pick(r,map,["Body Model"]), colour:pick(r,map,["Colour","Color"]), cctvCount:Number(pick(r,map,["CCTV Count","CCTV"]))||null, fireSuppression:pick(r,map,["Fire Suppression"]), luggageBins:pick(r,map,["Luggage Bins"]), tare:pick(r,map,["Tare"]), gvm:pick(r,map,["GVM"]), regoExpiry:legacyRegoExpiry, regoLastRenewedDate:normalizeCsvDate(pick(r,map,["Rego Last Renewed","Registration Last Renewed"])), regoExpiryDate:normalizeCsvDate(pick(r,map,["Next Rego Expiry","Rego Expiry Date","Registration Expiry Date"]) || legacyRegoExpiry), depot:pick(r,map,["Depot"]), status:pick(r,map,["Status"])||"Active", notes:pick(r,map,["Notes"]), updatedAt:serverTimestamp(), updatedByEmail:norm(auth.currentUser?.email)};
     batch.set(ref,payload,{merge:true}); count++;
   });
   try { await batch.commit(); toast(`✓ ${count} vehicle records imported/updated successfully.`); } catch(e){ toast(e?.message||"CSV import failed.","error"); }
@@ -303,7 +334,7 @@ function enhanceRows() {
     const fn=String(row.cells?.[0]?.textContent||"").trim(); const bus=buses.find((b)=>norm(fleetNo(b))===norm(fn)); if(!bus) return;
     row.dataset.wfReady="1"; row.classList.add("wf-openable"); row.title="Double-click to open full vehicle record";
     row.addEventListener("dblclick",(e)=>{if(e.target.closest("button,a,input,select")) return; openBus(bus);});
-    const actions=row.cells?.[7]; if(actions&&!actions.querySelector("[data-wf-open]")){ const btn=document.createElement("button"); btn.type="button"; btn.className="button secondary"; btn.dataset.wfOpen="1"; btn.textContent="Open"; btn.onclick=()=>openBus(bus); actions.appendChild(btn); }
+    const actions=row.cells?.[row.cells.length - 1]; if(actions&&!actions.querySelector("[data-wf-open]")){ const btn=document.createElement("button"); btn.type="button"; btn.className="button secondary"; btn.dataset.wfOpen="1"; btn.textContent="Open"; btn.onclick=()=>openBus(bus); actions.appendChild(btn); }
   });
 }
 
