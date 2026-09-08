@@ -6,7 +6,7 @@
   <title>Punchbowl Bus Company Workshop Management</title>
   <meta name="description" content="Fleet Manager workshop management, fleet maintenance and job cards" />
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles/workshop.css?v=2" />
+  <link rel="stylesheet" href="./styles/workshop.css?v=3" />
   <link rel="stylesheet" href="./styles/workshop_driver_defects.css" />
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
 </head>
@@ -67,7 +67,7 @@
           </section>
           <section class="panel">
             <div class="panel-head"><h2>Open Workshop Jobs</h2><span class="hint">Most recent</span></div>
-            <div id="dashboardJobsList" class="list-stack"></div>
+            <div id="dashboardJobsList" class="list-stack dashboard-open-jobs-scroll"></div>
           </section>
         </div>
       </section>
@@ -183,7 +183,7 @@
   </dialog>
 
   <script type="module" src="./js/workshop_display_stability.js"></script>
-  <script type="module" src="./js/workshop_management.js?v=20260908-status-filter"></script>
+  <script type="module" src="./js/workshop_management.js?v=20260908-open-jobs-scroll"></script>
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js"></script>

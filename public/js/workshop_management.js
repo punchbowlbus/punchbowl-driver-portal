@@ -151,7 +151,7 @@ function renderDashboard() {
   els.maintenanceDueList.innerHTML = dueList.length ? dueList.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))}</div><div class="list-meta">Current: ${esc(fmtKm(currentOdo(bus)))} · Next service: ${esc(fmtKm(nextServiceOdo(bus)))}</div></div><span class="badge ${state.overdue ? "bad" : "warn"}">${state.overdue ? "OVERDUE" : "DUE SOON"}</span></div><div class="list-meta">${esc(state.detail)}</div></div>`).join("") : `<div class="empty">No buses currently due based on recorded schedules.</div>`;
 
-  els.dashboardJobsList.innerHTML = openJobs.length ? openJobs.slice(0,10).map(jobCardSummary).join("") : `<div class="empty">No open workshop jobs.</div>`;
+  els.dashboardJobsList.innerHTML = openJobs.length ? openJobs.map(jobCardSummary).join("") : `<div class="empty">No open workshop jobs.</div>`;
 }
 
 function jobCardSummary(j) {
