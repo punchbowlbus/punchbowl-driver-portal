@@ -9,6 +9,11 @@
   <link rel="stylesheet" href="./styles/workshop.css" />
   <link rel="stylesheet" href="./styles/mechanic.css" />
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
+  <style>
+    .mechanic-defect-actions{display:flex;justify-content:flex-end;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
+    .mechanic-defect-actions .button{min-height:38px}
+    @media(max-width:600px){.mechanic-defect-actions .button{width:100%}}
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -49,11 +54,11 @@
       <section class="panel mechanic-defects-panel">
         <div class="panel-head">
           <div>
-            <h2>Today's Driver Defects <span id="mechanicTodayDefectCount" class="badge info">0</span></h2>
-            <span class="hint">Driver defect reports submitted today are shown here live for the workshop team.</span>
+            <h2>Open Driver Defects <span id="mechanicTodayDefectCount" class="badge info">0</span></h2>
+            <span class="hint">Open driver defects are shown live. Create a job card and assign it to yourself when action is required.</span>
           </div>
         </div>
-        <div id="mechanicTodayDefects" class="mechanic-defect-list"><div class="empty">Loading today's driver defect reports...</div></div>
+        <div id="mechanicTodayDefects" class="mechanic-defect-list"><div class="empty">Loading open driver defect reports...</div></div>
       </section>
 
       <section class="panel">
@@ -155,9 +160,9 @@
     </section>
   </main>
 
-  <script type="module" src="./js/mechanic_work_queue.js"></script>
+  <script type="module" src="./js/mechanic_work_queue.js?v=20260908-self-assign-defect"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
-  <script type="module" src="./js/mechanic_driver_defects_today.js"></script>
+  <script type="module" src="./js/mechanic_driver_defects_today.js?v=20260908-self-assign-defect"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>
   <script type="module" src="./js/mechanic_status_sync.js"></script>
   <script type="module" src="./js/mechanic_pre_rms.js"></script>

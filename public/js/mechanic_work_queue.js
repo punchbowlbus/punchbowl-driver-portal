@@ -33,6 +33,7 @@ let buses = [];
 let selectedJob = null;
 let jobsUnsub = null;
 let busesUnsub = null;
+window.currentWorkshopMechanic = null;
 
 function normalize(v) { return String(v || "").trim().toLowerCase(); }
 function isSuperAdmin(email) { return ADMIN_EMAILS.map(normalize).includes(normalize(email)); }
@@ -254,6 +255,7 @@ function openJob(id) {
   els.completeJobBtn.disabled = locked;
   window.scrollTo({top:0,behavior:"smooth"});
 }
+window.openMechanicJobCard = openJob;
 
 function collectJobCard() {
   const checklist = {};
@@ -307,6 +309,11 @@ function startListeners() {
     jobs = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
     renderQueue();
     if (selectedJob) { const refreshed = jobs.find((j) => j.id === selectedJob.id); if (refreshed) selectedJob = refreshed; }
+    if (window.pendingMechanicJobToOpen && jobs.some((job) => job.id === window.pendingMechanicJobToOpen)) {
+      const jobId = window.pendingMechanicJobToOpen;
+      window.pendingMechanicJobToOpen = null;
+      openJob(jobId);
+    }
   }, (err) => showStatus(err?.message || "Unable to load workshop jobs.", "error"));
   busesUnsub = onSnapshot(collection(db, "buses"), (snap) => { buses = snap.docs.map((d) => ({ id:d.id, ...d.data() })); });
 }
@@ -329,6 +336,7 @@ els.logoutBtn.addEventListener("click", () => signOut(auth));
 
 onAuthStateChanged(auth, async (user) => {
   currentUser = user;
+  window.currentWorkshopMechanic = null;
   if (!user) {
     stopListeners();
     els.authText.textContent = "Not signed in";
@@ -367,6 +375,13 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   const roleLabel = isSuperAdmin(user.email) ? "Super Admin" : (employee?.role || "Workshop");
+  window.currentWorkshopMechanic = {
+    uid:user.uid || "",
+    email:normalize(user.email),
+    name:employee?.displayName || user.displayName || user.email,
+    employeeNumber:employee?.employeeNumber || employee?.number || ""
+  };
+  window.dispatchEvent(new CustomEvent("mechanic-portal-access-granted"));
   els.authText.textContent = `${roleLabel}: ${user.email}`;
   els.mechanicIdentity.textContent = `${employee?.displayName || user.email} · Workshop ${employee?.role || "Super Admin"}`;
   clearStatus();
