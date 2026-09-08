@@ -7,7 +7,7 @@
   <meta name="description" content="Fleet Manager workshop management, fleet maintenance and job cards" />
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
   <link rel="stylesheet" href="./styles/workshop.css?v=3" />
-  <link rel="stylesheet" href="./styles/workshop_driver_defects.css" />
+  <link rel="stylesheet" href="./styles/workshop_driver_defects.css?v=2" />
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
 </head>
 <body>
@@ -148,8 +148,8 @@
           <button id="refreshWorkshopDefects" class="button secondary" type="button">Refresh</button>
         </div>
         <div class="defect-tabs">
-          <button type="button" class="active" data-defect-tab="overview">Overview</button>
-          <button type="button" data-defect-tab="open">Open Reports</button>
+          <button type="button" data-defect-tab="overview">Overview</button>
+          <button type="button" class="active" data-defect-tab="open">Open Reports</button>
           <button type="button" data-defect-tab="completed">Completed</button>
         </div>
         <section id="workshopDefectSummary" class="defect-summary"></section>
@@ -183,7 +183,7 @@
   </dialog>
 
   <script type="module" src="./js/workshop_display_stability.js"></script>
-  <script type="module" src="./js/workshop_management.js?v=20260908-open-jobs-scroll"></script>
+  <script type="module" src="./js/workshop_management.js?v=20260908-defect-job-card"></script>
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js"></script>
@@ -198,7 +198,7 @@
   <script type="module" src="./js/workshop_90day_tracking.js"></script>
   <script type="module" src="./js/workshop_history_filters.js"></script>
   <script type="module" src="./js/workshop_job_remove.js"></script>
-  <script type="module" src="./js/workshop_driver_defects.js"></script>
+  <script type="module" src="./js/workshop_driver_defects.js?v=20260908-job-card"></script>
   <script type="module" src="./js/workshop_print_fix.js"></script>
 </body>
 </html>

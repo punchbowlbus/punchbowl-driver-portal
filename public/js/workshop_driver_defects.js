@@ -3,7 +3,7 @@ import { auth, db } from "./firebase.js";
 
 const STATUSES = ["New", "Acknowledged", "Workshop Assigned", "Completed"];
 let reports = [];
-let activeTab = "overview";
+let activeTab = "open";
 let loaded = false;
 const esc = (v) => String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[m]));
 const isDone = (r) => ["completed", "closed"].includes(String(r?.status || "").toLowerCase());
@@ -68,8 +68,22 @@ function renderList() {
     const unsafe = r.safeToDrive === "No";
     const photos = Array.isArray(r.photos) ? r.photos : [];
     const status = r.status || "New";
-    return `<article class="defect-card ${unsafe ? "unsafe" : ""}"><div class="defect-head"><div><div class="defect-number">${esc(r.reportNumber || r.id)}</div><div class="defect-sub">${esc(r.defectDate || "Date not recorded")} · ${esc(fmtDate(r.createdAt || r.reportedAtIso))}</div></div><div class="defect-badges"><span class="defect-badge ${unsafe ? "unsafe" : "safe"}">${unsafe ? "Unsafe to drive" : "Safe to drive"}</span><span class="defect-badge">${esc(status)}</span></div></div><div class="defect-grid"><div><span>Bus</span><strong>${esc(busLabel(r))}</strong></div><div><span>Category</span><strong>${esc(r.category || "Other")}</strong></div><div><span>Driver</span><strong>${esc(r.reportedByName || "Unknown")}</strong><small>${esc(r.reportedByEmployeeNumber || "")}</small></div></div><div class="defect-desc">${esc(r.description || "")}</div>${photos.length ? `<div class="defect-photos">${photos.map((p) => `<a href="${esc(p.url || "")}" target="_blank" rel="noopener"><img src="${esc(p.url || "")}" alt="Defect photo"></a>`).join("")}</div>` : ""}<div class="defect-actions"><label>Status<select data-defect-status="${esc(r.id)}">${STATUSES.map((s) => `<option value="${s}" ${s === status ? "selected" : ""}>${s}</option>`).join("")}</select></label><label>Operations / workshop notes<input data-defect-notes="${esc(r.id)}" value="${esc(r.adminNotes || "")}" placeholder="Add an internal note"></label><button class="button primary" type="button" data-defect-save="${esc(r.id)}">Save update</button></div><div class="defect-save-msg" data-defect-msg="${esc(r.id)}"></div></article>`;
+    const jobAction = r.workshopJobId || r.workshopJobNumber
+      ? `<button class="button defect-job-created" type="button" disabled>Job ${esc(r.workshopJobNumber || "created")}</button>`
+      : !isDone(r) ? `<button class="button defect-create-job" type="button" data-defect-create-job="${esc(r.id)}">Create Job Card</button>` : "";
+    return `<article class="defect-card ${unsafe ? "unsafe" : ""}"><div class="defect-head"><div><div class="defect-number">${esc(r.reportNumber || r.id)}</div><div class="defect-sub">${esc(r.defectDate || "Date not recorded")} · ${esc(fmtDate(r.createdAt || r.reportedAtIso))}</div></div><div class="defect-badges"><span class="defect-badge ${unsafe ? "unsafe" : "safe"}">${unsafe ? "Unsafe to drive" : "Safe to drive"}</span><span class="defect-badge">${esc(status)}</span></div></div><div class="defect-grid"><div><span>Bus</span><strong>${esc(busLabel(r))}</strong></div><div><span>Category</span><strong>${esc(r.category || "Other")}</strong></div><div><span>Driver</span><strong>${esc(r.reportedByName || "Unknown")}</strong><small>${esc(r.reportedByEmployeeNumber || "")}</small></div></div><div class="defect-desc">${esc(r.description || "")}</div>${photos.length ? `<div class="defect-photos">${photos.map((p) => `<a href="${esc(p.url || "")}" target="_blank" rel="noopener"><img src="${esc(p.url || "")}" alt="Defect photo"></a>`).join("")}</div>` : ""}<div class="defect-actions"><label>Status<select data-defect-status="${esc(r.id)}">${STATUSES.map((s) => `<option value="${s}" ${s === status ? "selected" : ""}>${s}</option>`).join("")}</select></label><label>Operations / workshop notes<input data-defect-notes="${esc(r.id)}" value="${esc(r.adminNotes || "")}" placeholder="Add an internal note"></label>${jobAction}<button class="button primary" type="button" data-defect-save="${esc(r.id)}">Save update</button></div><div class="defect-save-msg" data-defect-msg="${esc(r.id)}"></div></article>`;
   }).join("");
+
+  el.querySelectorAll("[data-defect-create-job]").forEach((btn) => btn.addEventListener("click", async () => {
+    const report = reports.find((item) => item.id === btn.dataset.defectCreateJob);
+    if (!report) return;
+    const msg = el.querySelector(`[data-defect-msg="${CSS.escape(report.id)}"]`);
+    if (typeof window.openWorkshopJobDialog !== "function") {
+      if (msg) msg.textContent = "The Workshop Job form is not available. Refresh the page and try again.";
+      return;
+    }
+    window.openWorkshopJobDialog(report);
+  }));
 
   el.querySelectorAll("[data-defect-save]").forEach((btn) => btn.addEventListener("click", async () => {
     const id = btn.dataset.defectSave;
@@ -88,6 +102,10 @@ function renderList() {
 
 async function refresh() {
   const el = document.getElementById("workshopDefectList");
+  if (window.workshopManagerAccessGranted !== true) {
+    if (el) el.innerHTML = `<div class="defect-empty">Fleet Manager or Admin access is required.</div>`;
+    return;
+  }
   if (el) el.innerHTML = `<div class="defect-empty">Loading defect reports...</div>`;
   try { await loadReports(); categories(); summary(); renderList(); }
   catch { if (el) el.innerHTML = `<div class="defect-empty">Unable to load defect reports.</div>`; }
@@ -98,6 +116,10 @@ function wire() {
   ["workshopDefectSearch","workshopDefectDate","workshopDefectCategory","workshopDefectSafety"].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener(id === "workshopDefectSearch" ? "input" : "change", renderList); });
   document.getElementById("refreshWorkshopDefects")?.addEventListener("click", refresh);
   document.querySelector('[data-view="defects"]')?.addEventListener("click", () => { if (!loaded) { loaded = true; refresh(); } });
+  window.addEventListener("workshop-job-created-from-defect", refresh);
+  window.addEventListener("workshop-manager-access-granted", () => {
+    if (document.getElementById("defectsView")?.classList.contains("active")) { loaded = true; refresh(); }
+  });
 }
 
 wire();

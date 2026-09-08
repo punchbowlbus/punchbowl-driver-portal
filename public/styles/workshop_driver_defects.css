@@ -368,7 +368,7 @@
 
 .defect-actions{
   display:grid;
-  grid-template-columns:minmax(180px,210px) minmax(260px,1fr) auto;
+  grid-template-columns:minmax(180px,210px) minmax(260px,1fr) auto auto;
   gap:10px;
   align-items:end;
   margin-top:4px;
@@ -389,6 +389,7 @@
 }
 
 .defect-actions .button:hover{background:var(--defect-red-dark)}
+.defect-actions .defect-job-created:disabled{background:#ecfdf3;border-color:#abefc6;color:#067647;box-shadow:none;opacity:1;cursor:default}
 
 .defect-save-msg{
   min-height:15px;

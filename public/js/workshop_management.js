@@ -40,6 +40,8 @@ let unsubscribers = [];
 const JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval", "Completed", "Closed", "Cancelled"];
 const ACTIVE_JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval"];
 let selectedJobStatuses = new Set(ACTIVE_JOB_STATUSES);
+let pendingSourceDefect = null;
+window.workshopManagerAccessGranted = false;
 
 function normalizeEmail(v) { return String(v || "").trim().toLowerCase(); }
 function isSuperAdmin(email) { return ADMIN_EMAILS.map(normalizeEmail).includes(normalizeEmail(email)); }
@@ -211,19 +213,73 @@ async function createWorkshopJob(e) {
   if (!fault) return showStatus("Describe the work required.", "error");
   const now = Date.now();
   const jobNumber = `WJ-${new Date().getFullYear()}-${String(now).slice(-6)}`;
+  const jobPayload = {
+    jobNumber, busId:bus.id, fleetNumber:fleetNo(bus), rego:bus.rego || "", jobType:els.jobType.value, priority:els.jobPriority.value || "Normal",
+    status:els.jobMechanic.value.trim() ? "Assigned" : "New", assignedMechanic:els.jobMechanic.value.trim(), dueDate:els.jobDueDate.value || "",
+    source:pendingSourceDefect ? "Driver Defect" : "Fleet Manager", sourceDefectId:pendingSourceDefect?.id || "",
+    sourceDefectNumber:pendingSourceDefect?.reportNumber || "", defectCategory:pendingSourceDefect?.category || "",
+    reportedFault:fault, managerNotes:els.jobManagerNotes.value.trim(), defectPhotos:Array.isArray(pendingSourceDefect?.photos) ? pendingSourceDefect.photos : [],
+    odometerStart:currentOdo(bus), diagnosis:"", workCompleted:"", partsUsed:[], labourEntries:[], returnToServiceApproved:false,
+    createdByEmail:normalizeEmail(currentUser.email), createdAt:serverTimestamp(), updatedAt:serverTimestamp(), schemaVersion:1
+  };
   try {
-    await addDoc(collection(db, "workshopJobs"), {
-      jobNumber, busId:bus.id, fleetNumber:fleetNo(bus), rego:bus.rego || "", jobType:els.jobType.value, priority:els.jobPriority.value || "Normal",
-      status:els.jobMechanic.value.trim() ? "Assigned" : "New", assignedMechanic:els.jobMechanic.value.trim(), dueDate:els.jobDueDate.value || "",
-      source:"Fleet Manager", sourceDefectId:"", reportedFault:fault, managerNotes:els.jobManagerNotes.value.trim(), odometerStart:currentOdo(bus),
-      diagnosis:"", workCompleted:"", partsUsed:[], labourEntries:[], returnToServiceApproved:false,
-      createdByEmail:normalizeEmail(currentUser.email), createdAt:serverTimestamp(), updatedAt:serverTimestamp(), schemaVersion:1
-    });
+    let jobId = "";
+    if (pendingSourceDefect) {
+      const source = pendingSourceDefect;
+      const defectRef = doc(db, "defectReports", source.id);
+      const jobRef = doc(collection(db, "workshopJobs"));
+      await runTransaction(db, async (tx) => {
+        const defectSnap = await tx.get(defectRef);
+        if (!defectSnap.exists()) throw new Error("This defect report no longer exists.");
+        const current = defectSnap.data();
+        if (current.workshopJobId || current.workshopJobNumber) throw new Error(`A job card already exists: ${current.workshopJobNumber || current.workshopJobId}`);
+        if (["completed", "closed"].includes(String(current.status || "").toLowerCase())) throw new Error("A completed defect cannot be converted into a new job card.");
+        tx.set(jobRef, jobPayload);
+        tx.set(defectRef, {
+          status:"Workshop Assigned", workshopJobId:jobRef.id, workshopJobNumber:jobNumber,
+          convertedToJobAt:serverTimestamp(), convertedToJobByUid:currentUser.uid || "",
+          convertedToJobByEmail:normalizeEmail(currentUser.email), updatedAt:serverTimestamp()
+        }, {merge:true});
+      });
+      jobId = jobRef.id;
+      window.dispatchEvent(new CustomEvent("workshop-job-created-from-defect", {detail:{defectId:source.id, jobId, jobNumber}}));
+    } else {
+      const created = await addDoc(collection(db, "workshopJobs"), jobPayload);
+      jobId = created.id;
+    }
+    pendingSourceDefect = null;
     els.jobForm.reset(); els.jobDialog.close(); showStatus(`Workshop job ${jobNumber} created successfully.`);
   } catch (err) { showStatus(err?.message || "Unable to create workshop job.", "error"); }
 }
 
-function openJobDialog(busId="") { els.jobForm.reset(); if (busId) els.jobBus.value = busId; els.jobDialog.showModal(); }
+function openJobDialog(input="") {
+  els.jobForm.reset();
+  pendingSourceDefect = input && typeof input === "object" ? input : null;
+  const busId = pendingSourceDefect?.busId || input || "";
+  if (busId) els.jobBus.value = busId;
+  if (pendingSourceDefect) {
+    els.jobType.value = "Defect Repair";
+    els.jobPriority.value = pendingSourceDefect.safeToDrive === "No" ? "Safety Critical" : (pendingSourceDefect.priority || "Normal");
+    els.jobDueDate.value = pendingSourceDefect.defectDate || todayStr();
+    els.jobFault.value = pendingSourceDefect.description || "";
+    els.jobManagerNotes.value = pendingSourceDefect.adminNotes || "";
+    const title = els.jobDialog.querySelector(".dialog-head h2");
+    const help = els.jobDialog.querySelector(".dialog-head p");
+    if (title) title.textContent = "Create Job Card from Driver Defect";
+    if (help) help.textContent = `${pendingSourceDefect.reportNumber || "Driver defect"} · Confirm the details and assign a mechanic if required.`;
+  } else {
+    const title = els.jobDialog.querySelector(".dialog-head h2");
+    const help = els.jobDialog.querySelector(".dialog-head p");
+    if (title) title.textContent = "Create Workshop Job";
+    if (help) help.textContent = "Choose the job type. Leave mechanic unassigned to send it to the shared Workshop queue.";
+  }
+  els.jobDialog.showModal();
+}
+window.openWorkshopJobDialog = openJobDialog;
+function closeJobDialog() {
+  pendingSourceDefect = null;
+  els.jobDialog.close();
+}
 function switchView(name) {
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
@@ -300,11 +356,13 @@ document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click"
 els.fleetSearch.addEventListener("input", renderFleet); els.jobSearch.addEventListener("input", renderJobs); setupJobStatusFilter();
 els.odometerBus.addEventListener("change", syncPreviousOdometer); els.odometerForm.addEventListener("submit", saveOdometer); els.jobForm.addEventListener("submit", createWorkshopJob);
 $("createJobBtn").addEventListener("click", () => openJobDialog()); $("dashboardCreateJobBtn").addEventListener("click", () => openJobDialog());
-$("closeJobDialog").addEventListener("click", () => els.jobDialog.close()); $("cancelJobBtn").addEventListener("click", () => els.jobDialog.close());
+$("closeJobDialog").addEventListener("click", closeJobDialog); $("cancelJobBtn").addEventListener("click", closeJobDialog);
+els.jobDialog.addEventListener("close", () => { pendingSourceDefect = null; });
 els.loginBtn.addEventListener("click", () => signInWithPopup(auth,provider)); els.logoutBtn.addEventListener("click", () => signOut(auth));
 
 onAuthStateChanged(auth, async (user) => {
   currentUser = user;
+  window.workshopManagerAccessGranted = false;
   if (!user) {
     stopListeners(); els.authText.textContent = "Not signed in"; els.loginBtn.hidden = false; els.logoutBtn.hidden = true;
     showStatus("Sign in with an authorised Fleet Manager account to use Workshop Management.", "error"); return;
@@ -336,5 +394,7 @@ onAuthStateChanged(auth, async (user) => {
   }
 
   clearStatus();
+  window.workshopManagerAccessGranted = true;
+  window.dispatchEvent(new CustomEvent("workshop-manager-access-granted"));
   startListeners();
 });
