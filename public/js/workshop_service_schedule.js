@@ -334,7 +334,7 @@ function enhanceFleetRows() {
         if (meta.textContent !== summary) meta.textContent = summary;
       }
 
-      const actions = cells[7];
+      const actions = cells[cells.length - 1];
       if (!actions || actions.querySelector("[data-service-setup]")) return;
 
       actions.style.display = "flex";

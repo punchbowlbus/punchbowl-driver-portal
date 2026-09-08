@@ -18,7 +18,15 @@ function polishFleetList() {
     if (!cells.length) return;
 
     // Hide the actions column on the fleet list. All actions remain inside the full bus record.
-    if (cells.length >= 8) cells[cells.length - 1].style.display = 'none';
+    if (cells.length >= 8) {
+      const actionCell = cells[cells.length - 1];
+      [...row.querySelectorAll('button')].forEach((button) => {
+        if (/^(view history|service setup)$/i.test(button.textContent.trim()) && button.parentElement !== actionCell) {
+          actionCell.appendChild(button);
+        }
+      });
+      actionCell.style.display = 'none';
+    }
 
     if (row.dataset.wfPolished === '1') return;
     row.dataset.wfPolished = '1';
