@@ -11,7 +11,18 @@
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
   <style>
     .mechanic-defect-actions{display:flex;justify-content:flex-end;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
-    .mechanic-defect-actions .button{min-height:38px}
+    .mechanic-defect-actions .button{min-height:42px;font-size:13px}
+    #jobQueue table{font-size:13px;min-width:1180px}
+    #jobQueue th{font-size:11px;padding:13px 12px;white-space:nowrap}
+    #jobQueue td{padding:16px 12px;vertical-align:top;line-height:1.45}
+    #jobQueue tbody tr:nth-child(even){background:#fafbfc}
+    #jobQueue tbody tr:hover{background:#f3f7fc}
+    #jobQueue .mechanic-job-complaint{width:38%;min-width:360px;border-left:3px solid transparent}
+    #jobQueue tbody tr:hover .mechanic-job-complaint{border-left-color:#c62828}
+    #jobQueue .mechanic-job-complaint>strong{display:block;font-size:14px;color:#101828;margin-bottom:7px}
+    #jobQueue .mechanic-complaint-label{color:#667085;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;margin-bottom:3px}
+    #jobQueue .mechanic-complaint-text{color:#101828;font-size:14px;font-weight:700;line-height:1.5;white-space:normal;overflow-wrap:anywhere}
+    #jobQueue td:last-child .button{min-width:118px;min-height:46px;font-size:13px}
     @media(max-width:600px){.mechanic-defect-actions .button{width:100%}}
   </style>
 </head>
@@ -160,7 +171,7 @@
     </section>
   </main>
 
-  <script type="module" src="./js/mechanic_work_queue.js?v=20260908-self-assign-defect"></script>
+  <script type="module" src="./js/mechanic_work_queue.js?v=20260908-readable-job-table"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
   <script type="module" src="./js/mechanic_driver_defects_today.js?v=20260908-self-assign-defect"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>

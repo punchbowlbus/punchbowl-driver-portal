@@ -92,10 +92,10 @@ function renderQueue() {
   els.jobQueue.innerHTML = `
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Job</th><th>Bus</th><th>Type</th><th>Priority</th><th>Assigned Mechanic</th><th>Status</th><th>Due</th><th></th></tr></thead>
+        <thead><tr><th>Job / Mechanic Complaint</th><th>Bus</th><th>Job Type</th><th>Priority</th><th>Assigned Mechanic</th><th>Status</th><th>Due</th><th>Action</th></tr></thead>
         <tbody>${list.map((j) => `
           <tr>
-            <td><strong>${esc(j.jobNumber || j.id)}</strong><div class="list-meta">${esc(j.reportedFault || "")}</div></td>
+            <td class="mechanic-job-complaint"><strong>${esc(j.jobNumber || j.id)}</strong><div class="mechanic-complaint-label">Reported fault / complaint</div><div class="mechanic-complaint-text">${esc(j.reportedFault || "No complaint recorded")}</div></td>
             <td><strong>${esc(j.fleetNumber || "—")}</strong><div class="list-meta">${esc(j.rego || "")}</div></td>
             <td>${esc(j.jobType || "Workshop Job")}${categoryLabel(j) ? `<div class="list-meta"><strong>${esc(categoryLabel(j))}</strong></div>` : ""}</td>
             <td><span class="badge ${/urgent|critical/i.test(j.priority || "") ? "bad" : /high/i.test(j.priority || "") ? "warn" : "info"}">${esc(j.priority || "Normal")}</span></td>
