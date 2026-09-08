@@ -88,7 +88,7 @@ function ensureDashboardUi() {
   $("safety90Panel")?.remove();
   const maintenance = $("maintenanceDueList")?.closest(".panel");
   const hint = maintenance?.querySelector(".panel-head .hint");
-  if (hint) hint.textContent = "Service and 90 Day Safety Check due";
+  if (hint) hint.textContent = "Service, 90 Day Safety and Registration due";
 }
 
 function dueSafetyBuses() {
