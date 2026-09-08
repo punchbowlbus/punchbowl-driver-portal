@@ -213,3 +213,15 @@ tbody tr:hover{background:#fafbfc}
   #vehicleHistoryDialog>.dialog-actions{padding:12px}
   #vehicleHistoryDialog>.dialog-actions .button{width:100%;flex:1 1 100%}
 }
+.workshop-status-filter{position:relative;min-width:210px}
+.workshop-status-filter-button{width:100%;min-height:44px;border:1px solid #cfd4dc;border-radius:10px;background:#fff;color:#1f2937;padding:9px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;text-align:left}
+.workshop-status-filter-button:focus,.workshop-status-filter-button[aria-expanded="true"]{border-color:var(--red);box-shadow:0 0 0 3px rgba(198,40,40,.12);outline:none}
+.workshop-status-filter-menu{position:absolute;z-index:50;top:calc(100% + 6px);left:0;width:270px;background:#fff;border:1px solid #d7dce4;border-radius:12px;box-shadow:0 14px 35px rgba(16,24,40,.18);padding:10px}
+.workshop-status-quick-actions{display:grid;grid-template-columns:1fr;gap:5px;padding-bottom:9px;border-bottom:1px solid #e6e8ee}
+.workshop-status-quick-actions button{border:0;border-radius:8px;background:#f6f7fb;color:#344054;padding:8px 10px;text-align:left;font-weight:800;cursor:pointer}
+.workshop-status-quick-actions button:hover{background:#fff0f0;color:var(--red)}
+.workshop-status-options{display:grid;gap:3px;padding-top:8px}
+.workshop-status-options label{display:flex;align-items:center;gap:9px;border-radius:8px;padding:7px 8px;cursor:pointer;font-weight:700}
+.workshop-status-options label:hover{background:#f6f7fb}
+.workshop-status-options input{width:17px;height:17px;accent-color:var(--red)}
+@media(max-width:700px){.workshop-status-filter{width:100%}.workshop-status-filter-menu{width:100%}}

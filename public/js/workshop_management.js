@@ -37,6 +37,9 @@ let buses = [];
 let workshopJobs = [];
 let odometerReadings = [];
 let unsubscribers = [];
+const JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval", "Completed", "Closed", "Cancelled"];
+const ACTIVE_JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval"];
+let selectedJobStatuses = new Set(ACTIVE_JOB_STATUSES);
 
 function normalizeEmail(v) { return String(v || "").trim().toLowerCase(); }
 function isSuperAdmin(email) { return ADMIN_EMAILS.map(normalizeEmail).includes(normalizeEmail(email)); }
@@ -157,8 +160,7 @@ function jobCardSummary(j) {
 
 function renderJobs() {
   const term = String(els.jobSearch.value || "").trim().toLowerCase();
-  const status = els.jobStatusFilter.value;
-  const list = workshopJobs.filter((j) => (!status || j.status === status) && [j.jobNumber,j.fleetNumber,j.jobType,j.assignedMechanic,j.reportedFault].some((v) => String(v || "").toLowerCase().includes(term)));
+  const list = workshopJobs.filter((j) => selectedJobStatuses.has(j.status || "New") && [j.jobNumber,j.fleetNumber,j.jobType,j.assignedMechanic,j.reportedFault].some((v) => String(v || "").toLowerCase().includes(term)));
   els.jobsTableBody.innerHTML = list.length ? list.map((j) => `<tr><td><strong>${esc(j.jobNumber || j.id)}</strong></td><td>${esc(j.fleetNumber || "—")}</td><td>${esc(j.jobType || "—")}</td><td><span class="badge ${/urgent|critical/i.test(j.priority || "") ? "bad" : /high/i.test(j.priority || "") ? "warn" : ""}">${esc(j.priority || "Normal")}</span></td><td>${esc(j.assignedMechanic || "Unassigned")}</td><td>${esc(j.status || "New")}</td><td>${esc(fmtDate(j.dueDate))}</td></tr>`).join("") : `<tr><td colspan="7"><div class="empty">No workshop jobs found.</div></td></tr>`;
 
   const history = workshopJobs.filter((j) => ["Completed","Closed"].includes(j.status));
@@ -248,9 +250,54 @@ function startListeners() {
 }
 function stopListeners() { unsubscribers.forEach((u) => { try { u(); } catch {} }); unsubscribers = []; }
 
+function setupJobStatusFilter() {
+  const button = $("jobStatusFilterButton");
+  const menu = $("jobStatusFilterMenu");
+  const label = $("jobStatusFilterLabel");
+  const checks = [...menu.querySelectorAll("input[type='checkbox']")];
+
+  function updateLabel() {
+    const selected = JOB_STATUSES.filter((status) => selectedJobStatuses.has(status));
+    const isActive = selected.length === ACTIVE_JOB_STATUSES.length && ACTIVE_JOB_STATUSES.every((status) => selectedJobStatuses.has(status));
+    if (isActive) label.textContent = "Active Jobs";
+    else if (selected.length === JOB_STATUSES.length) label.textContent = "All Jobs";
+    else if (selected.length === 1) label.textContent = selected[0];
+    else if (!selected.length) label.textContent = "No statuses selected";
+    else label.textContent = `${selected.length} statuses selected`;
+  }
+
+  function applyStatuses(statuses) {
+    selectedJobStatuses = new Set(statuses);
+    checks.forEach((check) => { check.checked = selectedJobStatuses.has(check.value); });
+    updateLabel();
+    renderJobs();
+  }
+
+  button.addEventListener("click", () => {
+    menu.hidden = !menu.hidden;
+    button.setAttribute("aria-expanded", String(!menu.hidden));
+  });
+  checks.forEach((check) => check.addEventListener("change", () => {
+    selectedJobStatuses = new Set(checks.filter((item) => item.checked).map((item) => item.value));
+    updateLabel();
+    renderJobs();
+  }));
+  menu.querySelectorAll("[data-job-status-preset]").forEach((preset) => preset.addEventListener("click", () => {
+    const value = preset.dataset.jobStatusPreset;
+    applyStatuses(value === "active" ? ACTIVE_JOB_STATUSES : value === "closed" ? ["Closed"] : JOB_STATUSES);
+  }));
+  document.addEventListener("click", (event) => {
+    if (!els.jobStatusFilter.contains(event.target)) {
+      menu.hidden = true;
+      button.setAttribute("aria-expanded", "false");
+    }
+  });
+  updateLabel();
+}
+
 els.odometerDate.value = todayStr();
 document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => switchView(b.dataset.view)));
-els.fleetSearch.addEventListener("input", renderFleet); els.jobSearch.addEventListener("input", renderJobs); els.jobStatusFilter.addEventListener("change", renderJobs);
+els.fleetSearch.addEventListener("input", renderFleet); els.jobSearch.addEventListener("input", renderJobs); setupJobStatusFilter();
 els.odometerBus.addEventListener("change", syncPreviousOdometer); els.odometerForm.addEventListener("submit", saveOdometer); els.jobForm.addEventListener("submit", createWorkshopJob);
 $("createJobBtn").addEventListener("click", () => openJobDialog()); $("dashboardCreateJobBtn").addEventListener("click", () => openJobDialog());
 $("closeJobDialog").addEventListener("click", () => els.jobDialog.close()); $("cancelJobBtn").addEventListener("click", () => els.jobDialog.close());

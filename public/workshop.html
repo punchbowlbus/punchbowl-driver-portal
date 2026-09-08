@@ -6,7 +6,7 @@
   <title>Punchbowl Bus Company Workshop Management</title>
   <meta name="description" content="Fleet Manager workshop management, fleet maintenance and job cards" />
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles/workshop.css" />
+  <link rel="stylesheet" href="./styles/workshop.css?v=2" />
   <link rel="stylesheet" href="./styles/workshop_driver_defects.css" />
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
 </head>
@@ -110,7 +110,28 @@
         <section class="panel table-panel">
           <div class="filter-row">
             <input id="jobSearch" class="search-input" placeholder="Search job, bus, mechanic or fault" />
-            <select id="jobStatusFilter"><option value="">All statuses</option><option>New</option><option>Assigned</option><option>In Progress</option><option>Waiting Parts</option><option>Waiting Approval</option><option>Completed</option><option>Closed</option><option>Cancelled</option></select>
+            <div id="jobStatusFilter" class="workshop-status-filter">
+              <button id="jobStatusFilterButton" class="workshop-status-filter-button" type="button" aria-haspopup="true" aria-expanded="false">
+                <span id="jobStatusFilterLabel">Active Jobs</span><span aria-hidden="true">⌄</span>
+              </button>
+              <div id="jobStatusFilterMenu" class="workshop-status-filter-menu" hidden>
+                <div class="workshop-status-quick-actions">
+                  <button type="button" data-job-status-preset="active">Active Jobs</button>
+                  <button type="button" data-job-status-preset="all">All Jobs</button>
+                  <button type="button" data-job-status-preset="closed">Closed Jobs</button>
+                </div>
+                <div class="workshop-status-options">
+                  <label><input type="checkbox" value="New" checked> New</label>
+                  <label><input type="checkbox" value="Assigned" checked> Assigned</label>
+                  <label><input type="checkbox" value="In Progress" checked> In Progress</label>
+                  <label><input type="checkbox" value="Waiting Parts" checked> Waiting Parts</label>
+                  <label><input type="checkbox" value="Waiting Approval" checked> Waiting Approval</label>
+                  <label><input type="checkbox" value="Completed"> Completed</label>
+                  <label><input type="checkbox" value="Closed"> Closed</label>
+                  <label><input type="checkbox" value="Cancelled"> Cancelled</label>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="table-wrap"><table><thead><tr><th>Job</th><th>Bus</th><th>Type</th><th>Priority</th><th>Assigned</th><th>Status</th><th>Due</th></tr></thead><tbody id="jobsTableBody"></tbody></table></div>
         </section>
@@ -162,7 +183,7 @@
   </dialog>
 
   <script type="module" src="./js/workshop_display_stability.js"></script>
-  <script type="module" src="./js/workshop_management.js?v=20260827-access3"></script>
+  <script type="module" src="./js/workshop_management.js?v=20260908-status-filter"></script>
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js"></script>
