@@ -32,23 +32,27 @@ function isExpired(photo) {
   return false;
 }
 
+function isPdf(photo) {
+  return photo?.attachmentType === "pdf" || photo?.contentType === "application/pdf" || /\.pdf$/i.test(photo?.fileName || "");
+}
+
 function photoSection(job) {
   const photos = Array.isArray(job?.workshopPhotos) ? job.workshopPhotos.filter((p) => p?.url) : [];
   if (!photos.length) {
-    return `<div class="wm-review-box wm-full wm-photo-review"><div class="wm-review-label">Job Photos</div><div class="wm-review-value">No photos attached.</div></div>`;
+    return `<div class="wm-review-box wm-full wm-photo-review"><div class="wm-review-label">Job Photos &amp; Documents</div><div class="wm-review-value">No attachments added.</div></div>`;
   }
 
   const live = photos.filter((p) => !isExpired(p));
   const expiredCount = photos.length - live.length;
 
   return `<div class="wm-review-box wm-full wm-photo-review">
-    <div class="wm-review-label">Job Photos</div>
+    <div class="wm-review-label">Job Photos &amp; Documents</div>
     ${live.length ? `<div class="wm-photo-grid">${live.map((photo, index) => `
-      <a class="wm-photo-card" href="${esc(photo.url)}" target="_blank" rel="noopener" title="Open photo ${index + 1}">
-        <img src="${esc(photo.url)}" alt="Workshop job photo ${index + 1}" loading="lazy" />
-        <span>Photo ${index + 1}</span>
+      <a class="wm-photo-card" href="${esc(photo.url)}" target="_blank" rel="noopener" title="Open ${isPdf(photo) ? "PDF" : "photo"} ${index + 1}">
+        ${isPdf(photo) ? `<div class="wm-pdf-card"><strong>PDF</strong><small>Open document</small></div>` : `<img src="${esc(photo.url)}" alt="Workshop job photo ${index + 1}" loading="lazy" />`}
+        <span>${esc(photo.originalFileName || photo.fileName || `${isPdf(photo) ? "PDF" : "Photo"} ${index + 1}`)}</span>
       </a>`).join("")}</div>` : ""}
-    ${expiredCount ? `<div class="wm-photo-expired">${expiredCount} photo${expiredCount === 1 ? "" : "s"} expired after 6 months.</div>` : ""}
+    ${expiredCount ? `<div class="wm-photo-expired">${expiredCount} attachment${expiredCount === 1 ? "" : "s"} expired after 6 months.</div>` : ""}
   </div>`;
 }
 
@@ -81,6 +85,8 @@ function injectStyles() {
     .wm-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;margin-top:8px}
     .wm-photo-card{display:block;text-decoration:none;color:#1f2937;border:1px solid #d9e1ea;border-radius:10px;overflow:hidden;background:#fff}
     .wm-photo-card img{display:block;width:100%;height:110px;object-fit:cover;background:#f3f4f6}
+    .wm-pdf-card{height:110px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:#fff1f1;color:#b42318}
+    .wm-pdf-card strong{font-size:23px;letter-spacing:.08em}.wm-pdf-card small{font-size:11px;font-weight:800;color:#667085}
     .wm-photo-card span{display:block;padding:7px 9px;font-size:12px;font-weight:800}
     .wm-photo-expired{margin-top:10px;color:#667085;font-size:12px;font-weight:700}
   `;

@@ -15,7 +15,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
 import { auth, db, storage } from "./firebase.js";
 
-const MAX_PHOTOS = 6;
+const MAX_ATTACHMENTS = 6;
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const MAX_DIMENSION = 1600;
 const JPEG_QUALITY = 0.78;
 const RETENTION_DAYS = 180;
@@ -53,6 +54,10 @@ function photoList(job) {
   return Array.isArray(job?.workshopPhotos) ? job.workshopPhotos.filter((p) => p?.url) : [];
 }
 
+function isPdf(photo) {
+  return photo?.attachmentType === "pdf" || photo?.contentType === "application/pdf" || /\.pdf$/i.test(photo?.fileName || "");
+}
+
 function photosEditable(job) {
   return PHOTO_EDITABLE_STATUSES.has(String(job?.status || ""));
 }
@@ -72,25 +77,25 @@ function renderPhotos() {
 
   const photos = photoList(job);
   const editable = photosEditable(job);
-  const atLimit = photos.length >= MAX_PHOTOS;
+  const atLimit = photos.length >= MAX_ATTACHMENTS;
   if (button) {
     button.disabled = uploading || removingPhoto || !editable || atLimit;
-    button.textContent = atLimit ? `Photo limit reached (${MAX_PHOTOS})` : "Take / Add Photo";
+    button.textContent = atLimit ? `Attachment limit reached (${MAX_ATTACHMENTS})` : "Add Photo / PDF";
   }
   if (input) input.disabled = uploading || removingPhoto || !editable || atLimit;
 
   if (!photos.length) {
-    wrap.innerHTML = `<div class="job-photo-empty">No photos added. Photos are optional. Maximum ${MAX_PHOTOS} photos, automatically compressed before upload.</div>`;
+    wrap.innerHTML = `<div class="job-photo-empty">No photos or PDF documents added. Maximum ${MAX_ATTACHMENTS} attachments. Images are automatically compressed; PDFs can be up to 10 MB.</div>`;
     return;
   }
 
   wrap.innerHTML = photos.map((photo, index) => `
     <div class="job-photo-card" style="position:relative">
-      <a href="${esc(photo.url)}" target="_blank" rel="noopener" title="Open photo ${index + 1}" style="display:block;color:inherit;text-decoration:none">
-        <img src="${esc(photo.url)}" alt="Workshop job photo ${index + 1}" loading="lazy" />
-        <span>Photo ${index + 1}</span>
+      <a href="${esc(photo.url)}" target="_blank" rel="noopener" title="Open ${isPdf(photo) ? "PDF" : "photo"} ${index + 1}" style="display:block;color:inherit;text-decoration:none">
+        ${isPdf(photo) ? `<div class="job-pdf-preview"><strong>PDF</strong><small>Open document</small></div>` : `<img src="${esc(photo.url)}" alt="Workshop job photo ${index + 1}" loading="lazy" />`}
+        <span>${esc(photo.originalFileName || photo.fileName || `${isPdf(photo) ? "PDF" : "Photo"} ${index + 1}`)}</span>
       </a>
-      ${editable ? `<button class="button secondary job-photo-remove" type="button" data-remove-photo="${index}" style="margin-top:8px;width:100%;border-color:#efc2bf;color:#a51d16">Remove Photo</button>` : ""}
+      ${editable ? `<button class="button secondary job-photo-remove" type="button" data-remove-photo="${index}" style="margin-top:8px;width:100%;border-color:#efc2bf;color:#a51d16">Remove ${isPdf(photo) ? "PDF" : "Photo"}</button>` : ""}
     </div>`).join("");
 
   wrap.querySelectorAll("[data-remove-photo]").forEach((btn) => {
@@ -142,28 +147,33 @@ async function compressImage(file) {
 
 async function uploadSelected(file) {
   const job = currentJob();
-  if (!job) throw new Error("Open a job card before adding a photo.");
-  if (!photosEditable(job)) throw new Error("Photos are locked after the Job Card is submitted for approval.");
-  if (!file?.type?.startsWith("image/")) throw new Error("Please choose an image file.");
-  if (photoList(job).length >= MAX_PHOTOS) throw new Error(`Maximum ${MAX_PHOTOS} photos per job card.`);
+  if (!job) throw new Error("Open a job card before adding an attachment.");
+  if (!photosEditable(job)) throw new Error("Attachments are locked after the Job Card is submitted for approval.");
+  const pdf = file?.type === "application/pdf" || /\.pdf$/i.test(file?.name || "");
+  const image = file?.type?.startsWith("image/");
+  if (!image && !pdf) throw new Error("Please choose an image or PDF file.");
+  if (pdf && file.size > MAX_PDF_BYTES) throw new Error("PDF files must be 10 MB or smaller.");
+  if (photoList(job).length >= MAX_ATTACHMENTS) throw new Error(`Maximum ${MAX_ATTACHMENTS} attachments per job card.`);
 
-  const compressed = await compressImage(file);
+  const uploadBody = pdf ? file : await compressImage(file);
   const stamp = Date.now();
-  const filename = `${safeFileName(file.name)}.jpg`;
+  const filename = `${safeFileName(file.name)}.${pdf ? "pdf" : "jpg"}`;
   const storagePath = `workshopJobs/${job.id}/photos/${stamp}_${filename}`;
   const storageRef = ref(storage, storagePath);
   const uploadedAt = new Date();
   const expiresAt = new Date(uploadedAt.getTime() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
 
-  const snapshot = await uploadBytes(storageRef, compressed, {
-    contentType: "image/jpeg",
+  const contentType = pdf ? "application/pdf" : "image/jpeg";
+  const snapshot = await uploadBytes(storageRef, uploadBody, {
+    contentType,
     customMetadata: {
       workshopJobId: job.id,
       jobNumber: String(job.jobNumber || job.id),
       retentionDays: String(RETENTION_DAYS),
       expiresAt: expiresAt.toISOString(),
       originalBytes: String(file.size || 0),
-      compressedBytes: String(compressed.size || 0)
+      uploadedBytes: String(uploadBody.size || 0),
+      attachmentType: pdf ? "pdf" : "image"
     }
   });
   const url = await getDownloadURL(snapshot.ref);
@@ -172,11 +182,14 @@ async function uploadSelected(file) {
     url,
     storagePath,
     fileName: filename,
+    originalFileName: file.name || filename,
+    contentType,
+    attachmentType: pdf ? "pdf" : "image",
     uploadedAt: uploadedAt.toISOString(),
     expiresAt: expiresAt.toISOString(),
     retentionDays: RETENTION_DAYS,
     originalBytes: file.size || 0,
-    compressedBytes: compressed.size || 0,
+    compressedBytes: uploadBody.size || 0,
     uploadedBy: auth.currentUser?.email || ""
   };
 
@@ -188,17 +201,17 @@ async function uploadSelected(file) {
 async function removePhoto(index) {
   if (uploading || removingPhoto) return;
   const job = currentJob();
-  if (!job) return setMessage("Open a job card before removing a photo.", "error");
-  if (!photosEditable(job)) return setMessage("Photos are locked after the Job Card is submitted for approval.", "error");
+  if (!job) return setMessage("Open a job card before removing an attachment.", "error");
+  if (!photosEditable(job)) return setMessage("Attachments are locked after the Job Card is submitted for approval.", "error");
 
   const photos = photoList(job);
   const photo = photos[index];
   if (!photo) return setMessage("Photo could not be found.", "error");
-  if (!window.confirm(`Remove Photo ${index + 1}? You can take another photo after removing it.`)) return;
+  if (!window.confirm(`Remove ${isPdf(photo) ? "PDF document" : `Photo ${index + 1}`}?`)) return;
 
   removingPhoto = true;
   renderPhotos();
-  setMessage(`Removing Photo ${index + 1}...`);
+  setMessage(`Removing ${isPdf(photo) ? "PDF document" : `Photo ${index + 1}`}...`);
 
   try {
     if (photo.storagePath) {
@@ -216,10 +229,10 @@ async function removePhoto(index) {
     await updateDoc(doc(db, "workshopJobs", job.id), {
       workshopPhotos: remaining
     });
-    setMessage("Photo removed. You can take another photo now.", "success");
+    setMessage("Attachment removed.", "success");
   } catch (error) {
     console.error("Workshop photo removal failed", error);
-    setMessage(error?.message || "Unable to remove photo.", "error");
+    setMessage(error?.message || "Unable to remove attachment.", "error");
   } finally {
     removingPhoto = false;
     renderPhotos();
@@ -229,23 +242,23 @@ async function removePhoto(index) {
 async function handleFiles(files) {
   if (uploading || removingPhoto) return;
   const job = currentJob();
-  if (!job) return setMessage("Open a job card before adding a photo.", "error");
-  if (!photosEditable(job)) return setMessage("Photos are locked after the Job Card is submitted for approval.", "error");
+  if (!job) return setMessage("Open a job card before adding an attachment.", "error");
+  if (!photosEditable(job)) return setMessage("Attachments are locked after the Job Card is submitted for approval.", "error");
 
-  const remaining = Math.max(0, MAX_PHOTOS - photoList(job).length);
+  const remaining = Math.max(0, MAX_ATTACHMENTS - photoList(job).length);
   const list = [...(files || [])].slice(0, remaining);
-  if (!list.length) return setMessage(`Maximum ${MAX_PHOTOS} photos per job card.`, "error");
+  if (!list.length) return setMessage(`Maximum ${MAX_ATTACHMENTS} attachments per job card.`, "error");
 
   uploading = true;
   renderPhotos();
-  setMessage(`Compressing and uploading ${list.length === 1 ? "photo" : `${list.length} photos`}...`);
+  setMessage(`Preparing and uploading ${list.length === 1 ? "attachment" : `${list.length} attachments`}...`);
 
   try {
     for (const file of list) await uploadSelected(file);
-    setMessage(list.length === 1 ? "Photo compressed and added to job card." : `${list.length} photos compressed and added to job card.`, "success");
+    setMessage(list.length === 1 ? "Attachment added to job card." : `${list.length} attachments added to job card.`, "success");
   } catch (error) {
-    console.error("Workshop photo upload failed", error);
-    setMessage(error?.message || "Photo upload failed.", "error");
+    console.error("Workshop attachment upload failed", error);
+    setMessage(error?.message || "Attachment upload failed.", "error");
   } finally {
     uploading = false;
     const input = document.getElementById("jobPhotoInput");
