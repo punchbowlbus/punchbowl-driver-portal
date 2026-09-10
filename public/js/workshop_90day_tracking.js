@@ -48,6 +48,14 @@ function dateFromTimestamp(value) {
   return d && !Number.isNaN(d.getTime()) ? localDateString(d) : "";
 }
 
+function is90DayInspection(job) {
+  const key = norm(job?.serviceTemplateKey);
+  const category = norm(job?.serviceType || job?.inspectionType || job?.jobCategory);
+  return /-(90day|rms)$/.test(key)
+    || norm(job?.jobType) === "90 day safety check"
+    || (norm(job?.jobType).includes("safety inspection") && (category.includes("90") || category.includes("rms")));
+}
+
 function daysUntil(dateString) {
   if (!dateString) return null;
   const due = new Date(`${dateString}T00:00:00`);
@@ -316,11 +324,15 @@ function wireFleetEditor() {
 
 async function applyClosed90DayJobs() {
   for (const job of jobs) {
-    if (String(job.jobType || "") !== "90 Day Safety Check" || String(job.status || "") !== "Closed") continue;
+    if (!is90DayInspection(job) || String(job.status || "") !== "Closed") continue;
     const bus = buses.find((b) => b.id === job.busId || norm(fleetNo(b)) === norm(job.fleetNumber));
     if (!bus?.id || bus.last90DaySafetyCheckJobId === job.id) continue;
 
-    const lastDate = dateFromTimestamp(job.closedAt) || localDateString();
+    // New records use the physical inspection completion date. The close date
+    // remains only as a backward-compatible fallback for older job cards.
+    const lastDate = String(job.inspectionCompletedDate || job.jobCard?.inspectionCompletedDate || "").trim()
+      || dateFromTimestamp(job.mechanicCompletedAt || job.completedAt || job.closedAt)
+      || localDateString();
     try {
       await updateDoc(doc(db, "buses", bus.id), {
         last90DaySafetyCheckDate:lastDate,

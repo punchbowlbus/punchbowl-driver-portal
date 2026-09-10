@@ -47,6 +47,29 @@ function addMonths(dateString, months) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
+function addDays(dateString, days) {
+  if (!dateString) return "";
+  const d = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+function dateFromTimestamp(value) {
+  const d = value?.toDate?.() || (value ? new Date(value) : null);
+  return d && !Number.isNaN(d.getTime()) ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}` : "";
+}
+
+function categoryLabel(job) {
+  return job?.serviceType || job?.inspectionType || job?.jobCategory || "";
+}
+
+function is90DayInspection(job) {
+  const key = norm(job?.serviceTemplateKey);
+  const category = norm(categoryLabel(job));
+  return /-(90day|rms)$/.test(key) || (norm(job?.jobType).includes("safety inspection") && (category.includes("90") || category.includes("rms")));
+}
+
 function toast(message, type="success") {
   const status = $("status");
   if (!status) return;
@@ -107,6 +130,10 @@ function ensureDialogs() {
           <label class="full">Fleet Manager comments
             <textarea id="wmManagerComments" placeholder="Approval comments, restrictions or reason for returning to mechanic"></textarea>
           </label>
+          <label id="wmInspectionDateWrap" class="full" hidden>Actual inspection completed date
+            <input id="wmInspectionCompletedDate" type="date" />
+            <span class="wm-inspection-date-note">Only the Fleet Manager can correct this date during review. The next 90-day due date will be calculated from this date.</span>
+          </label>
         </div>
         <div id="wmReviewMessage" class="status"></div>
         <div class="dialog-actions">
@@ -146,8 +173,12 @@ function busForJob(job) {
 function approvalDisplay(job) {
   const card = job.jobCard || {};
   const checklist = card.checklist || {};
+  const evidence = card.checklistEvidence || {};
   const checklistHtml = Object.keys(checklist).length
-    ? Object.entries(checklist).map(([k,v]) => `<div>${esc(k)}: <strong>${esc(v || "—")}</strong></div>`).join("")
+    ? Object.entries(checklist).map(([k,v]) => {
+        const item = evidence[k] || {};
+        return `<div style="padding:8px 0;border-bottom:1px solid #e5e7eb"><strong>${esc(item.item || k)}</strong> · ${esc(v || "—")}${item.action ? `<div class="list-meta">Action: ${esc(item.action)}</div>` : ""}${item.description ? `<div class="list-meta">${esc(item.description)}</div>` : ""}${item.note ? `<div class="list-meta"><strong>Mechanic details:</strong> ${esc(item.note)}</div>` : ""}</div>`;
+      }).join("")
     : "No checklist recorded.";
   const parts = Array.isArray(card.partsUsed) ? card.partsUsed : [];
   const partsHtml = parts.length
@@ -161,6 +192,7 @@ function approvalDisplay(job) {
       <div class="wm-review-box"><div class="wm-review-label">Job type</div><div class="wm-review-value">${esc(job.jobType || "Workshop Job")}</div></div>
       <div class="wm-review-box"><div class="wm-review-label">Mechanic</div><div class="wm-review-value">${esc(job.mechanicName || job.assignedMechanic || "—")}</div></div>
       <div class="wm-review-box"><div class="wm-review-label">Mechanic completed</div><div class="wm-review-value">${esc(fmtDateTime(job.mechanicCompletedAt || job.updatedAt))}</div></div>
+      ${is90DayInspection(job) ? `<div class="wm-review-box"><div class="wm-review-label">Inspection completed date</div><div class="wm-review-value"><strong>${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</strong></div></div><div class="wm-review-box"><div class="wm-review-label">Mechanic sign-off</div><div class="wm-review-value">${esc(job.mechanicInspectionSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.mechanicInspectionSignOff?.employeeNumber ? `(${esc(job.mechanicInspectionSignOff.employeeNumber)})` : ""}</div></div>` : ""}
       <div class="wm-review-box"><div class="wm-review-label">Odometer</div><div class="wm-review-value">${esc(fmtKm(card.currentOdometer ?? job.odometerStart))}</div></div>
       <div class="wm-review-box wm-full"><div class="wm-review-label">Reported fault / work requested</div><div class="wm-review-value">${esc(job.reportedFault || "—")}</div></div>
       <div class="wm-review-box wm-full"><div class="wm-review-label">Diagnosis / findings</div><div class="wm-review-value">${esc(card.diagnosis || job.diagnosis || "—")}</div></div>
@@ -185,6 +217,10 @@ function openReview(jobId) {
   $("wmVehicleStatus").value = bus?.status && ["Active","Restricted","Workshop","Out of Service"].includes(bus.status) ? bus.status : "Active";
   $("wmReturnToService").value = job.jobCard?.safeToReturn === "No" ? "No" : "Yes";
   $("wmManagerComments").value = job.fleetManagerApproval?.comments || "";
+  const inspection = is90DayInspection(job);
+  $("wmInspectionDateWrap").hidden = !inspection;
+  $("wmInspectionCompletedDate").value = job.inspectionCompletedDate || job.jobCard?.inspectionCompletedDate || dateFromTimestamp(job.mechanicCompletedAt || job.completedAt) || todayStr();
+  $("wmInspectionCompletedDate").disabled = job.status !== "Waiting Approval";
   $("wmReviewMessage").className = "status";
   $("wmReviewMessage").textContent = "";
   const waiting = job.status === "Waiting Approval";
@@ -236,10 +272,23 @@ async function approveAndClose() {
   const vehicleStatus = $("wmVehicleStatus").value;
   const comments = $("wmManagerComments").value.trim();
   const card = selectedJob.jobCard || {};
+  const inspection = is90DayInspection(selectedJob);
+  const inspectionDate = inspection ? $("wmInspectionCompletedDate").value : "";
 
   if (returnToService === "Yes" && card.safeToReturn === "No") {
     $("wmReviewMessage").className = "status error";
     $("wmReviewMessage").textContent = "The mechanic marked this vehicle NOT safe to return. Change Return to service to No, or return the Job Card to the mechanic for correction.";
+    return;
+  }
+  if (inspection && !inspectionDate) {
+    $("wmReviewMessage").className = "status error";
+    $("wmReviewMessage").textContent = "Enter the actual date the mechanic completed the inspection.";
+    return;
+  }
+  const recordedInspectionDate = selectedJob.inspectionCompletedDate || selectedJob.jobCard?.inspectionCompletedDate || "";
+  if (inspection && recordedInspectionDate && recordedInspectionDate !== inspectionDate && !comments) {
+    $("wmReviewMessage").className = "status error";
+    $("wmReviewMessage").textContent = "Enter the reason for changing the mechanic's inspection completed date in Fleet Manager comments.";
     return;
   }
 
@@ -280,14 +329,33 @@ async function approveAndClose() {
         approvedAt:serverTimestamp()
       };
 
-      tx.update(jobRef, {
+      const previousInspectionDate = latestJob.inspectionCompletedDate || latestJob.jobCard?.inspectionCompletedDate || "";
+      const inspectionDateAudit = Array.isArray(latestJob.inspectionDateAudit) ? [...latestJob.inspectionDateAudit] : [];
+      if (inspection && previousInspectionDate && previousInspectionDate !== inspectionDate) {
+        inspectionDateAudit.push({
+          previousDate:previousInspectionDate,
+          newDate:inspectionDate,
+          changedByName:auth.currentUser?.displayName || auth.currentUser?.email || "Fleet Manager",
+          changedByEmail:norm(auth.currentUser?.email),
+          changedAt:new Date().toISOString(),
+          reason:comments || "Corrected during Fleet Manager review"
+        });
+      }
+
+      const jobUpdate = {
         status:"Closed",
         fleetManagerApproval:approval,
         returnToServiceApproved:returnToService === "Yes",
         closedByEmail:norm(auth.currentUser?.email),
         closedAt:serverTimestamp(),
         updatedAt:serverTimestamp()
-      });
+      };
+      if (inspection) {
+        jobUpdate.inspectionCompletedDate = inspectionDate;
+        jobUpdate.fleetManagerSignOffDate = todayStr();
+        jobUpdate.inspectionDateAudit = inspectionDateAudit;
+      }
+      tx.update(jobRef, jobUpdate);
 
       if (busRef && busData) {
         const busUpdate = {
@@ -329,6 +397,15 @@ async function approveAndClose() {
           if (intervalMonths > 0) busUpdate.nextServiceDate = addMonths(todayStr(), intervalMonths);
         }
 
+        if (inspection) {
+          busUpdate.last90DaySafetyCheckDate = inspectionDate;
+          busUpdate.next90DaySafetyCheckDate = addDays(inspectionDate, 90);
+          busUpdate.last90DaySafetyCheckJobId = selectedJob.id;
+          busUpdate.last90DaySafetyCheckJobNumber = selectedJob.jobNumber || "";
+          busUpdate.safety90TrackingUpdatedAt = serverTimestamp();
+          busUpdate.safety90TrackingUpdatedBy = norm(auth.currentUser?.email);
+        }
+
         tx.update(busRef, busUpdate);
       }
     });
@@ -349,6 +426,7 @@ function printJobCard(job) {
   const approval = job.fleetManagerApproval || {};
   const parts = Array.isArray(card.partsUsed) ? card.partsUsed : [];
   const checklist = card.checklist || {};
+  const evidence = card.checklistEvidence || {};
   const html = `<!doctype html><html><head><title>${esc(job.jobNumber || "Job Card")}</title><style>
     body{font-family:Arial,sans-serif;color:#111;margin:28px;font-size:13px} h1,h2{margin:0 0 8px} .head{border-bottom:3px solid #c92026;padding-bottom:12px;margin-bottom:18px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.box{border:1px solid #bbb;padding:10px}.full{grid-column:1/-1}.label{font-size:10px;font-weight:bold;text-transform:uppercase;color:#555;margin-bottom:4px} table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border:1px solid #bbb;padding:7px;text-align:left}.approval{margin-top:18px;border:2px solid #111;padding:12px}@media print{button{display:none}}</style></head><body>
     <div class="head"><h1>PUNCHBOWL BUS COMPANY</h1><h2>WORKSHOP JOB CARD</h2></div>
@@ -357,6 +435,7 @@ function printJobCard(job) {
       <div class="box"><div class="label">Fleet / Rego</div><strong>${esc(job.fleetNumber || "—")}</strong> ${job.rego ? `· ${esc(job.rego)}` : ""}</div>
       <div class="box"><div class="label">Job Type</div>${esc(job.jobType || "—")}</div>
       <div class="box"><div class="label">Mechanic</div>${esc(job.mechanicName || job.assignedMechanic || "—")}</div>
+      ${is90DayInspection(job) ? `<div class="box"><div class="label">Inspection Completed Date</div>${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div><div class="box"><div class="label">Mechanic Inspection Sign-off</div>${esc(job.mechanicInspectionSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.mechanicInspectionSignOff?.employeeNumber ? `(${esc(job.mechanicInspectionSignOff.employeeNumber)})` : ""}</div>` : ""}
       <div class="box full"><div class="label">Reported Fault / Requested Work</div>${esc(job.reportedFault || "—")}</div>
       <div class="box full"><div class="label">Diagnosis / Findings</div>${esc(card.diagnosis || "—")}</div>
       <div class="box full"><div class="label">Work Completed</div>${esc(card.workCompleted || "—")}</div>
@@ -369,8 +448,8 @@ function printJobCard(job) {
     <h2 style="margin-top:18px">Parts Used</h2>
     <table><thead><tr><th>Part No.</th><th>Description</th><th>Qty</th><th>Supplier / Ref</th></tr></thead><tbody>${parts.length ? parts.map((p)=>`<tr><td>${esc(p.partNumber||"")}</td><td>${esc(p.description||"")}</td><td>${esc(p.quantity??"")}</td><td>${esc(p.supplierRef||"")}</td></tr>`).join("") : `<tr><td colspan="4">No parts recorded</td></tr>`}</tbody></table>
     <h2 style="margin-top:18px">Checklist</h2>
-    <table><tbody>${Object.keys(checklist).length ? Object.entries(checklist).map(([k,v])=>`<tr><td>${esc(k)}</td><td>${esc(v||"—")}</td></tr>`).join("") : `<tr><td>No checklist recorded</td></tr>`}</tbody></table>
-    <div class="approval"><h2>Fleet Manager Approval</h2><div><strong>Status:</strong> ${esc(job.status || "—")}</div><div><strong>Approved by:</strong> ${esc(approval.approvedByName || approval.approvedByEmail || "Not yet approved")}</div><div><strong>Approved:</strong> ${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div><div><strong>Return to service:</strong> ${approval.returnToService === true ? "YES" : approval.returnToService === false ? "NO" : "—"}</div><div><strong>Comments:</strong> ${esc(approval.comments || "—")}</div></div>
+    <table><thead><tr><th>Inspection item</th><th>Action / Description of Work</th><th>Result / Details</th></tr></thead><tbody>${Object.keys(checklist).length ? Object.entries(checklist).map(([k,v])=>{const item=evidence[k]||{};return `<tr><td>${esc(item.item||k)}</td><td><strong>${esc(item.action||"—")}</strong><br>${esc(item.description||"")}</td><td><strong>${esc(v||"—")}</strong>${item.note?`<br>${esc(item.note)}`:""}</td></tr>`;}).join("") : `<tr><td colspan="3">No checklist recorded</td></tr>`}</tbody></table>
+    <div class="approval"><h2>Fleet Manager Approval</h2><div><strong>Status:</strong> ${esc(job.status || "—")}</div><div><strong>Approved by:</strong> ${esc(approval.approvedByName || approval.approvedByEmail || "Not yet approved")}</div><div><strong>Approval date/time:</strong> ${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div>${is90DayInspection(job)?`<div><strong>Inspection date used for next due calculation:</strong> ${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div>`:""}<div><strong>Return to service:</strong> ${approval.returnToService === true ? "YES" : approval.returnToService === false ? "NO" : "—"}</div><div><strong>Comments:</strong> ${esc(approval.comments || "—")}</div></div>
     <script>window.onload=()=>window.print();</script></body></html>`;
   const w = window.open("", "_blank", "noopener,noreferrer");
   if (!w) return toast("Pop-up blocked. Allow pop-ups to print the Job Card.", "error");

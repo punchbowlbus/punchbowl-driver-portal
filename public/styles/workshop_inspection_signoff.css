@@ -1,0 +1,7 @@
+.check-description{margin-top:5px;color:#344054;font-size:12px;line-height:1.45;max-width:760px}
+.check-response{display:grid;gap:7px}
+.check-result-note{width:100%;min-width:280px;border:1px solid #ef9a9a;border-radius:8px;padding:8px 10px;background:#fffafa}
+.inspection-declaration{display:flex!important;grid-column:1/-1;align-items:flex-start;gap:10px!important;padding:12px;border:1px solid #d9e1ea;border-radius:10px;background:#f8fafc}
+.inspection-declaration input{width:auto!important;min-height:0!important;margin-top:2px}
+.wm-inspection-date-note{margin-top:6px;color:#667085;font-size:11px;line-height:1.4}
+@media(max-width:600px){.check-result-note{min-width:0}}

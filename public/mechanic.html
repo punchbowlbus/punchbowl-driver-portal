@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="./icons/icon-192.png" />
   <link rel="stylesheet" href="./styles/workshop.css" />
   <link rel="stylesheet" href="./styles/mechanic.css" />
+  <link rel="stylesheet" href="./styles/workshop_inspection_signoff.css?v=20260910" />
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
   <style>
     .mechanic-defect-actions{display:flex;justify-content:flex-end;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
@@ -140,6 +141,19 @@
           </section>
         </div>
 
+        <section id="inspectionSignoffSection" class="panel jobcard-section" hidden>
+          <div class="panel-head">
+            <div>
+              <h2>90-Day Inspection Completion</h2>
+              <span class="hint">Record the date the physical inspection was completed. The next due date is calculated from this date, not the later Fleet Manager approval date.</span>
+            </div>
+          </div>
+          <div class="form-grid">
+            <label>Inspection completed date<input id="inspectionCompletedDate" type="date" /></label>
+            <label class="full inspection-declaration"><input id="mechanicInspectionDeclaration" type="checkbox" /> I confirm that I completed all mandatory inspection items and recorded the results accurately.</label>
+          </div>
+        </section>
+
         <section class="panel jobcard-section">
           <div class="panel-head"><h2>Parts Used</h2><button id="addPartBtn" class="button secondary" type="button">Add Part</button></div>
           <div class="table-wrap"><table><thead><tr><th>Part No.</th><th>Description</th><th>Qty</th><th>Supplier / Ref</th><th></th></tr></thead><tbody id="partsBody"></tbody></table></div>
@@ -174,7 +188,7 @@
     </section>
   </main>
 
-  <script type="module" src="./js/mechanic_work_queue.js?v=20260908-readable-job-table"></script>
+  <script type="module" src="./js/mechanic_work_queue.js?v=20260910-inspection-signoff"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
   <script type="module" src="./js/mechanic_driver_defects_today.js?v=20260908-self-assign-defect"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>

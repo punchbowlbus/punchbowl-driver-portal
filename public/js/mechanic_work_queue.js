@@ -24,7 +24,7 @@ const els = {
   queueView: $("queueView"), jobCardView: $("jobCardView"), mechanicIdentity: $("mechanicIdentity"), refreshBtn: $("refreshBtn"), statusFilter: $("statusFilter"), jobQueue: $("jobQueue"),
   metricAssigned: $("metricAssigned"), metricProgress: $("metricProgress"), metricUrgent: $("metricUrgent"), metricApproval: $("metricApproval"),
   backToQueueBtn: $("backToQueueBtn"), jobCardStatusBadge: $("jobCardStatusBadge"), jobCardTitle: $("jobCardTitle"), jobCardVehicle: $("jobCardVehicle"), jobCardMeta: $("jobCardMeta"), readonlyJobDetails: $("readonlyJobDetails"),
-  jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
+  jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), inspectionSignoffSection: $("inspectionSignoffSection"), inspectionCompletedDate: $("inspectionCompletedDate"), mechanicInspectionDeclaration: $("mechanicInspectionDeclaration"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
 };
 
 let currentUser = null;
@@ -56,6 +56,7 @@ function fmtDate(v) {
 }
 function showStatus(message, type="success") { els.status.className = `status ${type}`; els.status.textContent = message; }
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
+function localDateString(date = new Date()) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`; }
 
 const CHECKLISTS = {
   "Defect Repair": ["Reported fault confirmed","Root cause identified","Repair completed","Related components checked","Fault cleared / retested","Road test where required"],
@@ -144,21 +145,31 @@ function legacyTemplateKey(job) {
 }
 
 function requirementData(job) {
+  const templateKey = legacyTemplateKey(job);
+  const template = getRequirementTemplate(templateKey);
   if (Array.isArray(job.assignedChecklist?.items) && job.assignedChecklist.items.length) {
+    const currentItems = new Map((template?.items || []).map((item) => [String(item.id), item]));
     return {
       title: job.assignedChecklist.templateTitle || `${categoryLabel(job) || job.jobType} Checklist`,
       source: job.assignedChecklist.templateSource || "Assigned workshop checklist",
       schedule: job.assignedChecklist.schedule || "",
-      items: job.assignedChecklist.items
+      items: job.assignedChecklist.items.map((item) => {
+        const current = currentItems.get(String(item.id)) || {};
+        return { ...current, ...item, description:item.description || current.description || "", mandatory:item.mandatory ?? current.mandatory ?? true };
+      })
     };
   }
-  const templateKey = legacyTemplateKey(job);
-  const template = getRequirementTemplate(templateKey);
   if (!template) return null;
   if (!job.serviceTemplateKey && String(job.jobType || "").trim().toLowerCase() === "safety inspection") {
     return { ...template, source: `${template.source} · legacy Safety Inspection job matched from vehicle type` };
   }
   return template;
+}
+
+function is90DayInspection(job) {
+  const key = legacyTemplateKey(job);
+  const category = normalize(categoryLabel(job));
+  return /-(90day|rms)$/.test(key) || (normalize(job.jobType).includes("safety inspection") && (category.includes("90") || category.includes("rms")));
 }
 
 function savedChecklistValue(saved, key, item) {
@@ -182,17 +193,21 @@ function renderRequirementChecklist(job, requirement) {
     <details class="requirement-group" ${groupIndex < 2 ? "open" : ""} style="border:1px solid #e4e7ec;border-radius:10px;margin:0 0 10px;overflow:hidden">
       <summary style="cursor:pointer;padding:12px 14px;font-weight:800;background:#f8fafc">${esc(section)} <span class="hint">(${items.length})</span></summary>
       <div style="padding:4px 12px 10px">
-        ${items.map(({id,item,action,index}) => {
+        ${items.map(({id,item,action,description,mandatory,index}) => {
           const key = String(id || `${job.serviceTemplateKey || job.jobType}-${index + 1}`);
           const current = savedChecklistValue(saved, key, item);
+          const note = job.jobCard?.checklistNotes?.[key] || "";
           return `<div class="check-row" style="align-items:center">
-            <label for="check_${index}"><strong>${esc(item)}</strong>${action ? `<div class="list-meta">Action: ${esc(action)}</div>` : ""}</label>
-            <select id="check_${index}" data-check-key="${esc(key)}" data-check-item="${esc(item)}" data-required-work="1">
+            <label for="check_${index}"><strong>${esc(item)}</strong>${action ? `<div class="list-meta"><strong>Action:</strong> ${esc(action)}</div>` : ""}${description ? `<div class="check-description">${esc(description)}</div>` : ""}</label>
+            <div class="check-response">
+            <select id="check_${index}" data-check-key="${esc(key)}" data-check-item="${esc(item)}" data-check-action="${esc(action || "")}" data-check-description="${esc(description || "")}" ${mandatory === false ? "" : 'data-required-work="1"'}>
               <option value="">Select result</option>
               <option value="Pass" ${current === "Pass" ? "selected" : ""}>Completed / Pass</option>
               <option value="Attention" ${current === "Attention" ? "selected" : ""}>Attention required</option>
               <option value="N/A" ${current === "N/A" ? "selected" : ""}>N/A</option>
             </select>
+            <input class="check-result-note" data-check-note="${esc(key)}" value="${esc(note)}" placeholder="Reason/details required for Attention or N/A" ${current === "Attention" || current === "N/A" ? "" : "hidden"} />
+            </div>
           </div>`;
         }).join("")}
       </div>
@@ -246,6 +261,10 @@ function openJob(id) {
   els.labourFinish.value = job.jobCard?.labourFinish || "";
   els.mechanicNotes.value = job.jobCard?.mechanicNotes || "";
   renderChecklist(job);
+  const inspection = is90DayInspection(job);
+  els.inspectionSignoffSection.hidden = !inspection;
+  els.inspectionCompletedDate.value = job.inspectionCompletedDate || job.jobCard?.inspectionCompletedDate || localDateString();
+  els.mechanicInspectionDeclaration.checked = job.jobCard?.mechanicInspectionDeclaration === true;
   renderParts(job.jobCard?.partsUsed || []);
   const locked = ["Completed","Closed","Waiting Approval"].includes(job.status);
   els.jobCardForm.classList.toggle("jobcard-locked", locked);
@@ -253,13 +272,23 @@ function openJob(id) {
   els.waitingPartsBtn.disabled = locked;
   els.saveProgressBtn.disabled = locked;
   els.completeJobBtn.disabled = locked;
+  els.inspectionCompletedDate.disabled = locked;
+  els.mechanicInspectionDeclaration.disabled = locked;
   window.scrollTo({top:0,behavior:"smooth"});
 }
 window.openMechanicJobCard = openJob;
 
 function collectJobCard() {
   const checklist = {};
-  els.jobChecklist.querySelectorAll("[data-check-key]").forEach((el) => { checklist[el.dataset.checkKey] = el.value; });
+  const checklistNotes = {};
+  const checklistEvidence = {};
+  els.jobChecklist.querySelectorAll("[data-check-key]").forEach((el) => {
+    const key = el.dataset.checkKey;
+    const note = els.jobChecklist.querySelector(`[data-check-note="${CSS.escape(key)}"]`)?.value.trim() || "";
+    checklist[key] = el.value;
+    if (note) checklistNotes[key] = note;
+    checklistEvidence[key] = { item:el.dataset.checkItem || key, action:el.dataset.checkAction || "", description:el.dataset.checkDescription || "", result:el.value, note };
+  });
   const partsUsed = [...els.partsBody.querySelectorAll("tr")].map((tr) => ({
     partNumber: tr.querySelector(".part-number")?.value.trim() || "",
     description: tr.querySelector(".part-description")?.value.trim() || "",
@@ -275,10 +304,14 @@ function collectJobCard() {
     furtherWorkRequired: els.furtherWorkRequired.value,
     safeToReturn: els.safeToReturn.value,
     checklist,
+    checklistNotes,
+    checklistEvidence,
     partsUsed,
     labourStart: els.labourStart.value,
     labourFinish: els.labourFinish.value,
-    mechanicNotes: els.mechanicNotes.value.trim()
+    mechanicNotes: els.mechanicNotes.value.trim(),
+    inspectionCompletedDate:els.inspectionCompletedDate?.value || "",
+    mechanicInspectionDeclaration:els.mechanicInspectionDeclaration?.checked === true
   };
 }
 
@@ -294,10 +327,27 @@ async function saveJobCard(status, message) {
     const required = [...els.jobChecklist.querySelectorAll("[data-required-work='1']")];
     const incomplete = required.filter((el) => !el.value);
     if (incomplete.length) return showStatus(`Complete all service / inspection requirements before sending for approval. ${incomplete.length} item${incomplete.length === 1 ? " is" : "s are"} still unanswered.`, "error");
+    const missingNotes = required.filter((el) => ["Attention","N/A"].includes(el.value) && !card.checklistNotes[el.dataset.checkKey]);
+    if (missingNotes.length) return showStatus(`Enter a reason or details for every Attention required or N/A result. ${missingNotes.length} item${missingNotes.length === 1 ? " needs" : "s need"} details.`, "error");
+    if (is90DayInspection(selectedJob) && !card.inspectionCompletedDate) return showStatus("Enter the date the 90-day inspection was completed.", "error");
+    if (is90DayInspection(selectedJob) && !card.mechanicInspectionDeclaration) return showStatus("Confirm the mechanic inspection declaration before sending for approval.", "error");
   }
   const payload = { jobCard: card, status, updatedAt: serverTimestamp(), updatedByEmail: normalize(currentUser?.email) };
   if (status === "In Progress" && !selectedJob.startedAt) payload.startedAt = serverTimestamp();
-  if (status === "Waiting Approval") { payload.completedAt = serverTimestamp(); payload.completedByEmail = normalize(currentUser?.email); }
+  if (status === "Waiting Approval") {
+    payload.completedAt = serverTimestamp();
+    payload.mechanicCompletedAt = serverTimestamp();
+    payload.completedByEmail = normalize(currentUser?.email);
+    if (is90DayInspection(selectedJob)) {
+      payload.inspectionCompletedDate = card.inspectionCompletedDate;
+      payload.mechanicInspectionSignOff = {
+        name:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Mechanic",
+        employeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
+        email:normalize(currentUser?.email),
+        signedAt:serverTimestamp()
+      };
+    }
+  }
   try { await updateDoc(doc(db, "workshopJobs", selectedJob.id), payload); showStatus(message); }
   catch (err) { showStatus(err?.message || "Unable to update workshop job.", "error"); }
 }
@@ -327,6 +377,14 @@ els.statusFilter.addEventListener("change", renderQueue);
 els.refreshBtn.addEventListener("click", () => renderQueue());
 els.backToQueueBtn.addEventListener("click", () => { selectedJob = null; els.jobCardView.hidden = true; els.queueView.hidden = false; clearStatus(); });
 els.addPartBtn.addEventListener("click", () => partRow());
+els.jobChecklist.addEventListener("change", (event) => {
+  const select = event.target.closest?.("select[data-check-key]");
+  if (!select) return;
+  const note = els.jobChecklist.querySelector(`[data-check-note="${CSS.escape(select.dataset.checkKey)}"]`);
+  if (!note) return;
+  note.hidden = !["Attention","N/A"].includes(select.value);
+  if (note.hidden) note.value = "";
+});
 els.startJobBtn.addEventListener("click", () => saveJobCard("In Progress", "Workshop job started."));
 els.waitingPartsBtn.addEventListener("click", () => saveJobCard("Waiting Parts", "Workshop job marked as waiting for parts."));
 els.saveProgressBtn.addEventListener("click", () => saveJobCard(selectedJob?.status === "Assigned" ? "In Progress" : (selectedJob?.status || "In Progress"), "Job card progress saved."));
