@@ -5465,3 +5465,18 @@ body.dispatch-board-fullscreen { overflow: hidden; }
 .collision-admin-section{border-left:4px solid #c9232d}.collision-admin-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.collision-admin-title h4,.collision-admin-title p{margin:0}.collision-admin-title p{color:#69748a;font-size:12px;margin-top:4px}.collision-admin-title>span{border-radius:999px;background:#fff0f1;color:#a91f27;padding:6px 10px;font-weight:800;font-size:12px}
 .collision-admin-actions{display:flex;flex-wrap:wrap;gap:9px;margin-top:14px}.collision-pdf-note{display:block;color:#69748a;margin-top:9px}
 @media(max-width:720px){.collision-overlay{padding:0}.collision-dialog{border-radius:0;padding:12px;min-height:100vh}.collision-claim-head{position:sticky;top:0;z-index:2}.collision-claim-head p{font-size:12px}.collision-progress{font-size:11px}.collision-actions{display:grid;grid-template-columns:1fr 1fr}.collision-actions .btn{justify-content:center}}
+
+.charter-leg-estimate { display: block; font-size: 9px; line-height: 1.2; color: var(--charter-muted, #64748b); margin-top: 4px; white-space: normal; }
+
+
+/* -- Multiple Journeys Generator -- */
+.charter-generator-box { border: 1px solid var(--charter-line); border-radius: 12px; padding: 14px; background: #fbfcfe; margin-bottom: 16px; }
+.charter-days-section { margin-top: 12px; }
+.charter-days-section > span { display: block; font-size: 10px; font-weight: 700; color: var(--charter-ink); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.charter-days-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+.charter-days-grid label { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--charter-line); border-radius: 8px; background: #fff; cursor: pointer; transition: all 0.15s ease; font-size: 11px; font-weight: 600; color: var(--charter-muted); }
+.charter-days-grid label:hover { border-color: #cbd5e1; background: #f8fafc; }
+.charter-days-grid input:checked + span { color: var(--charter-ink); }
+.charter-days-grid label:has(input:checked) { border-color: var(--charter-red); background: #fee7e8; }
+.charter-days-grid input { margin: 0; cursor: pointer; }
+

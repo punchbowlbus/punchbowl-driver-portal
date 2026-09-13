@@ -22,16 +22,18 @@ import {
   attachAutocomplete,
   detachAllAutocomplete,
   calculateRoute,
+  calculateLegDuration,
   getRouteResult,
   isMapReady,
   getStaticMapUrl,
-  onMapClick
+  onMapClick,
+  clearMapRoute
 } from "./charter_map.js";
 import { generateQuotationPDF, renderPdfPreview, downloadPdf } from "./charter_pdf.js?v=3";
 import { go } from "./main.js";
 
 const BOOKING_STATUSES = ["Draft", "Quoted", "Sent", "Confirmed", "Operational", "Completed", "Cancelled"];
-const JOURNEY_TYPES = ["One Way", "Forward + Return", "Multi-stop", "Multiple Journeys"];
+const JOURNEY_TYPES = ["One Way", "Forward + Return", "Multiple Journeys"];
 const VEHICLE_TYPES = ["To be recommended", "Mini Bus", "Standard Bus", "Coach", "Accessible Vehicle", "Multiple Vehicle Types"];
 
 let bookings = [];
@@ -47,8 +49,17 @@ let currentPdfBlob = null;
 let historyUnsubscribe = null;
 let focusedStopRowId = null; // Track which stop input is focused for map click
 
+// Smart Time Engine — tracks which arrival fields the user manually edited
+const userOverriddenArrivals = new Set();
+// Leg duration cache keyed by "stopRowId" → { durationMinutes, distanceKm }
+const legEstimates = new Map();
+// Multiple Journeys data
+let multipleJourneys = [];
+let journeySequence = 0;
+
 // Geocoded data stored per stop (keyed by stop row ID)
 const stopGeoData = new Map();
+let returnStopsManuallyEdited = false;
 
 const byId = (id) => document.getElementById(id);
 const value = (id) => String(byId(id)?.value || "").trim();
@@ -176,8 +187,8 @@ function organisationOptions(selectedId = "") {
   return `<option value="">Select customer</option>${organisations.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === selectedId ? "selected" : ""}>${escapeHtml(item.name || "Unnamed customer")}</option>`).join("")}`;
 }
 
-function stopRow(stop = {}, index = 0) {
-  const rowId = stop.id || `stop_${++stopSequence}`;
+function stopRow(stop = {}, index = 0, prefix = "") {
+  const rowId = stop.id || `${prefix}stop_${++stopSequence}`;
   // Store geo data if the stop already has coordinates
   if (stop.latitude && stop.longitude) {
     stopGeoData.set(rowId, {
@@ -192,36 +203,41 @@ function stopRow(stop = {}, index = 0) {
     <label class="charter-stop-type"><span>Stop type</span><select class="charterStopType"><option ${stop.type === "Pickup" ? "selected" : ""}>Pickup</option><option ${stop.type === "Drop-off" ? "selected" : ""}>Drop-off</option><option ${stop.type === "Stop" ? "selected" : ""}>Stop</option><option ${stop.type === "Depot" ? "selected" : ""}>Depot</option></select></label>
     <label class="charter-stop-location"><span>Location</span><input class="charterStopLocation" value="${escapeHtml(stop.name || "")}" placeholder="Search address, venue or point of interest" /></label>
     <label><span>Arrive</span><input class="charterStopArrival" type="time" value="${escapeHtml(stop.arrivalTime || "")}" /></label>
-    <label><span>Buffer</span><input class="charterStopBuffer" type="number" min="0" step="5" value="${escapeHtml(String(stop.bufferMinutes || 0))}" /></label>
+    <label><span>Buffer (min)</span><input class="charterStopBuffer" type="number" min="0" step="5" value="${escapeHtml(String(stop.bufferMinutes || 0))}" /></label>
     <button type="button" class="btn danger charter-stop-remove" title="Remove stop"><i data-lucide="trash-2"></i><span>Remove</span></button>
   </div>`;
 }
 
-function renderStops(stops = []) {
+function renderStops(stops = [], prefix = "", containerId = "charterStops") {
+  const container = byId(containerId);
+  if (!container) return;
   const list = stops.length ? stops : [
     {type: "Pickup", departureTime: ""},
     {type: "Drop-off", arrivalTime: ""}
   ];
-  byId("charterStops").innerHTML = list.map(stopRow).join("");
-  rewireStops();
+  container.innerHTML = list.map((s, i) => stopRow(s, i, prefix)).join("");
+  rewireStops(containerId);
 }
 
-function rewireStops() {
-  const rows = [...byId("charterStops").querySelectorAll("[data-stop-row]")];
+function rewireStops(containerId = "charterStops") {
+  const container = byId(containerId);
+  if (!container) return;
+  const rows = [...container.querySelectorAll("[data-stop-row]")];
   rows.forEach((row, index) => {
     row.querySelector(".charter-stop-number").textContent = String(index + 1);
     const remove = row.querySelector(".charter-stop-remove");
     remove.disabled = rows.length <= 2;
     remove.onclick = () => {
-      if (byId("charterStops").querySelectorAll("[data-stop-row]").length <= 2) return showPageMessage("A journey requires at least a pickup and destination.", "error");
+      if (container.querySelectorAll("[data-stop-row]").length <= 2) return showPageMessage("A journey requires at least a pickup and destination.", "error");
       const rowId = row.dataset.stopRow;
       stopGeoData.delete(rowId);
+      legEstimates.delete(rowId);
       row.remove();
-      rewireStops();
+      rewireStops(containerId);
       updateJourneySummary();
       triggerRouteCalculation();
+      if (containerId === "charterStopsFwd" && !returnStopsManuallyEdited) autoMirrorReturnStops();
     };
-    row.querySelectorAll("input, select").forEach((input) => input.addEventListener("input", updateJourneySummary));
 
     // Track focused stop for map click-to-pin
     const locationInput = row.querySelector(".charterStopLocation");
@@ -235,15 +251,123 @@ function rewireStops() {
           stopGeoData.set(stopRowId, placeData);
           updateJourneySummary();
           triggerRouteCalculation();
+          autoCalculateArrivalTimes(containerId);
+          if (containerId === "charterStopsFwd" && !returnStopsManuallyEdited) autoMirrorReturnStops();
         });
       }
     }
+
+    // Track user manual override of arrival times
+    const arrivalInput = row.querySelector(".charterStopArrival");
+    if (arrivalInput) {
+      arrivalInput.addEventListener("input", () => {
+        userOverriddenArrivals.add(row.dataset.stopRow);
+        autoCalculateArrivalTimes(containerId);
+      });
+    }
+
+    // Buffer change triggers recalculation
+    const bufferInput = row.querySelector(".charterStopBuffer");
+    if (bufferInput) {
+      bufferInput.addEventListener("input", () => {
+        autoCalculateArrivalTimes(containerId);
+        updateJourneySummary();
+      });
+    }
+
+    row.querySelectorAll("input, select").forEach((input) => input.addEventListener("input", (e) => {
+      updateJourneySummary();
+      if (containerId === "charterReturnStops" && !e.target.classList.contains("charterStopArrival")) {
+        returnStopsManuallyEdited = true;
+      }
+      if (containerId === "charterStopsFwd" && !returnStopsManuallyEdited && !e.target.classList.contains("charterStopArrival")) {
+        autoMirrorReturnStops();
+      }
+    }));
   });
   window.lucide?.createIcons?.();
 }
 
-function collectStops() {
-  return [...byId("charterStops").querySelectorAll("[data-stop-row]")].map((row, index) => {
+/* =========================================================
+   Smart Time Engine — auto-calculate arrival times
+========================================================= */
+let smartTimeDebounce = null;
+
+function autoCalculateArrivalTimes(containerId = "charterStops") {
+  clearTimeout(smartTimeDebounce);
+  smartTimeDebounce = setTimeout(() => _doAutoCalculate(containerId), 300);
+}
+
+async function _doAutoCalculate(containerId) {
+  const container = byId(containerId);
+  if (!container || !isMapReady()) return;
+
+  const rows = [...container.querySelectorAll("[data-stop-row]")];
+  if (rows.length < 2) return;
+
+  for (let i = 1; i < rows.length; i++) {
+    const prevRow = rows[i - 1];
+    const currRow = rows[i];
+    const prevRowId = prevRow.dataset.stopRow;
+    const currRowId = currRow.dataset.stopRow;
+
+    // Skip if user manually overrode this arrival
+    if (userOverriddenArrivals.has(currRowId)) continue;
+
+    const prevGeo = stopGeoData.get(prevRowId);
+    const currGeo = stopGeoData.get(currRowId);
+    if (!prevGeo?.latitude || !currGeo?.latitude) continue;
+
+    const prevArrival = prevRow.querySelector(".charterStopArrival")?.value || "";
+    const prevBuffer = Number(prevRow.querySelector(".charterStopBuffer")?.value || 0);
+
+    if (!prevArrival) continue;
+
+    // Calculate departure from previous stop
+    const prevArrivalMin = timeStrToMinutes(prevArrival);
+    if (prevArrivalMin === null) continue;
+    const departureMin = prevArrivalMin + prevBuffer;
+
+    try {
+      const leg = await calculateLegDuration(
+        { lat: prevGeo.latitude, lng: prevGeo.longitude },
+        { lat: currGeo.latitude, lng: currGeo.longitude }
+      );
+      if (!leg) continue;
+
+      legEstimates.set(currRowId, leg);
+
+      const arrivalMin = departureMin + leg.durationMinutes;
+      const arrivalInput = currRow.querySelector(".charterStopArrival");
+      if (arrivalInput) {
+        arrivalInput.value = minutesToTimeStr(arrivalMin);
+      }
+    } catch (err) {
+      console.warn("Leg estimate failed:", err);
+    }
+  }
+}
+
+function timeStrToMinutes(timeStr) {
+  if (!timeStr) return null;
+  const p = String(timeStr).trim().split(":");
+  if (p.length < 2) return null;
+  return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+}
+
+function minutesToTimeStr(totalMin) {
+  const h = Math.floor(totalMin / 60) % 24;
+  const m = totalMin % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/* =========================================================
+   Data collection — stops and journeys
+========================================================= */
+function collectStopsFrom(containerId = "charterStops") {
+  const container = byId(containerId);
+  if (!container) return [];
+  return [...container.querySelectorAll("[data-stop-row]")].map((row, index) => {
     const rowId = row.dataset.stopRow;
     const geo = stopGeoData.get(rowId) || {};
     return {
@@ -260,6 +384,62 @@ function collectStops() {
   });
 }
 
+function collectStops() { return collectStopsFrom("charterStops"); }
+function collectReturnStops() { return collectStopsFrom("charterReturnStops"); }
+
+
+
+function renderReturnStops(stops = []) {
+  const container = byId("charterReturnStops");
+  if (!container) return;
+  const list = stops.length ? stops : [{type: "Drop-off"}, {type: "Pickup"}];
+  container.innerHTML = list.map((s, i) => stopRow(s, i, "ret_")).join("");
+  rewireStops("charterReturnStops");
+}
+
+function wireGenerator() {
+  if (isMapReady()) {
+    const pickupInput = byId("mjGenPickup");
+    const dropoffInput = byId("mjGenDropoff");
+    if (pickupInput) {
+      attachAutocomplete(pickupInput, (pd) => {
+        stopGeoData.set("mj_gen_pickup", pd);
+        triggerRouteCalculation();
+        updateJourneySummary();
+      });
+      pickupInput.addEventListener("focus", () => { focusedStopRowId = "mj_gen_pickup"; });
+    }
+    if (dropoffInput) {
+      attachAutocomplete(dropoffInput, (pd) => {
+        stopGeoData.set("mj_gen_dropoff", pd);
+        triggerRouteCalculation();
+        updateJourneySummary();
+      });
+      dropoffInput.addEventListener("focus", () => { focusedStopRowId = "mj_gen_dropoff"; });
+    }
+  }
+}
+
+function renderMultipleJourneys(config = null) {
+  if (!config) return;
+  if (byId("mjGenStart")) byId("mjGenStart").value = config.startDate || "";
+  if (byId("mjGenEnd")) byId("mjGenEnd").value = config.endDate || "";
+  if (byId("mjGenType")) byId("mjGenType").value = config.recurringType || "Weekly";
+  if (byId("mjGenStartTime")) byId("mjGenStartTime").value = config.startTime || "";
+  if (byId("mjGenPickup")) byId("mjGenPickup").value = config.pickup || "";
+  if (byId("mjGenDropoff")) byId("mjGenDropoff").value = config.dropoff || "";
+  
+  if (config.pickupGeo) stopGeoData.set("mj_gen_pickup", config.pickupGeo);
+  if (config.dropoffGeo) stopGeoData.set("mj_gen_dropoff", config.dropoffGeo);
+
+  const days = config.days || [];
+  document.querySelectorAll(".mjGenDay").forEach(cb => {
+    cb.checked = days.includes(parseInt(cb.value, 10));
+  });
+}
+
+
+
 function calculatePricing() {
   const base = numberValue("charterBaseCharge");
   const distance = numberValue("charterDistanceCharge");
@@ -275,9 +455,26 @@ function calculatePricing() {
 }
 
 function triggerRouteCalculation() {
-  const stops = collectStops();
+  const jt = value("charterJourneyType") || "One Way";
+  
+  let stops = [];
+  let summaryId = "charterRouteSummary";
+  if (jt === "Multiple Journeys") {
+    summaryId = "charterRouteSummaryMJ";
+    const pGeo = stopGeoData.get("mj_gen_pickup");
+    const dGeo = stopGeoData.get("mj_gen_dropoff");
+    if (pGeo && pGeo.latitude) stops.push({name: value("mjGenPickup") || pGeo.name, latitude: pGeo.latitude, longitude: pGeo.longitude, placeId: pGeo.placeId});
+    if (dGeo && dGeo.latitude) stops.push({name: value("mjGenDropoff") || dGeo.name, latitude: dGeo.latitude, longitude: dGeo.longitude, placeId: dGeo.placeId});
+  } else if (jt === "Forward + Return") {
+    summaryId = "charterRouteSummaryFR";
+    stops = collectStopsFrom("charterStopsFwd");
+  } else {
+    summaryId = "charterRouteSummary";
+    stops = collectStopsFrom("charterStops");
+  }
+
   calculateRoute(stops, (result, error) => {
-    const summaryEl = byId("charterRouteSummary");
+    const summaryEl = byId(summaryId);
     if (!summaryEl) return;
     if (error) {
       summaryEl.innerHTML = `<strong>${escapeHtml(stops.filter((s) => s.name).map((s) => s.name).join(" → ") || "Route pending")}</strong><span>${stops.length} stops · ${escapeHtml(error)}</span>`;
@@ -288,13 +485,33 @@ function triggerRouteCalculation() {
 }
 
 function updateJourneySummary() {
-  const stops = collectStops();
+  const jt = value("charterJourneyType") || "One Way";
+
+  let stops = [];
+  let summaryId = "charterRouteSummary";
+  if (jt === "Multiple Journeys") {
+    summaryId = "charterRouteSummaryMJ";
+    const pGeo = stopGeoData.get("mj_gen_pickup");
+    const dGeo = stopGeoData.get("mj_gen_dropoff");
+    if (pGeo && pGeo.latitude) stops.push({name: value("mjGenPickup") || pGeo.name});
+    if (dGeo && dGeo.latitude) stops.push({name: value("mjGenDropoff") || dGeo.name});
+  } else if (jt === "Forward + Return") {
+    summaryId = "charterRouteSummaryFR";
+    stops = collectStopsFrom("charterStopsFwd");
+  } else {
+    summaryId = "charterRouteSummary";
+    stops = collectStopsFrom("charterStops");
+  }
+  
+  const summaryEl = byId(summaryId);
+  if (!summaryEl) return;
+
   const named = stops.filter((item) => item.name);
   const start = named[0]?.name || "Pickup pending";
   const end = named[named.length - 1]?.name || "Destination pending";
   const route = getRouteResult();
   const routeInfo = route ? `${route.distanceKm} km · ~${route.durationMinutes} min` : "Route calculation pending";
-  byId("charterRouteSummary").innerHTML = `<strong>${escapeHtml(start)} → ${escapeHtml(end)}</strong><span>${stops.length} stops · ${routeInfo}</span>`;
+  summaryEl.innerHTML = `<strong>${escapeHtml(start)} → ${escapeHtml(end)}</strong><span>${stops.length} stops · ${routeInfo}</span>`;
 }
 
 /* =========================================================
@@ -325,7 +542,7 @@ function editorTemplate(booking = null) {
           <label class="charter-full"><span>Special instructions</span><textarea id="charterInstructions" placeholder="Accessibility, luggage, permits, passenger requirements or customer instructions">${escapeHtml(booking?.specialInstructions || "")}</textarea></label>
           <label class="charter-full"><span>Internal notes</span><textarea id="charterInternalNotes" placeholder="Internal Charter Department notes — not included in the customer PDF">${escapeHtml(booking?.internalNotes || "")}</textarea></label>
         </div></section>
-        <div class="charter-tab-bar"><span class="charter-tab-hint">${getSaveHint(status)}</span><button type="button" class="charter-save-draft" id="saveDraftOverview">Save Draft</button><button type="button" id="nextToItinerary" class="btn primary">Next: Itinerary →</button></div>
+        <div class="charter-tab-bar"><span class="charter-tab-hint">Complete required customer fields to continue.</span><button type="button" id="nextToItinerary" class="btn primary">Next: Itinerary →</button></div>
       </div>
 
       <!-- ===== ITINERARY & MAP TAB ===== -->
@@ -333,8 +550,8 @@ function editorTemplate(booking = null) {
         <section class="charter-section"><div class="charter-section-title"><span>2</span><div><h4>Journey type and route</h4><p>Select the journey type, build the stop order, and use the map to search or click exact locations.</p></div></div>
           <div id="charterJourneyTypeSelector" class="charter-journey-types">
             ${JOURNEY_TYPES.map((jt) => {
-              const icons = {"One Way": "→", "Forward + Return": "⇄", "Multi-stop": "⋯", "Multiple Journeys": "▤"};
-              const descs = {"One Way": "Pickup to drop-off", "Forward + Return": "There and back", "Multi-stop": "Several stops en route", "Multiple Journeys": "Multiple separate trips"};
+              const icons = {"One Way": "→", "Forward + Return": "⇄", "Multiple Journeys": "▤"};
+              const descs = {"One Way": "Pickup to drop-off", "Forward + Return": "There and back", "Multiple Journeys": "Multiple separate trips"};
               const sel = jt === (booking?.journeyType || "One Way") ? "selected" : "";
               return `<button type="button" class="charter-journey-card ${sel}" data-journey-type="${escapeHtml(jt)}"><div class="charter-journey-card-icon">${icons[jt] || "→"}</div><div class="charter-journey-card-label">${escapeHtml(jt)}</div><div class="charter-journey-card-desc">${escapeHtml(descs[jt] || "")}</div></button>`;
             }).join("")}
@@ -344,7 +561,59 @@ function editorTemplate(booking = null) {
             <label><span>Vehicle requirement</span><select id="charterVehicleType">${VEHICLE_TYPES.map((item) => `<option ${item === (booking?.vehicleType || "To be recommended") ? "selected" : ""}>${item}</option>`).join("")}</select></label>
             <label><span>Number of buses</span><input id="charterBusCount" type="number" min="1" value="${escapeHtml(String(booking?.busCount || 1))}" /></label>
           </div>
-          <div class="charter-route-layout"><div><div id="charterStops" class="charter-stops"></div><button id="addCharterStop" type="button" class="btn"><i data-lucide="map-pin-plus"></i> Add stop</button></div><aside class="charter-map-aside"><div id="charterMapContainer" class="charter-map-container"></div><div class="charter-map-click-hint"><i data-lucide="mouse-pointer-click"></i> Click on the map to set a stop location</div><div id="charterRouteSummary" class="charter-route-summary"></div></aside></div>
+
+          <!-- ONE WAY panel -->
+          <div id="panelOneWay" class="charter-journey-panel" ${(booking?.journeyType || "One Way") === "One Way" ? "" : "hidden"}>
+            <div class="charter-route-layout"><div><div id="charterStops" class="charter-stops"></div><button id="addCharterStop" type="button" class="btn"><i data-lucide="map-pin-plus"></i> Add stop</button></div><aside class="charter-map-aside"><div id="charterMapContainer" class="charter-map-container"></div><div class="charter-map-click-hint"><i data-lucide="mouse-pointer-click"></i> Click on the map to set a stop location</div><div id="charterRouteSummary" class="charter-route-summary"></div></aside></div>
+          </div>
+
+          <!-- FORWARD + RETURN panel -->
+          <div id="panelForwardReturn" class="charter-journey-panel" ${(booking?.journeyType) === "Forward + Return" ? "" : "hidden"}>
+            <div class="charter-fr-section">
+              <h5 class="charter-fr-heading"><i data-lucide="arrow-right"></i> Forward Journey</h5>
+              <div id="charterStopsFwd" class="charter-stops"></div>
+              <button id="addCharterStopFwd" type="button" class="btn"><i data-lucide="map-pin-plus"></i> Add stop</button>
+            </div>
+            <div class="charter-fr-section charter-fr-return">
+              <h5 class="charter-fr-heading"><i data-lucide="arrow-left"></i> Return Journey</h5>
+              <div class="charter-grid" style="margin-bottom:10px">
+                <label><span>Return departure time *</span><input id="charterReturnDepartureTime" type="time" value="${escapeHtml(booking?.returnDepartureTime || "")}" /></label>
+                <label><span>Return buffer (min)</span><input id="charterReturnBuffer" type="number" min="0" step="5" value="${escapeHtml(String(booking?.returnBuffer || 0))}" /></label>
+              </div>
+              <div id="charterReturnStops" class="charter-stops"></div>
+            </div>
+            <aside class="charter-map-aside"><div id="charterMapContainerFR" class="charter-map-container"></div><div id="charterRouteSummaryFR" class="charter-route-summary"></div></aside>
+          </div>
+
+          <!-- MULTIPLE JOURNEYS panel -->
+          <div id="panelMultipleJourneys" class="charter-journey-panel" ${(booking?.journeyType) === "Multiple Journeys" ? "" : "hidden"}>
+            <div class="charter-generator-box">
+              <div class="charter-grid">
+                <label><span>Start Date *</span><input type="date" id="mjGenStart" /></label>
+                <label><span>End Date *</span><input type="date" id="mjGenEnd" /></label>
+                <label><span>Recurring Type</span><select id="mjGenType"><option>Weekly</option></select></label>
+              </div>
+              <div class="charter-days-section">
+                <span>Weekly days</span>
+                <div class="charter-days-grid">
+                  <label><input type="checkbox" class="mjGenDay" value="1"> <span>Mon</span></label>
+                  <label><input type="checkbox" class="mjGenDay" value="2"> <span>Tue</span></label>
+                  <label><input type="checkbox" class="mjGenDay" value="3"> <span>Wed</span></label>
+                  <label><input type="checkbox" class="mjGenDay" value="4"> <span>Thu</span></label>
+                  <label><input type="checkbox" class="mjGenDay" value="5"> <span>Fri</span></label>
+                  <label><input type="checkbox" class="mjGenDay" value="6"> <span>Sat</span></label>
+                  <label><input type="checkbox" class="mjGenDay" value="0"> <span>Sun</span></label>
+                </div>
+              </div>
+              <div class="charter-grid" style="margin-top: 12px; border-top: 1px solid var(--charter-line, #e2e8f0); padding-top: 12px;">
+                <label><span>Start Time *</span><input type="time" id="mjGenStartTime" /></label>
+                <label><span>Pickup *</span><input id="mjGenPickup" placeholder="Shared pickup location" /></label>
+                <label><span>Drop-off *</span><input id="mjGenDropoff" placeholder="Shared drop-off location" /></label>
+              </div>
+            </div>
+            <aside class="charter-map-aside" style="margin-top:14px"><div id="charterMapContainerMJ" class="charter-map-container"></div><div id="charterRouteSummaryMJ" class="charter-route-summary"></div></aside>
+          </div>
+
         </section>
         <div class="charter-tab-bar"><span class="charter-tab-hint">Define the journey stops before moving to quotation.</span><button type="button" class="charter-save-draft" id="saveDraftItinerary">Save Draft</button><button type="button" id="nextToQuotation" class="btn primary">Next: Quotation →</button></div>
       </div>
@@ -543,6 +812,36 @@ function selectCustomer() {
 /* =========================================================
    Tabs & Navigation
 ========================================================= */
+function registerMapClickListener() {
+  onMapClick((geo) => {
+    if (!focusedStopRowId) {
+      showPageMessage("Please click inside a Stop Location field first.", "error");
+      return;
+    }
+    
+    // Handle Multiple Journeys fields
+    if (focusedStopRowId === "mj_gen_pickup" || focusedStopRowId === "mj_gen_dropoff") {
+      const locInput = document.getElementById(focusedStopRowId === "mj_gen_pickup" ? "mjGenPickup" : "mjGenDropoff");
+      if (locInput) locInput.value = geo.name;
+      stopGeoData.set(focusedStopRowId, geo);
+      triggerRouteCalculation();
+      updateJourneySummary();
+      return; 
+    }
+
+    // Find the focused stop row and update it
+    const row = document.querySelector(`[data-stop-row="${escapeHtml(focusedStopRowId)}"]`);
+    if (row) {
+      const locInput = row.querySelector(".charterStopLocation");
+      if (locInput) locInput.value = geo.name;
+      stopGeoData.set(focusedStopRowId, geo);
+      updateJourneySummary();
+      triggerRouteCalculation();
+      if (focusedStopRowId.startsWith("fwd_") && !returnStopsManuallyEdited) autoMirrorReturnStops();
+    }
+  });
+}
+
 function switchTab(tabId) {
   const buttons = [...document.querySelectorAll("[data-charter-tab]")];
   const panels = [...document.querySelectorAll("[data-charter-panel]")];
@@ -553,27 +852,17 @@ function switchTab(tabId) {
   // Initialise map when itinerary tab is shown
   if (tabId === "itinerary" && !mapInitialisedForSession) {
     mapInitialisedForSession = true;
-    initMap("charterMapContainer").then(() => {
-      rewireStops();
-      triggerRouteCalculation();
+    
+    const jt = byId("charterJourneyType")?.value || "One Way";
+    let mapId = "charterMapContainer";
+    if (jt === "Forward + Return") mapId = "charterMapContainerFR";
+    else if (jt === "Multiple Journeys") mapId = "charterMapContainerMJ";
 
-      // Register map click-to-pin
-      onMapClick((geo) => {
-        if (!focusedStopRowId) {
-          showPageMessage("Please click inside a Stop Location field first.", "error");
-          return;
-        }
-        
-        // Find the focused stop row and update it
-        const row = document.querySelector(`[data-stop-row="${escapeHtml(focusedStopRowId)}"]`);
-        if (row) {
-          const locInput = row.querySelector(".charterStopLocation");
-          if (locInput) locInput.value = geo.name;
-          stopGeoData.set(focusedStopRowId, geo);
-          updateJourneySummary();
-          triggerRouteCalculation();
-        }
-      });
+    initMap(mapId).then(() => {
+      rewireStops();
+      wireGenerator();
+      triggerRouteCalculation();
+      registerMapClickListener();
     }).catch((err) => console.warn("Map init failed:", err));
   }
 }
@@ -585,25 +874,88 @@ function setupTabs() {
   });
 }
 
-/* =========================================================
-   Render editor
-========================================================= */
-function renderEditor(booking = null) {
+
+
+function resetBookingState() {
   stopGeoData.clear();
+  legEstimates.clear();
+  userOverriddenArrivals.clear();
+  returnStopsManuallyEdited = false;
+  journeySequence = 0;
+  focusedStopRowId = null;
+  clearMapRoute();
+}
+
+function autoMirrorReturnStops() {
+  const fwdStops = collectStopsFrom("charterStopsFwd");
+  if (!fwdStops.length) return;
+  
+  const revStops = [...fwdStops].reverse().map(stop => {
+    let newType = stop.type;
+    if (stop.type === "Pickup") newType = "Drop-off";
+    else if (stop.type === "Drop-off") newType = "Pickup";
+    
+    return {
+      type: newType,
+      name: stop.name,
+      placeId: stop.placeId,
+      latitude: stop.latitude,
+      longitude: stop.longitude,
+      arrivalTime: "", 
+      bufferMinutes: stop.bufferMinutes || 0
+    };
+  });
+  
+  renderReturnStops(revStops);
+  
+  const newReturnRows = [...document.getElementById("charterReturnStops").querySelectorAll("[data-stop-row]")];
+  newReturnRows.forEach((row, idx) => {
+    if (revStops[idx].latitude) {
+      stopGeoData.set(row.dataset.stopRow, {
+        placeId: revStops[idx].placeId,
+        latitude: revStops[idx].latitude,
+        longitude: revStops[idx].longitude,
+        formattedAddress: revStops[idx].name
+      });
+    }
+  });
+}
+
+function renderEditor(booking = null) {
+  resetBookingState();
   mapInitialisedForSession = false;
   currentPdfBlob = null;
+  journeySequence = 0;
   if (historyUnsubscribe) { historyUnsubscribe(); historyUnsubscribe = null; }
 
   byId("charterEditor").innerHTML = editorTemplate(booking);
   setupTabs();
-  renderStops(Array.isArray(booking?.stops) ? booking.stops : []);
+
+  // Render stops for the current journey type
+  const jt = booking?.journeyType || "One Way";
+  if (jt === "Forward + Return") {
+    renderStops(Array.isArray(booking?.stops) ? booking.stops : [{type: "Pickup"}, {type: "Drop-off"}], "fwd_", "charterStopsFwd");
+    // Render return stops — auto-mirror if no return stops saved
+    const returnStops = Array.isArray(booking?.returnStops) ? booking.returnStops : [];
+    if (returnStops.length) {
+      renderReturnStops(returnStops);
+    } else {
+      renderReturnStops([{type: "Drop-off"}, {type: "Pickup"}]);
+    }
+  } else if (jt === "Multiple Journeys") {
+    renderMultipleJourneys(booking?.multipleJourneysConfig || null);
+    wireGenerator();
+  } else {
+    renderStops(Array.isArray(booking?.stops) ? booking.stops : []);
+  }
+
   updateJourneySummary();
   calculatePricing();
 
   // Wire overview
   byId("charterOrganisation").onchange = selectCustomer;
   
-  // Wire journey types
+  // Wire journey types — panel switching
   const jtCards = document.querySelectorAll(".charter-journey-card");
   jtCards.forEach(card => {
     card.onclick = () => {
@@ -612,34 +964,80 @@ function renderEditor(booking = null) {
       const type = card.dataset.journeyType;
       byId("charterJourneyType").value = type;
       
-      // Auto-populate template if no stops currently (or overwrite logic if preferred)
-      const currentStops = collectStops();
-      if (currentStops.length <= 1) {
-        let templateStops = [];
-        if (type === "One Way") templateStops = [{type: "Pickup"}, {type: "Drop-off"}];
-        else if (type === "Forward + Return") templateStops = [{type: "Pickup"}, {type: "Drop-off"}, {type: "Drop-off"}];
-        else if (type === "Multi-stop") templateStops = [{type: "Pickup"}, {type: "Stop"}, {type: "Drop-off"}];
-        else templateStops = [{type: "Pickup"}, {type: "Drop-off"}];
-        
-        renderStops(templateStops);
+      // Toggle panels
+      const panels = document.querySelectorAll(".charter-journey-panel");
+      panels.forEach(p => { p.hidden = true; });
+      if (type === "One Way") {
+        if (byId("panelOneWay")) byId("panelOneWay").hidden = false;
+        renderStops([{type: "Pickup"}, {type: "Drop-off"}]);
+        if (mapInitialisedForSession) initMap("charterMapContainer").then(() => { triggerRouteCalculation(); registerMapClickListener(); }).catch(console.warn);
+      } else if (type === "Forward + Return") {
+        if (byId("panelForwardReturn")) byId("panelForwardReturn").hidden = false;
+        renderStops([{type: "Pickup"}, {type: "Drop-off"}], "fwd_", "charterStopsFwd");
+        if (booking?.returnStops && booking.returnStops.length > 0) {
+          renderReturnStops(booking.returnStops);
+          returnStopsManuallyEdited = true;
+        } else {
+          returnStopsManuallyEdited = false;
+          autoMirrorReturnStops();
+        }
+        if (mapInitialisedForSession) initMap("charterMapContainerFR").then(() => { triggerRouteCalculation(); registerMapClickListener(); }).catch(console.warn);
+      } else if (type === "Multiple Journeys") {
+        if (byId("panelMultipleJourneys")) byId("panelMultipleJourneys").hidden = false;
+        renderMultipleJourneys(booking?.multipleJourneysConfig || null);
+        if (mapInitialisedForSession) initMap("charterMapContainerMJ").then(() => { wireGenerator(); registerMapClickListener(); }).catch(console.warn);
       }
     };
   });
 
-  byId("addCharterStop").onclick = () => {
-    byId("charterStops").insertAdjacentHTML("beforeend", stopRow({type: "Stop"}, byId("charterStops").children.length));
-    rewireStops(); updateJourneySummary();
-  };
+  // Wire addCharterStop for One Way
+  if (byId("addCharterStop")) {
+    byId("addCharterStop").onclick = () => {
+      byId("charterStops").insertAdjacentHTML("beforeend", stopRow({type: "Stop"}, byId("charterStops").children.length));
+      rewireStops(); updateJourneySummary();
+    };
+  }
+
+  // Wire addCharterStopFwd for Forward + Return
+  if (byId("addCharterStopFwd")) {
+    byId("addCharterStopFwd").onclick = () => {
+      const container = byId("charterStopsFwd");
+      if (!container) return;
+      container.insertAdjacentHTML("beforeend", stopRow({type: "Stop"}, container.children.length, "fwd_"));
+      rewireStops("charterStopsFwd"); updateJourneySummary();
+      if (!returnStopsManuallyEdited) autoMirrorReturnStops();
+    };
+  }
+
+  // Wire addJourneyCard for Multiple Journeys
+  if (byId("addJourneyCard")) {
+    byId("addJourneyCard").onclick = () => {
+      const container = byId("charterJourneyCards");
+      if (!container) return;
+      container.insertAdjacentHTML("beforeend", journeyCardHtml({}, container.children.length));
+      rewireJourneyCards();
+    };
+  }
   ["charterBaseCharge", "charterDistanceCharge", "charterWaitingCharge", "charterAdditionalCharge", "charterDiscount"].forEach((id) => byId(id).addEventListener("input", calculatePricing));
   
   // Wire Wizard Navigation
-  if (byId("nextToItinerary")) byId("nextToItinerary").onclick = () => switchTab("itinerary");
+  if (byId("nextToItinerary")) {
+    byId("nextToItinerary").onclick = () => {
+      const err = validateOverview();
+      if (err) {
+        showPageMessage(err, "error");
+      } else {
+        clearPageMessage();
+        switchTab("itinerary");
+      }
+    };
+  }
   if (byId("nextToQuotation")) byId("nextToQuotation").onclick = () => switchTab("quotation");
   
   // Wire Saves
   const triggerSave = (e) => { e?.preventDefault(); saveCharter(); };
   byId("charterForm").onsubmit = triggerSave;
-  ["saveDraftOverview", "saveDraftItinerary", "saveDraftQuotation", "saveCharter"].forEach(id => {
+  ["saveDraftItinerary", "saveDraftQuotation", "saveCharter"].forEach(id => {
     if (byId(id)) byId(id).onclick = triggerSave;
   });
 
@@ -668,7 +1066,26 @@ function wireQuotationButtons(booking) {
   if (previewBtn) {
     previewBtn.onclick = () => {
       clearPageMessage();
-      const stops = collectStops();
+      
+      const jt = value("charterJourneyType") || "One Way";
+      const stops = jt === "Forward + Return" ? collectStopsFrom("charterStopsFwd") : collectStopsFrom("charterStops");
+      const returnStops = jt === "Forward + Return" ? collectReturnStops() : [];
+      
+      let mjConfig = null;
+      if (jt === "Multiple Journeys") {
+        mjConfig = {
+          startDate: value("mjGenStart"),
+          endDate: value("mjGenEnd"),
+          recurringType: value("mjGenType") || "Weekly",
+          days: [...document.querySelectorAll(".mjGenDay:checked")].map(cb => parseInt(cb.value, 10)),
+          startTime: value("mjGenStartTime"),
+          pickup: value("mjGenPickup"),
+          dropoff: value("mjGenDropoff"),
+          pickupGeo: stopGeoData.get("mj_gen_pickup") || null,
+          dropoffGeo: stopGeoData.get("mj_gen_dropoff") || null
+        };
+      }
+      
       const pricing = calculatePricing();
 
       if (pricing.total <= 0) {
@@ -677,7 +1094,7 @@ function wireQuotationButtons(booking) {
       }
 
       // Build a temporary booking object with current form data
-      const previewBooking = buildCurrentBookingData(booking, stops, pricing);
+      const previewBooking = buildCurrentBookingData(booking, jt, stops, returnStops, mjConfig, pricing);
 
       try {
         const result = generateQuotationPDF(previewBooking);
@@ -705,9 +1122,9 @@ function wireQuotationButtons(booking) {
   }
 }
 
-function buildCurrentBookingData(existingBooking, stops, pricing) {
+function buildCurrentBookingData(existingBooking, jt, stops, returnStops, mjConfig, pricing) {
   const organisation = organisations.find((item) => item.id === value("charterOrganisation"));
-  return {
+  const payload = {
     ...(existingBooking || {}),
     bookingNumber: existingBooking?.bookingNumber || "DRAFT",
     organisationName: organisation?.name || "",
@@ -716,18 +1133,34 @@ function buildCurrentBookingData(existingBooking, stops, pricing) {
     contactEmail: value("charterContactEmail"),
     serviceDate: value("charterServiceDate"),
     passengerCount: numberValue("charterPassengers"),
-    journeyType: value("charterJourneyType"),
+    journeyType: jt,
     vehicleType: value("charterVehicleType"),
     busCount: numberValue("charterBusCount"),
     specialInstructions: value("charterInstructions"),
     quoteExpiryDate: value("charterQuoteExpiry"),
     quoteNotes: value("charterQuoteNotes"),
     stops,
-    pickupLocation: stops[0]?.name || "",
-    destination: stops[stops.length - 1]?.name || "",
     pricing,
     routeSnapshot: getRouteResult() || existingBooking?.routeSnapshot || null
   };
+
+  if (jt === "Forward + Return") {
+    payload.returnStops = returnStops;
+    payload.returnDepartureTime = value("charterReturnDepartureTime");
+    payload.returnBuffer = numberValue("charterReturnBuffer");
+    payload.pickupLocation = stops[0]?.name || "";
+    payload.destination = stops[stops.length - 1]?.name || "";
+  } else if (jt === "Multiple Journeys") {
+    payload.multipleJourneysConfig = mjConfig;
+    payload.serviceDate = mjConfig?.startDate || value("charterServiceDate");
+    payload.pickupLocation = mjConfig?.pickup || "";
+    payload.destination = mjConfig?.dropoff || "";
+  } else {
+    payload.pickupLocation = stops[0]?.name || "";
+    payload.destination = stops[stops.length - 1]?.name || "";
+  }
+
+  return payload;
 }
 
 async function sendQuotation(booking) {
@@ -807,11 +1240,6 @@ function wireOperationsButtons(booking) {
     createBtn.innerHTML = `<span class="spinner"></span> Creating blocks…`;
 
     try {
-      const driverEmail = byId("charterAssignDriver")?.value || "";
-      const busId = byId("charterAssignBus")?.value || "";
-      const driver = employees.find((e) => e.email === driverEmail);
-      const bus = buses.find((b) => b.id === busId);
-
       // Create a job group document
       const jobGroupRef = doc(collection(db, "jobGroups"));
       const stops = Array.isArray(booking.stops) ? booking.stops : [];
@@ -833,10 +1261,6 @@ function wireOperationsButtons(booking) {
         distanceKm: route.distanceKm || null,
         durationMinutes: route.durationMinutes || null,
         stops,
-        driverEmail: driverEmail || null,
-        driverName: driver?.displayName || driverEmail || null,
-        busId: busId || null,
-        busNumber: bus?.busNumber || bus?.registration || null,
         status: "Active",
         createdAt: serverTimestamp(),
         createdAtIso: nowIso,
@@ -853,33 +1277,119 @@ function wireOperationsButtons(booking) {
         return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
       }
 
-      let startMin = timeStrToMin(stops[0]?.arrivalTime);
-      let endMin = timeStrToMin(stops[stops.length - 1]?.arrivalTime);
-
-      if (startMin === null) startMin = 8 * 60; // 8:00 AM fallback
-      if (endMin === null) endMin = startMin + 60; // 1 hr fallback
-
       const numBuses = Number(booking.busCount) || 1;
       const blockPromises = [];
-      for (let i = 0; i < numBuses; i++) {
-        const blockRef = doc(collection(db, "blocks"));
-        blockPromises.push(setDoc(blockRef, {
-          jobGroupId: jobGroupRef.id,
-          organisationName: booking.organisationName || "",
-          jobGroupName: booking.bookingNumber ? `${booking.organisationName || "Customer"} (${booking.bookingNumber})` : booking.organisationName,
-          serviceDate: booking.serviceDate || "",
-          startMin: startMin,
-          endMin: endMin,
-          from: booking.pickupLocation || "",
-          to: booking.destination || "",
-          notes: booking.specialInstructions || "",
-          deleted: false,
-          published: false,
-          createdAt: serverTimestamp(),
-          createdAtIso: nowIso,
-          createdByEmail: auth.currentUser?.email || ""
-        }));
+      const jt = booking.journeyType || "One Way";
+
+      if (jt === "Multiple Journeys" && Array.isArray(booking.journeys)) {
+        // Multiple Journeys: one block per journey per bus
+        for (let i = 0; i < numBuses; i++) {
+          booking.journeys.forEach((j, jIndex) => {
+            const blockRef = doc(collection(db, "blocks"));
+            let startMin = timeStrToMin(j.startTime) || 8 * 60;
+            // Rough estimate of 1 hour if we don't have duration saved, ideally we'd store it.
+            // For now, default to start + 60
+            let endMin = startMin + 60;
+
+            blockPromises.push(setDoc(blockRef, {
+              jobGroupId: jobGroupRef.id,
+              organisationName: booking.organisationName || "",
+              jobGroupName: booking.bookingNumber ? `${booking.organisationName || "Customer"} (${booking.bookingNumber}) - J${jIndex + 1}` : `${booking.organisationName} - J${jIndex + 1}`,
+              serviceDate: j.journeyDate || booking.serviceDate || "",
+              startMin,
+              endMin,
+              from: j.pickup || "",
+              to: j.dropoff || "",
+              notes: booking.specialInstructions || "",
+              deleted: false,
+              published: false,
+              createdAt: serverTimestamp(),
+              createdAtIso: nowIso,
+              createdByEmail: auth.currentUser?.email || ""
+            }));
+          });
+        }
+      } else if (jt === "Forward + Return") {
+        // Forward + Return: two blocks per bus, linked with pairId
+        const fwdStops = Array.isArray(booking.stops) ? booking.stops : [];
+        const retStops = Array.isArray(booking.returnStops) ? booking.returnStops : [];
+        
+        for (let i = 0; i < numBuses; i++) {
+          const pairId = `pair_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          const blockRefFwd = doc(collection(db, "blocks"));
+          const blockRefRet = doc(collection(db, "blocks"));
+
+          let fwdStart = timeStrToMin(fwdStops[0]?.arrivalTime) ?? (8 * 60);
+          let fwdEnd = timeStrToMin(fwdStops[fwdStops.length - 1]?.arrivalTime) ?? (fwdStart + 60);
+          let retStart = timeStrToMin(retStops[0]?.arrivalTime) ?? (15 * 60);
+          let retEnd = timeStrToMin(retStops[retStops.length - 1]?.arrivalTime) ?? (retStart + 60);
+
+          blockPromises.push(setDoc(blockRefFwd, {
+            jobGroupId: jobGroupRef.id,
+            pairId,
+            leg: "Forward",
+            organisationName: booking.organisationName || "",
+            jobGroupName: booking.bookingNumber ? `${booking.organisationName || "Customer"} (${booking.bookingNumber}) - Fwd` : `${booking.organisationName} - Fwd`,
+            serviceDate: booking.serviceDate || "",
+            startMin: fwdStart,
+            endMin: fwdEnd,
+            from: fwdStops[0]?.name || booking.pickupLocation || "",
+            to: fwdStops[fwdStops.length - 1]?.name || booking.destination || "",
+            notes: booking.specialInstructions || "",
+            deleted: false,
+            published: false,
+            createdAt: serverTimestamp(),
+            createdAtIso: nowIso,
+            createdByEmail: auth.currentUser?.email || ""
+          }));
+
+          blockPromises.push(setDoc(blockRefRet, {
+            jobGroupId: jobGroupRef.id,
+            pairId,
+            leg: "Return",
+            organisationName: booking.organisationName || "",
+            jobGroupName: booking.bookingNumber ? `${booking.organisationName || "Customer"} (${booking.bookingNumber}) - Ret` : `${booking.organisationName} - Ret`,
+            serviceDate: booking.serviceDate || "",
+            startMin: retStart,
+            endMin: retEnd,
+            from: retStops[0]?.name || booking.destination || "",
+            to: retStops[retStops.length - 1]?.name || booking.pickupLocation || "",
+            notes: booking.specialInstructions || "",
+            deleted: false,
+            published: false,
+            createdAt: serverTimestamp(),
+            createdAtIso: nowIso,
+            createdByEmail: auth.currentUser?.email || ""
+          }));
+        }
+      } else {
+        // One Way (or legacy)
+        let startMin = timeStrToMin(stops[0]?.arrivalTime);
+        let endMin = timeStrToMin(stops[stops.length - 1]?.arrivalTime);
+        if (startMin === null) startMin = 8 * 60; // 8:00 AM fallback
+        if (endMin === null) endMin = startMin + 60; // 1 hr fallback
+
+        for (let i = 0; i < numBuses; i++) {
+          const blockRef = doc(collection(db, "blocks"));
+          blockPromises.push(setDoc(blockRef, {
+            jobGroupId: jobGroupRef.id,
+            organisationName: booking.organisationName || "",
+            jobGroupName: booking.bookingNumber ? `${booking.organisationName || "Customer"} (${booking.bookingNumber})` : booking.organisationName,
+            serviceDate: booking.serviceDate || "",
+            startMin: startMin,
+            endMin: endMin,
+            from: stops[0]?.name || booking.pickupLocation || "",
+            to: stops[stops.length - 1]?.name || booking.destination || "",
+            notes: booking.specialInstructions || "",
+            deleted: false,
+            published: false,
+            createdAt: serverTimestamp(),
+            createdAtIso: nowIso,
+            createdByEmail: auth.currentUser?.email || ""
+          }));
+        }
       }
+
       await Promise.all(blockPromises);
 
       // Update charter booking
@@ -887,10 +1397,6 @@ function wireOperationsButtons(booking) {
       await setDoc(bookingRef, {
         status: "Operational",
         operationalJobGroupId: jobGroupRef.id,
-        assignedDriverEmail: driverEmail || null,
-        assignedDriverName: driver?.displayName || null,
-        assignedBusId: busId || null,
-        assignedBusNumber: bus?.busNumber || bus?.registration || null,
         updatedAt: serverTimestamp(),
         updatedAtIso: nowIso,
         updatedByUid: auth.currentUser?.uid || "",
@@ -906,9 +1412,7 @@ function wireOperationsButtons(booking) {
         createdByEmail: auth.currentUser?.email || "",
         createdByName: employeeName(),
         metadata: {
-          jobGroupId: jobGroupRef.id,
-          driverEmail: driverEmail || null,
-          busId: busId || null
+          jobGroupId: jobGroupRef.id
         }
       });
 
@@ -950,24 +1454,51 @@ function wireOperationsButtons(booking) {
 /* =========================================================
    Validation + Save
 ========================================================= */
-function validateForm(stops) {
+function validateOverview() {
   if (!value("charterOrganisation")) return "Select an existing customer.";
   if (!value("charterContactName")) return "Contact name is required.";
-  if (!value("charterServiceDate")) return "Service date is required.";
+  if (!value("charterContactEmail")) return "Contact email is required.";
   if (numberValue("charterPassengers") < 1) return "Passenger quantity must be at least 1.";
   if (numberValue("charterBusCount") < 1) return "Number of buses must be at least 1.";
-  if (stops.length < 2) return "Add at least a pickup and destination.";
-  if (!stops[0].name) return "Enter the pickup location.";
-  if (!stops[stops.length - 1].name) return "Enter the destination.";
   return "";
 }
 
-function buildPayload(organisation, stops, pricing, existing) {
-  const nowIso = new Date().toISOString();
-  const bookingNumber = existing?.bookingNumber || `CB-${new Date().getFullYear()}-${doc(collection(db, "charterBookings")).id.slice(0, 6).toUpperCase()}`;
-  const routeResult = getRouteResult();
+function validateForm(jt, stops, returnStops, config) {
+  const overviewError = validateOverview();
+  if (overviewError) return overviewError;
 
-  return {
+  if (jt === "Multiple Journeys") {
+    if (!config.startDate) return "Start Date is required for Multiple Journeys.";
+    if (!config.endDate) return "End Date is required for Multiple Journeys.";
+    if (!config.days || config.days.length === 0) return "Select at least one day of the week.";
+    if (!config.startTime) return "Start Time is required.";
+    if (!config.pickup) return "Pickup location is required.";
+    if (!config.dropoff) return "Drop-off location is required.";
+    const sd = new Date(`${config.startDate}T00:00:00`);
+    const ed = new Date(`${config.endDate}T00:00:00`);
+    if (ed < sd) return "End Date must be after Start Date.";
+  } else {
+    if (!value("charterServiceDate")) return "Service date is required.";
+    if (stops.length < 2) return "Add at least a pickup and destination.";
+    if (!stops[0].name) return "Enter the pickup location.";
+    if (!stops[stops.length - 1].name) return "Enter the destination.";
+
+    if (jt === "Forward + Return") {
+      if (returnStops.length < 2) return "Return journey must have a pickup and destination.";
+      if (!returnStops[0].name) return "Enter the return pickup location.";
+      if (!returnStops[returnStops.length - 1].name) return "Enter the return destination.";
+      if (!value("charterReturnDepartureTime")) return "Return departure time is required.";
+    }
+  }
+  return "";
+}
+
+function buildPayload(organisation, jt, stops, returnStops, mjConfig, pricing, existing) {
+  const nowIso = new Date().toISOString();
+  const routeResult = getRouteResult();
+  const bookingNumber = existing?.bookingNumber || "DRAFT";
+
+  const payload = {
     schemaVersion: 1,
     bookingNumber,
     status: value("charterStatus") || "Draft",
@@ -978,14 +1509,12 @@ function buildPayload(organisation, stops, pricing, existing) {
     contactEmail: value("charterContactEmail").toLowerCase(),
     serviceDate: value("charterServiceDate"),
     passengerCount: numberValue("charterPassengers"),
-    journeyType: value("charterJourneyType"),
+    journeyType: jt,
     vehicleType: value("charterVehicleType"),
     busCount: numberValue("charterBusCount"),
     specialInstructions: value("charterInstructions"),
     internalNotes: value("charterInternalNotes"),
     stops,
-    pickupLocation: stops[0].name,
-    destination: stops[stops.length - 1].name,
     routeStatus: routeResult ? "Calculated" : (existing?.routeStatus || "Not calculated"),
     routeSnapshot: routeResult || existing?.routeSnapshot || null,
     pricing,
@@ -999,15 +1528,53 @@ function buildPayload(organisation, stops, pricing, existing) {
     deleted: false,
     ...(existing ? {} : {createdAt: serverTimestamp(), createdAtIso: nowIso, createdByUid: auth.currentUser?.uid || "", createdByEmail: auth.currentUser?.email || "", createdByName: employeeName(), blocksGenerated: false})
   };
+
+  if (jt === "Forward + Return") {
+    payload.returnStops = returnStops;
+    payload.returnDepartureTime = value("charterReturnDepartureTime");
+    payload.returnBuffer = numberValue("charterReturnBuffer");
+    payload.pickupLocation = stops[0]?.name || "";
+    payload.destination = stops[stops.length - 1]?.name || "";
+  } else if (jt === "Multiple Journeys") {
+    payload.multipleJourneysConfig = mjConfig;
+    payload.serviceDate = mjConfig.startDate || "";
+    payload.pickupLocation = mjConfig.pickup || "";
+    payload.destination = mjConfig.dropoff || "";
+  } else {
+    payload.pickupLocation = stops[0]?.name || "";
+    payload.destination = stops[stops.length - 1]?.name || "";
+  }
+
+  return payload;
 }
 
 async function saveCharter(event) {
   event?.preventDefault();
   if (saving) return;
   clearPageMessage(); showError("");
-  const stops = collectStops();
-  const error = validateForm(stops);
+  
+  const jt = value("charterJourneyType") || "One Way";
+  const stops = jt === "Forward + Return" ? collectStopsFrom("charterStopsFwd") : collectStopsFrom("charterStops");
+  const returnStops = jt === "Forward + Return" ? collectReturnStops() : [];
+  
+  let mjConfig = null;
+  if (jt === "Multiple Journeys") {
+    mjConfig = {
+      startDate: value("mjGenStart"),
+      endDate: value("mjGenEnd"),
+      recurringType: value("mjGenType") || "Weekly",
+      days: [...document.querySelectorAll(".mjGenDay:checked")].map(cb => parseInt(cb.value, 10)),
+      startTime: value("mjGenStartTime"),
+      pickup: value("mjGenPickup"),
+      dropoff: value("mjGenDropoff"),
+      pickupGeo: stopGeoData.get("mj_gen_pickup") || null,
+      dropoffGeo: stopGeoData.get("mj_gen_dropoff") || null
+    };
+  }
+
+  const error = validateForm(jt, stops, returnStops, mjConfig);
   if (error) return showPageMessage(error, "error");
+  
   const organisation = organisations.find((item) => item.id === value("charterOrganisation"));
   const existing = bookings.find((item) => item.id === selectedBookingId) || null;
   const bookingRef = existing ? doc(db, "charterBookings", existing.id) : doc(collection(db, "charterBookings"));
@@ -1015,7 +1582,7 @@ async function saveCharter(event) {
   const saveButton = byId("saveCharter");
   saving = true; saveButton.disabled = true; saveButton.textContent = existing ? "Saving changes…" : "Creating draft…";
   try {
-    const payload = buildPayload(organisation, stops, pricing, existing);
+    const payload = buildPayload(organisation, jt, stops, returnStops, mjConfig, pricing, existing);
     // Fix bookingNumber for new docs
     if (!existing) {
       payload.bookingNumber = `CB-${new Date().getFullYear()}-${bookingRef.id.slice(0, 6).toUpperCase()}`;
@@ -1052,11 +1619,29 @@ async function saveCharter(event) {
 /** Silent save — used before sending quotation */
 async function saveCharterSilent(existingBooking) {
   if (!existingBooking?.id) return;
-  const stops = collectStops();
+  const jt = value("charterJourneyType") || "One Way";
+  const stops = jt === "Forward + Return" ? collectStopsFrom("charterStopsFwd") : collectStopsFrom("charterStops");
+  const returnStops = jt === "Forward + Return" ? collectReturnStops() : [];
+  
+  let mjConfig = null;
+  if (jt === "Multiple Journeys") {
+    mjConfig = {
+      startDate: value("mjGenStart"),
+      endDate: value("mjGenEnd"),
+      recurringType: value("mjGenType") || "Weekly",
+      days: [...document.querySelectorAll(".mjGenDay:checked")].map(cb => parseInt(cb.value, 10)),
+      startTime: value("mjGenStartTime"),
+      pickup: value("mjGenPickup"),
+      dropoff: value("mjGenDropoff"),
+      pickupGeo: stopGeoData.get("mj_gen_pickup") || null,
+      dropoffGeo: stopGeoData.get("mj_gen_dropoff") || null
+    };
+  }
+  
   const organisation = organisations.find((item) => item.id === value("charterOrganisation"));
   if (!organisation) return;
   const pricing = calculatePricing();
-  const payload = buildPayload(organisation, stops, pricing, existingBooking);
+  const payload = buildPayload(organisation, jt, stops, returnStops, mjConfig, pricing, existingBooking);
   payload.bookingNumber = existingBooking.bookingNumber;
   const bookingRef = doc(db, "charterBookings", existingBooking.id);
   await setDoc(bookingRef, payload, {merge: true});

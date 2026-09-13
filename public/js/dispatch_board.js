@@ -1798,6 +1798,8 @@ function renderAssignedBlocksForDriver(empNo) {
       block.name ||
       block.jobName ||
       block.group ||
+      block.organisationName ||
+      block.customerName ||
       ""
     ).trim();
 
@@ -2415,7 +2417,7 @@ function getRouteRunCode(block) {
 }
 
 function getUnassignedGroupName(block) {
-  const direct = block.jobGroupName || block.groupName || block.schoolName || block.school || block.title || block.name || block.jobName || block.group || block.organisationName;
+  const direct = block.jobGroupName || block.groupName || block.schoolName || block.school || block.title || block.name || block.jobName || block.group || block.organisationName || block.customerName;
   if (direct) return String(direct).trim();
   const group = jobGroupsCache.find((item) => String(item.id) === String(block.jobGroupId || ""));
   return String(group?.title || group?.name || group?.organisationName || group?.clientName || "No Group").trim();
