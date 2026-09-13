@@ -128,6 +128,28 @@ export function detachAllAutocomplete() {
 }
 
 /* =========================================================
+   Single-leg duration estimate (for Smart Time Engine)
+========================================================= */
+export async function calculateLegDuration(originLatLng, destLatLng) {
+  if (!directionsService) throw new Error("Map not initialised");
+  if (!originLatLng?.lat || !destLatLng?.lat) return null;
+
+  const result = await directionsService.route({
+    origin: { lat: originLatLng.lat, lng: originLatLng.lng },
+    destination: { lat: destLatLng.lat, lng: destLatLng.lng },
+    travelMode: google.maps.TravelMode.DRIVING
+  });
+
+  const leg = result.routes?.[0]?.legs?.[0];
+  if (!leg) return null;
+
+  return {
+    durationMinutes: Math.round(leg.duration.value / 60),
+    distanceKm: Math.round(leg.distance.value / 100) / 10
+  };
+}
+
+/* =========================================================
    Route calculation
 ========================================================= */
 let routeDebounceTimer = null;
@@ -304,3 +326,6 @@ export async function reverseGeocode(lat, lng) {
 export function getRouteResult() { return routeResult; }
 export function isMapReady() { return mapInitialised; }
 export function getMap() { return map; }
+
+export function clearMapRoute() { if (directionsRenderer) directionsRenderer.setDirections({ routes: [] }); clearMarkers(); routeResult = null; }
+
