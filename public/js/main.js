@@ -328,7 +328,7 @@ export async function go(pageId) {
   if (pageId === "charterBookings") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./charter_bookings.js?v=1");
+    const mod = await import("./charter_bookings.js?v=3");
     await mod.renderCharterBookingsPage();
     return;
   }
