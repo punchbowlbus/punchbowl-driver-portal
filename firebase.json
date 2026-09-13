@@ -7,7 +7,30 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/quotation-response.html",
+        "function": "processQuotationResponse"
+      },
       { "source": "**", "destination": "/index.html" }
     ]
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20"
+  },
+  "emulators": {
+    "functions": {
+      "port": 5001
+    },
+    "firestore": {
+      "port": 8080
+    },
+    "hosting": {
+      "port": 5000
+    },
+    "ui": {
+      "enabled": true
+    },
+    "singleProjectMode": true
   }
 }

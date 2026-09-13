@@ -7,6 +7,7 @@ export const state = {
 
   // admin selections
   selectedJobGroupId: null,
+  dispatchDate: null,
 
   // shifts view
   shifts: [],

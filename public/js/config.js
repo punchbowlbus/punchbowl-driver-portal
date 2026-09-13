@@ -27,3 +27,16 @@ export const CHARTER_STATUS = ["Draft", "Confirmed", "Cancelled"];
 export const JOB_TYPES = ["School", "Charter", "Rail", "Loop", "Dead-run", "Other"];
 
 export const FCM_VAPID_KEY = "BIzWZ2A906hAey2Hy1egd3DSvjBkB0J0DmDvMkT_YOOkENbpLIudzp2K6zmLTMXgpSYJC6iGSfMj9kQudqXIOv8";
+
+// Google Maps API key – replace with your real key
+export const GOOGLE_MAPS_API_KEY = "AIzaSyDs-QUuIxxkl29q_sQDmeLdf6GJxvsInLI";
+
+// Company branding for quotation PDFs
+export const COMPANY = {
+  name: "Punchbowl Bus Company",
+  abn: "XX XXX XXX XXX",
+  address: "Your Address, Sydney NSW 2196",
+  phone: "(02) XXXX XXXX",
+  email: "charters@punchbowlbus.com.au",
+  website: "www.punchbowlbus.com.au"
+};

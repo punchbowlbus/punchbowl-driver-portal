@@ -13,6 +13,7 @@ import {
 } from "./db.js";
 
 import { els, showError } from "./ui.js";
+import { state } from "./state.js";
 import { calculateFatigue } from "./dispatch_fatigue.js";
 import { assignBlockToDriver } from "./dispatch_assignments.js";
 import { unassignBlockFromDriver } from "./dispatch_assignments.js";
@@ -30,7 +31,8 @@ export function renderDispatchBoardPage() {
     return `${y}-${m}-${d}`;
   }
 
-  const today = getLocalTodayStr();
+  const today = state.dispatchDate || getLocalTodayStr();
+  state.dispatchDate = null; // consume it
 
 els.contentArea.innerHTML = `
   <section id="dispatchBoardShell" class="dispatch-pro-shell" aria-label="Dispatch Board">
@@ -1813,6 +1815,7 @@ function renderAssignedBlocksForDriver(empNo) {
     return String(
       jobGroup.title ||
       jobGroup.name ||
+      jobGroup.organisationName ||
       jobGroup.clientName ||
       "No Group"
     ).trim();
@@ -2412,10 +2415,10 @@ function getRouteRunCode(block) {
 }
 
 function getUnassignedGroupName(block) {
-  const direct = block.jobGroupName || block.groupName || block.schoolName || block.school || block.title || block.name || block.jobName || block.group;
+  const direct = block.jobGroupName || block.groupName || block.schoolName || block.school || block.title || block.name || block.jobName || block.group || block.organisationName;
   if (direct) return String(direct).trim();
   const group = jobGroupsCache.find((item) => String(item.id) === String(block.jobGroupId || ""));
-  return String(group?.title || group?.name || group?.clientName || "No Group").trim();
+  return String(group?.title || group?.name || group?.organisationName || group?.clientName || "No Group").trim();
 }
 
 function buildUnassignedWorkSets(source = blocksCache) {
