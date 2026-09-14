@@ -130,9 +130,9 @@ function currentBusOdo(job) {
 }
 
 function mechanicMatchesJob(mechanic, job) {
-  return (job.assignedMechanicEmail && normalize(mechanic.email) === normalize(job.assignedMechanicEmail))
-    || (job.assignedMechanicEmployeeNumber && employeeNumber(mechanic) === String(job.assignedMechanicEmployeeNumber))
-    || normalize(employeeName(mechanic)) === normalize(job.assignedMechanic || job.assignedMechanicName);
+  if (job.assignedMechanicEmail) return normalize(mechanic.email) === normalize(job.assignedMechanicEmail);
+  if (job.assignedMechanicEmployeeNumber) return employeeNumber(mechanic) === String(job.assignedMechanicEmployeeNumber);
+  return normalize(employeeName(mechanic)) === normalize(job.assignedMechanic || job.assignedMechanicName);
 }
 
 function populateWorkingMechanic(job = selectedJob) {
@@ -155,11 +155,17 @@ async function updateWorkingMechanic() {
   const newNumber = employeeNumber(mechanic);
   const newEmail = normalize(mechanic.email);
   const button = els.updateWorkingMechanicBtn;
+  const previousJob = selectedJob;
+  const jobId = selectedJob.id;
   button.disabled = true;
   button.textContent = "Updating...";
+  selectedJob = { ...selectedJob, assignedMechanic:newName, assignedMechanicName:newName, assignedMechanicEmployeeNumber:newNumber, assignedMechanicEmail:newEmail, mechanicName:newName, status:selectedJob.status === "New" ? "Assigned" : selectedJob.status };
+  const assignedText = $("jobAssignedMechanicText");
+  if (assignedText) assignedText.textContent = newName;
+  showStatus(`Updating working mechanic to ${newName}...`);
   try {
     await runTransaction(db, async (tx) => {
-      const ref = doc(db, "workshopJobs", selectedJob.id);
+      const ref = doc(db, "workshopJobs", jobId);
       const snap = await tx.get(ref);
       if (!snap.exists()) throw new Error("This workshop job no longer exists.");
       const current = snap.data();
@@ -188,11 +194,10 @@ async function updateWorkingMechanic() {
         updatedByEmail:normalize(currentUser?.email)
       });
     });
-    selectedJob = { ...selectedJob, assignedMechanic:newName, assignedMechanicName:newName, assignedMechanicEmployeeNumber:newNumber, assignedMechanicEmail:newEmail, mechanicName:newName, status:selectedJob.status === "New" ? "Assigned" : selectedJob.status };
-    const assignedText = $("jobAssignedMechanicText");
-    if (assignedText) assignedText.textContent = newName;
     showStatus(`Working mechanic updated to ${newName}.`);
   } catch (err) {
+    selectedJob = previousJob;
+    if (assignedText) assignedText.textContent = previousJob.assignedMechanic || previousJob.assignedMechanicName || "Unassigned";
     showStatus(err?.message || "Unable to update the working mechanic.", "error");
   } finally {
     button.textContent = "Update Mechanic";
