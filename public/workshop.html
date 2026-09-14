@@ -169,11 +169,16 @@
 
       <section id="reportsView" class="view">
         <div class="page-head">
-          <div><h1>Compliance Reports</h1><p>Review, filter and print 90-day safety inspection records.</p></div>
+          <div><h1>Workshop Reports</h1><p>Compliance records and workshop operational reporting.</p></div>
           <button id="refreshComplianceReports" class="button secondary" type="button">Refresh</button>
         </div>
-        <div id="complianceReportMetrics" class="metrics-grid"></div>
-        <section class="panel table-panel">
+        <div class="report-tabs">
+          <button class="active" data-report-tab="compliance90" type="button">90-Day Compliance</button>
+          <button data-report-tab="workshopJobs" type="button">Workshop Jobs</button>
+        </div>
+        <div id="compliance90ReportTab" class="report-tab-panel">
+          <div id="complianceReportMetrics" class="metrics-grid"></div>
+          <section class="panel table-panel">
           <div class="report-filter-grid">
             <label>Search<input id="complianceReportSearch" type="search" placeholder="Job, bus, rego or mechanic" /></label>
             <label>Status<select id="complianceReportStatus"><option value="">All statuses</option><option value="Closed">Completed / Closed</option><option value="Waiting Approval">Waiting Approval</option><option value="Active">Active inspection</option></select></label>
@@ -183,11 +188,28 @@
             <button id="clearComplianceReportFilters" class="button secondary" type="button">Clear Filters</button>
           </div>
           <div id="complianceReportList"></div>
-        </section>
-        <section class="panel table-panel">
-          <div class="panel-head"><div><h2>Fleet 90-Day Status</h2><span class="hint">Every fleet record, including buses without a recorded inspection date.</span></div></div>
-          <div id="complianceFleetStatus"></div>
-        </section>
+          </section>
+          <section class="panel table-panel">
+            <div class="panel-head"><div><h2>Fleet 90-Day Status</h2><span class="hint">Every fleet record, including buses without a recorded inspection date.</span></div></div>
+            <div id="complianceFleetStatus"></div>
+          </section>
+        </div>
+        <div id="workshopJobsReportTab" class="report-tab-panel" hidden>
+          <div id="workshopJobReportMetrics" class="metrics-grid"></div>
+          <section class="panel table-panel">
+            <div class="report-filter-grid job-report-filters">
+              <label>Search<input id="workshopJobReportSearch" type="search" placeholder="Job, bus, fault or mechanic" /></label>
+              <label>Status<select id="workshopJobReportStatus"><option value="">All statuses</option><option>New</option><option>Assigned</option><option>In Progress</option><option>Waiting Parts</option><option>Waiting Approval</option><option>Completed</option><option>Closed</option><option>Cancelled</option></select></label>
+              <label>Job type<select id="workshopJobReportType"><option value="">All job types</option></select></label>
+              <label>Mechanic<select id="workshopJobReportMechanic"><option value="">All mechanics</option></select></label>
+              <label>Created from<input id="workshopJobReportFrom" type="date" /></label>
+              <label>Created to<input id="workshopJobReportTo" type="date" /></label>
+              <button id="clearWorkshopJobReportFilters" class="button secondary" type="button">Clear Filters</button>
+            </div>
+            <div class="report-export-row"><span id="workshopJobReportResultCount" class="hint"></span><div><button id="exportWorkshopJobsCsv" class="button secondary" type="button">Export CSV</button> <button id="printWorkshopJobsReport" class="button primary" type="button">Print Summary</button></div></div>
+            <div id="workshopJobReportList"></div>
+          </section>
+        </div>
       </section>
     </main>
   </div>
@@ -213,7 +235,7 @@
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js?v=20260908-fleet-actions"></script>
-  <script type="module" src="./js/workshop_manager_approval.js?v=20260914-prestart-actions"></script>
+  <script type="module" src="./js/workshop_manager_approval.js?v=20260914-report-review"></script>
   <script type="module" src="./js/workshop_review_status_fix.js"></script>
   <script type="module" src="./js/workshop_checklist_labels.js"></script>
   <script type="module" src="./js/workshop_job_photos_preview.js?v=20260909-pdf-attachments"></script>
@@ -227,6 +249,6 @@
   <script type="module" src="./js/workshop_job_edit.js?v=20260914-review-actions"></script>
   <script type="module" src="./js/workshop_driver_defects.js?v=20260908-job-card"></script>
   <script type="module" src="./js/workshop_print_fix.js"></script>
-  <script type="module" src="./js/workshop_compliance_reports.js?v=20260914-date-confirmation"></script>
+  <script type="module" src="./js/workshop_compliance_reports.js?v=20260914-workshop-job-reports"></script>
 </body>
 </html>

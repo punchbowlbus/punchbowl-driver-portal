@@ -254,6 +254,7 @@ function openReview(jobId) {
   $("wmApproveClose").hidden = !waiting;
   $("fleetManagerReviewDialog").showModal();
 }
+window.openFleetManagerJobReview = openReview;
 
 async function returnToMechanic() {
   if (!selectedJob || selectedJob.status !== "Waiting Approval") return;
