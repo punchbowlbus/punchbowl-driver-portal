@@ -175,6 +175,8 @@
         <div class="report-tabs">
           <button class="active" data-report-tab="compliance90" type="button">90-Day Compliance</button>
           <button data-report-tab="workshopJobs" type="button">Workshop Jobs</button>
+          <button data-report-tab="driverDefects" type="button">Driver Defects</button>
+          <button data-report-tab="fleetCompliance" type="button">Fleet Compliance</button>
         </div>
         <div id="compliance90ReportTab" class="report-tab-panel">
           <div id="complianceReportMetrics" class="metrics-grid"></div>
@@ -208,6 +210,36 @@
             </div>
             <div class="report-export-row"><span id="workshopJobReportResultCount" class="hint"></span><div><button id="exportWorkshopJobsCsv" class="button secondary" type="button">Export CSV</button> <button id="printWorkshopJobsReport" class="button primary" type="button">Print Summary</button></div></div>
             <div id="workshopJobReportList"></div>
+          </section>
+        </div>
+        <div id="driverDefectsReportTab" class="report-tab-panel" hidden>
+          <div id="driverDefectReportMetrics" class="metrics-grid"></div>
+          <section class="panel table-panel">
+            <div class="report-filter-grid">
+              <label>Search<input id="driverDefectReportSearch" type="search" placeholder="Report, bus, driver or description" /></label>
+              <label>Status<select id="driverDefectReportStatus"><option value="">All statuses</option><option>New</option><option>Acknowledged</option><option>Workshop Assigned</option><option>Completed</option><option>Closed</option></select></label>
+              <label>Category<select id="driverDefectReportCategory"><option value="">All categories</option></select></label>
+              <label>Safety<select id="driverDefectReportSafety"><option value="">Safe and unsafe</option><option value="No">Unsafe to drive</option><option value="Yes">Safe to drive</option></select></label>
+              <label>Reported from<input id="driverDefectReportFrom" type="date" /></label>
+              <label>Reported to<input id="driverDefectReportTo" type="date" /></label>
+              <button id="clearDriverDefectReportFilters" class="button secondary" type="button">Clear Filters</button>
+            </div>
+            <div class="report-export-row"><span id="driverDefectReportResultCount" class="hint"></span><div><button id="exportDriverDefectsCsv" class="button secondary" type="button">Export CSV</button><button id="printDriverDefectsReport" class="button primary" type="button">Print Summary</button></div></div>
+            <div id="driverDefectReportList"></div>
+          </section>
+        </div>
+        <div id="fleetComplianceReportTab" class="report-tab-panel" hidden>
+          <div id="fleetComplianceMetrics" class="metrics-grid"></div>
+          <section class="panel table-panel fleet-compliance-panel">
+            <div class="report-filter-grid fleet-report-filters">
+              <label>Search<input id="fleetComplianceSearch" type="search" placeholder="Fleet, rego, make or model" /></label>
+              <label>Overall status<select id="fleetComplianceStatus"><option value="">All compliance states</option><option value="Critical">Critical</option><option value="Attention">Attention</option><option value="Compliant">Compliant</option></select></label>
+              <label>Depot<select id="fleetComplianceDepot"><option value="">All depots</option></select></label>
+              <label>Vehicle type<select id="fleetComplianceVehicleType"><option value="">Diesel and Electric</option><option value="Diesel">Diesel</option><option value="Electric">Electric</option></select></label>
+              <button id="clearFleetComplianceFilters" class="button secondary" type="button">Clear Filters</button>
+            </div>
+            <div class="report-export-row"><span id="fleetComplianceResultCount" class="hint"></span><div><button id="exportFleetComplianceCsv" class="button secondary" type="button">Export CSV</button><button id="printFleetComplianceReport" class="button primary" type="button">Print Summary</button></div></div>
+            <div id="fleetComplianceList"></div>
           </section>
         </div>
       </section>
@@ -249,6 +281,6 @@
   <script type="module" src="./js/workshop_job_edit.js?v=20260914-review-actions"></script>
   <script type="module" src="./js/workshop_driver_defects.js?v=20260908-job-card"></script>
   <script type="module" src="./js/workshop_print_fix.js"></script>
-  <script type="module" src="./js/workshop_compliance_reports.js?v=20260914-workshop-job-reports"></script>
+  <script type="module" src="./js/workshop_compliance_reports.js?v=20260914-stage34-pro"></script>
 </body>
 </html>
