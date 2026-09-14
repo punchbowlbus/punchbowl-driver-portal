@@ -16,7 +16,7 @@ import {
 import { auth, db, provider } from "./firebase.js";
 import { ADMIN_EMAILS } from "./config.js";
 import { getEmployeeByEmail } from "./db.js";
-import { getRequirementTemplate } from "./workshop_service_requirements.js";
+import { getRequirementTemplate } from "./workshop_service_requirements.js?v=20260914-descriptions";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -153,8 +153,12 @@ function requirementData(job) {
       title: job.assignedChecklist.templateTitle || `${categoryLabel(job) || job.jobType} Checklist`,
       source: job.assignedChecklist.templateSource || "Assigned workshop checklist",
       schedule: job.assignedChecklist.schedule || "",
-      items: job.assignedChecklist.items.map((item) => {
-        const current = currentItems.get(String(item.id)) || {};
+      items: job.assignedChecklist.items.map((item, index) => {
+        const positionMatch = template?.items?.[index];
+        const samePositionItem = positionMatch
+          && normalize(positionMatch.item) === normalize(item.item)
+          && normalize(positionMatch.action) === normalize(item.action);
+        const current = currentItems.get(String(item.id)) || (samePositionItem ? positionMatch : {});
         return { ...current, ...item, description:item.description || current.description || "", mandatory:item.mandatory ?? current.mandatory ?? true };
       })
     };
@@ -198,7 +202,7 @@ function renderRequirementChecklist(job, requirement) {
           const current = savedChecklistValue(saved, key, item);
           const note = job.jobCard?.checklistNotes?.[key] || "";
           return `<div class="check-row" style="align-items:center">
-            <label for="check_${index}"><strong>${esc(item)}</strong>${action ? `<div class="list-meta"><strong>Action:</strong> ${esc(action)}</div>` : ""}${description ? `<div class="check-description">${esc(description)}</div>` : ""}</label>
+            <label for="check_${index}"><strong>${esc(item)}</strong>${action ? `<div class="list-meta"><strong>Action:</strong> ${esc(action)}</div>` : ""}${description ? `<div class="check-description"><strong>Description of Work:</strong> ${esc(description)}</div>` : ""}</label>
             <div class="check-response">
             <select id="check_${index}" data-check-key="${esc(key)}" data-check-item="${esc(item)}" data-check-action="${esc(action || "")}" data-check-description="${esc(description || "")}" ${mandatory === false ? "" : 'data-required-work="1"'}>
               <option value="">Select result</option>
