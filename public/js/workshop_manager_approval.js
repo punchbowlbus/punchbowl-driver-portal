@@ -86,6 +86,11 @@ function injectStyles() {
     .wm-clickable { cursor:pointer; }
     .wm-clickable:hover { background:#f8fafc; }
     .wm-action-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+    .wm-prestart-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; border:1px solid #b2ddff; background:#eff8ff; border-radius:10px; padding:12px; margin-bottom:14px; }
+    .wm-prestart-actions strong { color:#1849a9; }
+    .wm-prestart-buttons { display:flex; gap:8px; flex-wrap:wrap; }
+    #wmEditJob { border-color:#175cd3; color:#1849a9; }
+    #wmRemoveJob { border-color:#f04438; color:#b42318; }
     .wm-review-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
     .wm-review-box { border:1px solid #d9e1ea; border-radius:10px; padding:12px; background:#f8fafc; }
     .wm-review-label { font-size:11px; text-transform:uppercase; font-weight:800; color:#5d6a78; margin-bottom:4px; }
@@ -112,6 +117,13 @@ function ensureDialogs() {
         <div class="dialog-head">
           <div><h2>Fleet Manager Review</h2><p id="wmReviewSubtitle">Review the completed electronic job card.</p></div>
           <button type="button" class="icon-button" id="wmReviewClose">×</button>
+        </div>
+        <div id="wmPreStartActions" class="wm-prestart-actions" hidden>
+          <strong>Pre-start job actions</strong>
+          <div class="wm-prestart-buttons">
+            <button type="button" class="button secondary" id="wmEditJob">Edit Job</button>
+            <button type="button" class="button secondary" id="wmRemoveJob">Remove Job</button>
+          </div>
         </div>
         <div id="wmReviewBody"></div>
         <div class="section-title">Fleet Manager Decision</div>
@@ -145,6 +157,16 @@ function ensureDialogs() {
     document.body.appendChild(d);
     $("wmReviewClose").onclick = () => d.close();
     $("wmPrintJob").onclick = () => selectedJob && printJobCard(selectedJob);
+    $("wmEditJob").onclick = () => {
+      if (!selectedJob || typeof window.openWorkshopJobEditDialog !== "function") return toast("The Edit Job form is not ready. Please refresh and try again.", "error");
+      d.close();
+      window.openWorkshopJobEditDialog(selectedJob);
+    };
+    $("wmRemoveJob").onclick = () => {
+      if (!selectedJob || typeof window.openWorkshopJobRemoveDialog !== "function") return toast("The Remove Job action is not ready. Please refresh and try again.", "error");
+      d.close();
+      window.openWorkshopJobRemoveDialog(selectedJob);
+    };
     $("wmReturnMechanic").onclick = returnToMechanic;
     $("wmApproveClose").onclick = approveAndClose;
   }
@@ -211,6 +233,10 @@ function openReview(jobId) {
   const job = jobs.find((j) => j.id === jobId);
   if (!job) return toast("Workshop job could not be found.", "error");
   selectedJob = job;
+  const preStartEditable = ["New", "Assigned"].includes(job.status || "New")
+    && !job.startedAt
+    && !job.jobCard?.labourStart;
+  $("wmPreStartActions").hidden = !preStartEditable;
   const bus = busForJob(job);
   $("wmReviewSubtitle").textContent = `${job.jobNumber || job.id} · ${job.fleetNumber || ""} · ${job.status || ""}`;
   $("wmReviewBody").innerHTML = approvalDisplay(job);

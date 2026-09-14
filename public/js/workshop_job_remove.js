@@ -80,6 +80,7 @@ function openRemoveDialog(job) {
   document.getElementById("removeJobDetail").textContent = `${job.fleetNumber || "Bus"} · ${job.jobType || "Workshop Job"} · ${job.assignedMechanic || "Unassigned"}`;
   document.getElementById("removeWorkshopJobDialog").showModal();
 }
+window.openWorkshopJobRemoveDialog = openRemoveDialog;
 
 async function removeConfirmedJob() {
   if (!pendingJob) return;

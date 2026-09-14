@@ -52,6 +52,7 @@ function openEditDialog(job) {
 
   dialog.showModal();
 }
+window.openWorkshopJobEditDialog = openEditDialog;
 
 function enhanceRows() {
   if (rendering) return;
