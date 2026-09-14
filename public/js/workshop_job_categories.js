@@ -3,7 +3,8 @@ import {
   collection,
   doc,
   getDoc,
-  serverTimestamp
+  serverTimestamp,
+  updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
 import { getRequirementTemplate } from "./workshop_service_requirements.js";
@@ -202,7 +203,9 @@ async function createJobWithCategory(event) {
       id: `${requirementKey}-${index + 1}`,
       section: item.section || "General",
       item: item.item || "",
-      action: item.action || ""
+      action: item.action || "",
+      description: item.description || "",
+      mandatory: item.mandatory !== false
     }))
   } : null;
 
@@ -240,26 +243,64 @@ async function createJobWithCategory(event) {
     schemaVersion:3
   };
 
+  const editingJob = window.workshopEditingJob || null;
   const submitBtn = form.querySelector('button[type="submit"]');
   if (submitBtn) {
     submitBtn.disabled = true;
-    submitBtn.textContent = "Creating...";
+    submitBtn.textContent = editingJob ? "Saving..." : "Creating...";
   }
 
   try {
-    await addDoc(collection(db, "workshopJobs"), payload);
+    if (editingJob) {
+      const jobRef = doc(db, "workshopJobs", editingJob.id);
+      const currentSnap = await getDoc(jobRef);
+      if (!currentSnap.exists()) throw new Error("This workshop job no longer exists.");
+      const current = currentSnap.data();
+      const canEdit = ["New", "Assigned"].includes(current.status || "New")
+        && !current.startedAt
+        && !current.jobCard?.labourStart;
+      if (!canEdit) throw new Error("This job is locked because mechanic work has already started.");
+
+      await updateDoc(jobRef, {
+        busId:payload.busId,
+        fleetNumber:payload.fleetNumber,
+        rego:payload.rego,
+        jobType:payload.jobType,
+        jobCategory:payload.jobCategory,
+        serviceType:payload.serviceType,
+        inspectionType:payload.inspectionType,
+        serviceProgram:payload.serviceProgram,
+        serviceTemplateKey:payload.serviceTemplateKey,
+        assignedChecklist:payload.assignedChecklist,
+        serviceIntervalKm:payload.serviceIntervalKm,
+        serviceDueOdometer:payload.serviceDueOdometer,
+        priority:payload.priority,
+        status:payload.status,
+        assignedMechanic:payload.assignedMechanic,
+        dueDate:payload.dueDate,
+        reportedFault:payload.reportedFault,
+        managerNotes:payload.managerNotes,
+        updatedAt:serverTimestamp(),
+        updatedByEmail:normalizeEmail(auth.currentUser?.email)
+      });
+    } else {
+      await addDoc(collection(db, "workshopJobs"), payload);
+    }
     form.reset();
     $("jobCategoryWrap").hidden = true;
     $("jobDialog")?.close();
     const categoryText = category ? ` · ${category}` : "";
     const checklistText = assignedChecklist ? ` · ${assignedChecklist.items.length} checklist items assigned` : "";
-    showStatus(`✓ Workshop job ${jobNumber} created${categoryText}${checklistText}.`);
+    showStatus(editingJob
+      ? `✓ Workshop job ${editingJob.jobNumber || editingJob.id} updated.`
+      : `✓ Workshop job ${jobNumber} created${categoryText}${checklistText}.`);
+    window.workshopEditingJob = null;
   } catch (err) {
     showStatus(err?.message || "Unable to create workshop job.", "error");
   } finally {
     if (submitBtn) {
       submitBtn.disabled = false;
-      submitBtn.textContent = "Create Job Card";
+      submitBtn.textContent = window.workshopEditingJob ? "Save Changes" : "Create Job Card";
     }
   }
 }
