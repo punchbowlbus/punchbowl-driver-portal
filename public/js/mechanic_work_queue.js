@@ -1,10 +1,11 @@
 import {
   collection,
   doc,
+  getDoc,
   onSnapshot,
   orderBy,
   query,
-  runTransaction,
+  arrayUnion,
   serverTimestamp,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
@@ -164,23 +165,21 @@ async function updateWorkingMechanic() {
   if (assignedText) assignedText.textContent = newName;
   showStatus(`Updating working mechanic to ${newName}...`);
   try {
-    await runTransaction(db, async (tx) => {
-      const ref = doc(db, "workshopJobs", jobId);
-      const snap = await tx.get(ref);
-      if (!snap.exists()) throw new Error("This workshop job no longer exists.");
-      const current = snap.data();
-      if (!["New","Assigned","In Progress","Waiting Parts"].includes(current.status || "New")) {
-        throw new Error("The working mechanic is locked because this job has been sent for Fleet Manager approval.");
-      }
-      const history = Array.isArray(current.mechanicAssignmentHistory) ? current.mechanicAssignmentHistory : [];
-      tx.update(ref, {
+    const ref = doc(db, "workshopJobs", jobId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) throw new Error("This workshop job no longer exists.");
+    const current = snap.data();
+    if (!["New","Assigned","In Progress","Waiting Parts"].includes(current.status || "New")) {
+      throw new Error("The working mechanic is locked because this job has been sent for Fleet Manager approval.");
+    }
+    await updateDoc(ref, {
         assignedMechanic:newName,
         assignedMechanicName:newName,
         assignedMechanicEmployeeNumber:newNumber,
         assignedMechanicEmail:newEmail,
         mechanicName:newName,
         status:current.status === "New" ? "Assigned" : current.status,
-        mechanicAssignmentHistory:[...history.slice(-99), {
+        mechanicAssignmentHistory:arrayUnion({
           fromName:current.assignedMechanic || current.assignedMechanicName || "Unassigned",
           fromEmployeeNumber:current.assignedMechanicEmployeeNumber || "",
           toName:newName,
@@ -188,11 +187,11 @@ async function updateWorkingMechanic() {
           changedByName:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Workshop user",
           changedByEmployeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
           changedByEmail:normalize(currentUser?.email),
+          changeId:`${Date.now()}-${currentUser?.uid || "workshop"}`,
           changedAtIso:new Date().toISOString()
-        }],
+        }),
         updatedAt:serverTimestamp(),
         updatedByEmail:normalize(currentUser?.email)
-      });
     });
     showStatus(`Working mechanic updated to ${newName}.`);
   } catch (err) {
@@ -203,6 +202,19 @@ async function updateWorkingMechanic() {
     button.textContent = "Update Mechanic";
     populateWorkingMechanic(selectedJob);
   }
+}
+
+function previewWorkingMechanic() {
+  if (!selectedJob) return;
+  const mechanic = mechanics.find((item) => item.id === els.jobWorkingMechanic.value);
+  const assignedText = $("jobAssignedMechanicText");
+  if (!mechanic) {
+    if (assignedText) assignedText.textContent = selectedJob.assignedMechanic || selectedJob.assignedMechanicName || "Unassigned";
+    els.updateWorkingMechanicBtn.textContent = "Update Mechanic";
+    return;
+  }
+  if (assignedText) assignedText.textContent = employeeName(mechanic);
+  els.updateWorkingMechanicBtn.textContent = mechanicMatchesJob(mechanic, selectedJob) ? "Mechanic Selected" : "Save Mechanic";
 }
 
 function busIsEv(bus) {
@@ -475,6 +487,7 @@ els.refreshBtn.addEventListener("click", () => renderQueue());
 els.backToQueueBtn.addEventListener("click", () => { selectedJob = null; els.jobCardView.hidden = true; els.queueView.hidden = false; clearStatus(); });
 els.addPartBtn.addEventListener("click", () => partRow());
 els.updateWorkingMechanicBtn.addEventListener("click", updateWorkingMechanic);
+els.jobWorkingMechanic.addEventListener("change", previewWorkingMechanic);
 els.jobChecklist.addEventListener("change", (event) => {
   const select = event.target.closest?.("select[data-check-key]");
   if (!select) return;

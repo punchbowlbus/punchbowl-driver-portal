@@ -1,5 +1,5 @@
-import { collection, onSnapshot, orderBy, query } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
-import { db } from "./firebase.js";
+import { collection, doc, onSnapshot, orderBy, query, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import { auth, db } from "./firebase.js";
 import { getRequirementTemplate } from "./workshop_service_requirements.js?v=20260914-descriptions";
 
 const $ = (id) => document.getElementById(id);
@@ -13,6 +13,12 @@ let busUnsub = null;
 
 function localDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+function addDays(dateString, days) {
+  const date = new Date(`${dateString}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return "";
+  date.setDate(date.getDate() + days);
+  return localDate(date);
 }
 function fmtDate(value) {
   if (!value) return "—";
@@ -77,7 +83,7 @@ function renderReportList() {
   const list = filteredJobs().sort((a,b) => String(inspectionDate(b) || "9999").localeCompare(String(inspectionDate(a) || "9999")));
   $("complianceReportList").innerHTML = list.length ? `<div class="table-wrap"><table class="compliance-table"><thead><tr><th>Inspection</th><th>Bus</th><th>Vehicle</th><th>Inspection Date</th><th>Mechanic</th><th>Fleet Manager Sign-off</th><th>Status</th><th>Action</th></tr></thead><tbody>${list.map((job)=>{
     const approval=job.fleetManagerApproval||{};
-    return `<tr><td><strong>${esc(job.jobNumber||job.id)}</strong><div class="list-meta">${esc(job.assignedChecklist?.templateTitle || job.inspectionType || "90 Day Safety Check")}</div></td><td><strong>${esc(job.fleetNumber||"—")}</strong><div class="list-meta">${esc(job.rego||"")}</div></td><td>${esc(vehicleType(job))}</td><td>${esc(fmtDate(inspectionDate(job)))}</td><td>${esc(job.mechanicInspectionSignOff?.name || job.mechanicName || job.assignedMechanic || "—")}</td><td>${esc(approval.approvedByName || approval.approvedByEmail || "Not signed off")}<div class="list-meta">${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div></td><td><span class="badge ${job.status==="Closed"?"good":job.status==="Waiting Approval"?"warn":"info"}">${esc(job.status||"Active")}</span>${attentionCount(job)?`<div class="list-meta report-attention">${attentionCount(job)} attention item(s)</div>`:""}</td><td><button class="button secondary" type="button" data-compliance-view="${esc(job.id)}">View Report</button></td></tr>`;
+    return `<tr><td><strong>${esc(job.jobNumber||job.id)}</strong><div class="list-meta">${esc(job.assignedChecklist?.templateTitle || job.inspectionType || "90 Day Safety Check")}</div></td><td><strong>${esc(job.fleetNumber||"—")}</strong><div class="list-meta">${esc(job.rego||"")}</div></td><td>${esc(vehicleType(job))}</td><td>${inspectionDate(job)?esc(fmtDate(inspectionDate(job))):'<span class="badge warn">CONFIRM DATE</span><div class="list-meta">Missing inspection date</div>'}</td><td>${esc(job.mechanicInspectionSignOff?.name || job.mechanicName || job.assignedMechanic || "—")}</td><td>${esc(approval.approvedByName || approval.approvedByEmail || "Not signed off")}<div class="list-meta">${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div></td><td><span class="badge ${job.status==="Closed"?"good":job.status==="Waiting Approval"?"warn":"info"}">${esc(job.status||"Active")}</span>${attentionCount(job)?`<div class="list-meta report-attention">${attentionCount(job)} attention item(s)</div>`:""}</td><td><button class="button secondary" type="button" data-compliance-view="${esc(job.id)}">View Report</button></td></tr>`;
   }).join("")}</tbody></table></div>` : `<div class="empty">No 90-day inspection records match these filters.</div>`;
   $("complianceReportList").querySelectorAll("[data-compliance-view]").forEach((button)=>button.addEventListener("click",()=>openReport(button.dataset.complianceView)));
 }
@@ -110,7 +116,7 @@ function reportHtml(job) {
     <div class="wm-review-box"><div class="wm-review-label">Fleet Manager sign-off</div>${esc(approval.approvedByName||approval.approvedByEmail||"Not signed off")}<div class="list-meta">${esc(fmtDateTime(approval.approvedAt||job.closedAt))}</div></div>
     <div class="wm-review-box"><div class="wm-review-label">Next due</div>${esc(fmtDate(busFor(job)?.next90DaySafetyCheckDate))}</div>
     <div class="wm-review-box wm-full"><div class="wm-review-label">Fleet Manager comments</div>${esc(approval.comments||"—")}</div>
-  </div><h3>Mandatory Inspection Checklist</h3><div class="table-wrap">${checklistRows(job)}</div>`;
+  </div>${!inspectionDate(job) ? `<section class="missing-inspection-date"><h3>Inspection Date Confirmation Required</h3><p>This legacy record has no confirmed physical inspection date. Enter the actual date from the workshop record.</p><div class="report-date-correction"><label>Actual inspection date<input id="confirmInspectionDate" type="date" max="${localDate()}" /></label><label>Confirmation note<input id="confirmInspectionDateReason" placeholder="Source of the confirmed date" /></label><button id="saveConfirmedInspectionDate" class="button primary" type="button">Save Confirmed Date</button></div><div id="inspectionDateCorrectionMessage" class="status"></div></section>` : ""}<h3>Mandatory Inspection Checklist</h3><div class="table-wrap">${checklistRows(job)}</div>`;
 }
 
 function ensureDialog() {
@@ -120,7 +126,32 @@ function ensureDialog() {
   document.body.appendChild(dialog);
   $("closeComplianceReport").onclick=()=>dialog.close();$("doneComplianceReport").onclick=()=>dialog.close();$("printComplianceReport").onclick=printReport;
 }
-function openReport(id) { ensureDialog();selectedJob=jobs.find((job)=>job.id===id);if(!selectedJob)return;$("complianceReportBody").innerHTML=reportHtml(selectedJob);$("complianceReportDialog").showModal(); }
+function openReport(id) { ensureDialog();selectedJob=jobs.find((job)=>job.id===id);if(!selectedJob)return;$("complianceReportBody").innerHTML=reportHtml(selectedJob);$("saveConfirmedInspectionDate")?.addEventListener("click",saveConfirmedInspectionDate);$("complianceReportDialog").showModal(); }
+async function saveConfirmedInspectionDate() {
+  if(!selectedJob || inspectionDate(selectedJob)) return;
+  const date=$("confirmInspectionDate")?.value||"";
+  const reason=$("confirmInspectionDateReason")?.value.trim()||"";
+  const message=$("inspectionDateCorrectionMessage");
+  if(!date || !reason){message.className="status error";message.textContent="Enter the actual inspection date and the source used to confirm it.";return;}
+  const button=$("saveConfirmedInspectionDate");button.disabled=true;button.textContent="Saving...";
+  try{
+    await runTransaction(db,async(tx)=>{
+      const jobRef=doc(db,"workshopJobs",selectedJob.id);const jobSnap=await tx.get(jobRef);
+      if(!jobSnap.exists())throw new Error("This inspection job no longer exists.");
+      const current=jobSnap.data();
+      if(current.inspectionCompletedDate||current.jobCard?.inspectionCompletedDate)throw new Error("An inspection date has already been recorded. Refresh the report.");
+      const audit=Array.isArray(current.inspectionDateAudit)?current.inspectionDateAudit:[];
+      const bus=busFor(selectedJob);
+      const busRef=bus?.id?doc(db,"buses",bus.id):null;
+      const busSnap=busRef?await tx.get(busRef):null;
+      tx.update(jobRef,{inspectionCompletedDate:date,inspectionDateAudit:[...audit,{previousDate:"",newDate:date,changedByName:auth.currentUser?.displayName||auth.currentUser?.email||"Fleet Manager",changedByEmail:norm(auth.currentUser?.email),changedAt:new Date().toISOString(),reason}],updatedAt:serverTimestamp()});
+      if(busSnap?.exists()){const data=busSnap.data();if(!data.last90DaySafetyCheckDate||String(data.last90DaySafetyCheckDate)<=date)tx.update(busRef,{last90DaySafetyCheckDate:date,next90DaySafetyCheckDate:addDays(date,90),last90DaySafetyCheckJobId:selectedJob.id,last90DaySafetyCheckJobNumber:selectedJob.jobNumber||"",updatedAt:serverTimestamp()});}
+    });
+    selectedJob={...selectedJob,inspectionCompletedDate:date};
+    $("complianceReportBody").innerHTML=reportHtml(selectedJob);
+    const status=$("status");if(status){status.className="status success";status.textContent=`Inspection date confirmed for ${selectedJob.jobNumber||selectedJob.id}.`;}
+  }catch(error){message.className="status error";message.textContent=error?.message||"Unable to save the inspection date.";button.disabled=false;button.textContent="Save Confirmed Date";}
+}
 function printReport() {
   if(!selectedJob)return;
   const win=window.open("","_blank");
@@ -132,7 +163,7 @@ function printReport() {
 function renderAll(){renderMetrics();renderReportList();renderFleetStatus();}
 function start(){if(jobUnsub||busUnsub)return;ensureDialog();jobUnsub=onSnapshot(query(collection(db,"workshopJobs"),orderBy("createdAt","desc")),snap=>{jobs=snap.docs.map(doc=>({id:doc.id,...doc.data()}));renderAll();});busUnsub=onSnapshot(collection(db,"buses"),snap=>{buses=snap.docs.map(doc=>({id:doc.id,...doc.data()}));renderAll();});}
 
-function injectStyles(){const style=document.createElement("style");style.textContent=`.report-filter-grid{display:grid;grid-template-columns:2fr repeat(4,minmax(140px,1fr)) auto;gap:10px;align-items:end;padding:16px}.report-filter-grid label{display:grid;gap:5px;font-size:12px;font-weight:800}.compliance-table td{vertical-align:top}.report-attention{color:#b42318;font-weight:800}.compliance-report-dialog{width:min(1250px,calc(100vw - 28px))}.compliance-report-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px}.compliance-detail-grid{margin-bottom:18px}.compliance-checklist{min-width:900px}@media(max-width:1000px){.report-filter-grid{grid-template-columns:repeat(2,1fr)}}@media(max-width:600px){.report-filter-grid{grid-template-columns:1fr}}`;document.head.appendChild(style);}
+function injectStyles(){const style=document.createElement("style");style.textContent=`.report-filter-grid{display:grid;grid-template-columns:2fr repeat(4,minmax(140px,1fr)) auto;gap:10px;align-items:end;padding:16px}.report-filter-grid label{display:grid;gap:5px;font-size:12px;font-weight:800}.compliance-table td{vertical-align:top}.report-attention{color:#b42318;font-weight:800}.compliance-report-dialog{width:min(1250px,calc(100vw - 28px))}.compliance-report-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:14px}.compliance-detail-grid{margin-bottom:18px}.compliance-checklist{min-width:900px}.missing-inspection-date{border:1px solid #f79009;background:#fffaeb;border-radius:12px;padding:14px;margin:16px 0}.missing-inspection-date h3{color:#93370d;margin-top:0}.report-date-correction{display:grid;grid-template-columns:220px 1fr auto;gap:10px;align-items:end}.report-date-correction label{display:grid;gap:5px;font-size:12px;font-weight:800}@media(max-width:1000px){.report-filter-grid{grid-template-columns:repeat(2,1fr)}.report-date-correction{grid-template-columns:1fr}}@media(max-width:600px){.report-filter-grid{grid-template-columns:1fr}}`;document.head.appendChild(style);}
 injectStyles();
 ["complianceReportSearch","complianceReportStatus","complianceReportVehicleType","complianceReportFrom","complianceReportTo"].forEach(id=>$(id)?.addEventListener(id==="complianceReportSearch"?"input":"change",renderReportList));
 $("clearComplianceReportFilters")?.addEventListener("click",()=>{["complianceReportSearch","complianceReportStatus","complianceReportVehicleType","complianceReportFrom","complianceReportTo"].forEach(id=>{$(id).value="";});renderReportList();});
