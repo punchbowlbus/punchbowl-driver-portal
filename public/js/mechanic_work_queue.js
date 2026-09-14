@@ -4,6 +4,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
@@ -23,16 +24,18 @@ const els = {
   authText: $("authText"), loginBtn: $("loginBtn"), logoutBtn: $("logoutBtn"), status: $("status"),
   queueView: $("queueView"), jobCardView: $("jobCardView"), mechanicIdentity: $("mechanicIdentity"), refreshBtn: $("refreshBtn"), statusFilter: $("statusFilter"), jobQueue: $("jobQueue"),
   metricAssigned: $("metricAssigned"), metricProgress: $("metricProgress"), metricUrgent: $("metricUrgent"), metricApproval: $("metricApproval"),
-  backToQueueBtn: $("backToQueueBtn"), jobCardStatusBadge: $("jobCardStatusBadge"), jobCardTitle: $("jobCardTitle"), jobCardVehicle: $("jobCardVehicle"), jobCardMeta: $("jobCardMeta"), readonlyJobDetails: $("readonlyJobDetails"),
+  backToQueueBtn: $("backToQueueBtn"), jobCardStatusBadge: $("jobCardStatusBadge"), jobCardTitle: $("jobCardTitle"), jobCardVehicle: $("jobCardVehicle"), jobCardMeta: $("jobCardMeta"), jobWorkingMechanic: $("jobWorkingMechanic"), updateWorkingMechanicBtn: $("updateWorkingMechanicBtn"), readonlyJobDetails: $("readonlyJobDetails"),
   jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), inspectionSignoffSection: $("inspectionSignoffSection"), inspectionCompletedDate: $("inspectionCompletedDate"), mechanicInspectionDeclaration: $("mechanicInspectionDeclaration"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
 };
 
 let currentUser = null;
 let jobs = [];
 let buses = [];
+let mechanics = [];
 let selectedJob = null;
 let jobsUnsub = null;
 let busesUnsub = null;
+let mechanicsUnsub = null;
 window.currentWorkshopMechanic = null;
 
 function normalize(v) { return String(v || "").trim().toLowerCase(); }
@@ -46,6 +49,13 @@ function hasMechanicAccess(employee) {
   if (status !== "active") return false;
   if (accessLevel === "super admin") return true;
   return department === "workshop" && ["mechanic", "manager", "fleet manager"].includes(role);
+}
+function employeeNumber(employee) { return String(employee.employeeNumber || employee.employeeNo || employee.empNo || employee.number || employee.id || "").trim(); }
+function employeeName(employee) {
+  return String(employee.displayName || employee.name || employee.fullName || [employee.firstName,employee.lastName].filter(Boolean).join(" ") || employee.email || "Mechanic").trim();
+}
+function isActiveMechanic(employee) {
+  return normalize(employee.status) === "active" && normalize(employee.department) === "workshop" && normalize(employee.role) === "mechanic";
 }
 function esc(v) { return String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[m])); }
 function num(v) { const n = Number(v); return Number.isFinite(n) ? n : null; }
@@ -117,6 +127,77 @@ function jobBus(job) {
 function currentBusOdo(job) {
   const b = jobBus(job);
   return num(b?.currentOdometer ?? b?.odometer ?? b?.odometerKm ?? job.currentOdometer);
+}
+
+function mechanicMatchesJob(mechanic, job) {
+  return (job.assignedMechanicEmail && normalize(mechanic.email) === normalize(job.assignedMechanicEmail))
+    || (job.assignedMechanicEmployeeNumber && employeeNumber(mechanic) === String(job.assignedMechanicEmployeeNumber))
+    || normalize(employeeName(mechanic)) === normalize(job.assignedMechanic || job.assignedMechanicName);
+}
+
+function populateWorkingMechanic(job = selectedJob) {
+  if (!els.jobWorkingMechanic) return;
+  const current = mechanics.find((mechanic) => mechanicMatchesJob(mechanic, job || {}));
+  els.jobWorkingMechanic.innerHTML = `<option value="">Select working mechanic</option>${mechanics.map((mechanic) => `<option value="${esc(mechanic.id)}">${esc(employeeName(mechanic))}${employeeNumber(mechanic) ? ` · ${esc(employeeNumber(mechanic))}` : ""}</option>`).join("")}`;
+  els.jobWorkingMechanic.value = current?.id || "";
+  const editable = Boolean(job) && ["New","Assigned","In Progress","Waiting Parts"].includes(job.status || "New");
+  els.jobWorkingMechanic.disabled = !editable;
+  els.updateWorkingMechanicBtn.disabled = !editable;
+  els.updateWorkingMechanicBtn.hidden = !editable;
+}
+
+async function updateWorkingMechanic() {
+  if (!selectedJob) return;
+  const mechanic = mechanics.find((item) => item.id === els.jobWorkingMechanic.value);
+  if (!mechanic) return showStatus("Select the mechanic who is performing this job.", "error");
+  if (mechanicMatchesJob(mechanic, selectedJob)) return showStatus(`${employeeName(mechanic)} is already the working mechanic.`);
+  const newName = employeeName(mechanic);
+  const newNumber = employeeNumber(mechanic);
+  const newEmail = normalize(mechanic.email);
+  const button = els.updateWorkingMechanicBtn;
+  button.disabled = true;
+  button.textContent = "Updating...";
+  try {
+    await runTransaction(db, async (tx) => {
+      const ref = doc(db, "workshopJobs", selectedJob.id);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) throw new Error("This workshop job no longer exists.");
+      const current = snap.data();
+      if (!["New","Assigned","In Progress","Waiting Parts"].includes(current.status || "New")) {
+        throw new Error("The working mechanic is locked because this job has been sent for Fleet Manager approval.");
+      }
+      const history = Array.isArray(current.mechanicAssignmentHistory) ? current.mechanicAssignmentHistory : [];
+      tx.update(ref, {
+        assignedMechanic:newName,
+        assignedMechanicName:newName,
+        assignedMechanicEmployeeNumber:newNumber,
+        assignedMechanicEmail:newEmail,
+        mechanicName:newName,
+        status:current.status === "New" ? "Assigned" : current.status,
+        mechanicAssignmentHistory:[...history.slice(-99), {
+          fromName:current.assignedMechanic || current.assignedMechanicName || "Unassigned",
+          fromEmployeeNumber:current.assignedMechanicEmployeeNumber || "",
+          toName:newName,
+          toEmployeeNumber:newNumber,
+          changedByName:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Workshop user",
+          changedByEmployeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
+          changedByEmail:normalize(currentUser?.email),
+          changedAtIso:new Date().toISOString()
+        }],
+        updatedAt:serverTimestamp(),
+        updatedByEmail:normalize(currentUser?.email)
+      });
+    });
+    selectedJob = { ...selectedJob, assignedMechanic:newName, assignedMechanicName:newName, assignedMechanicEmployeeNumber:newNumber, assignedMechanicEmail:newEmail, mechanicName:newName, status:selectedJob.status === "New" ? "Assigned" : selectedJob.status };
+    const assignedText = $("jobAssignedMechanicText");
+    if (assignedText) assignedText.textContent = newName;
+    showStatus(`Working mechanic updated to ${newName}.`);
+  } catch (err) {
+    showStatus(err?.message || "Unable to update the working mechanic.", "error");
+  } finally {
+    button.textContent = "Update Mechanic";
+    populateWorkingMechanic(selectedJob);
+  }
 }
 
 function busIsEv(bus) {
@@ -250,7 +331,8 @@ function openJob(id) {
   els.jobCardTitle.textContent = `${job.jobNumber || job.id} · ${job.jobType || "Workshop Job"}${category ? ` · ${category}` : ""}`;
   els.jobCardVehicle.textContent = `${job.fleetNumber || "Bus"}${job.rego ? ` · ${job.rego}` : ""}`;
   els.jobCardStatusBadge.innerHTML = `<span class="badge info">${esc(job.status || "New")}</span>`;
-  els.jobCardMeta.innerHTML = `<div><strong>Priority:</strong> ${esc(job.priority || "Normal")}</div><div><strong>Due:</strong> ${esc(fmtDate(job.dueDate))}</div><div><strong>Assigned:</strong> ${esc(job.assignedMechanic || job.assignedMechanicName || "Unassigned")}</div>${category ? `<div><strong>Category:</strong> ${esc(category)}</div>` : ""}`;
+  els.jobCardMeta.innerHTML = `<div><strong>Priority:</strong> ${esc(job.priority || "Normal")}</div><div><strong>Due:</strong> ${esc(fmtDate(job.dueDate))}</div><div><strong>Assigned:</strong> <span id="jobAssignedMechanicText">${esc(job.assignedMechanic || job.assignedMechanicName || "Unassigned")}</span></div>${category ? `<div><strong>Category:</strong> ${esc(category)}</div>` : ""}`;
+  populateWorkingMechanic(job);
   els.readonlyJobDetails.innerHTML = `<div class="readonly-field"><div class="readonly-label">Requested work</div><div class="readonly-value">${esc(job.reportedFault || "—")}</div></div><div class="readonly-field"><div class="readonly-label">Fleet Manager notes</div><div class="readonly-value">${esc(job.managerNotes || "—")}</div></div>`;
   const previous = currentBusOdo(job);
   els.jobPreviousOdometer.value = previous == null ? "" : String(previous);
@@ -359,6 +441,7 @@ async function saveJobCard(status, message) {
 function startListeners() {
   if (jobsUnsub) jobsUnsub();
   if (busesUnsub) busesUnsub();
+  if (mechanicsUnsub) mechanicsUnsub();
   jobsUnsub = onSnapshot(query(collection(db, "workshopJobs"), orderBy("createdAt", "desc")), (snap) => {
     jobs = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
     renderQueue();
@@ -370,17 +453,23 @@ function startListeners() {
     }
   }, (err) => showStatus(err?.message || "Unable to load workshop jobs.", "error"));
   busesUnsub = onSnapshot(collection(db, "buses"), (snap) => { buses = snap.docs.map((d) => ({ id:d.id, ...d.data() })); });
+  mechanicsUnsub = onSnapshot(collection(db, "employees"), (snap) => {
+    mechanics = snap.docs.map((d) => ({ id:d.id, ...d.data() })).filter(isActiveMechanic).sort((a,b) => employeeName(a).localeCompare(employeeName(b), undefined, {sensitivity:"base"}));
+    populateWorkingMechanic();
+  }, (err) => showStatus(err?.message || "Unable to load active Workshop mechanics.", "error"));
 }
 
 function stopListeners() {
   if (jobsUnsub) { try { jobsUnsub(); } catch {} jobsUnsub = null; }
   if (busesUnsub) { try { busesUnsub(); } catch {} busesUnsub = null; }
+  if (mechanicsUnsub) { try { mechanicsUnsub(); } catch {} mechanicsUnsub = null; }
 }
 
 els.statusFilter.addEventListener("change", renderQueue);
 els.refreshBtn.addEventListener("click", () => renderQueue());
 els.backToQueueBtn.addEventListener("click", () => { selectedJob = null; els.jobCardView.hidden = true; els.queueView.hidden = false; clearStatus(); });
 els.addPartBtn.addEventListener("click", () => partRow());
+els.updateWorkingMechanicBtn.addEventListener("click", updateWorkingMechanic);
 els.jobChecklist.addEventListener("change", (event) => {
   const select = event.target.closest?.("select[data-check-key]");
   if (!select) return;

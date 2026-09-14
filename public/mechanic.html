@@ -27,6 +27,10 @@
     .job-pdf-preview{height:130px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;background:#fff1f1;color:#b42318;border-bottom:1px solid var(--border)}
     .job-pdf-preview strong{font-size:25px;letter-spacing:.08em}
     .job-pdf-preview small{font-size:12px;font-weight:800;color:#667085}
+    .working-mechanic-control{margin-top:12px;display:grid;gap:6px;min-width:260px}
+    .working-mechanic-control span{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:#475467}
+    .working-mechanic-row{display:flex;gap:8px;align-items:center}
+    .working-mechanic-row select{min-width:230px}
     @media(max-width:600px){.mechanic-defect-actions .button{width:100%}}
   </style>
 </head>
@@ -108,7 +112,16 @@
           <h1 id="jobCardTitle">Workshop Job</h1>
           <div id="jobCardVehicle" class="jobcard-vehicle"></div>
         </div>
-        <div class="jobcard-meta" id="jobCardMeta"></div>
+        <div>
+          <div class="jobcard-meta" id="jobCardMeta"></div>
+          <label class="working-mechanic-control">
+            <span>Working mechanic</span>
+            <div class="working-mechanic-row">
+              <select id="jobWorkingMechanic"><option value="">Select working mechanic</option></select>
+              <button id="updateWorkingMechanicBtn" class="button secondary" type="button">Update Mechanic</button>
+            </div>
+          </label>
+        </div>
       </section>
 
       <form id="jobCardForm">
@@ -188,7 +201,7 @@
     </section>
   </main>
 
-  <script type="module" src="./js/mechanic_work_queue.js?v=20260914-inspection-descriptions"></script>
+  <script type="module" src="./js/mechanic_work_queue.js?v=20260914-working-mechanic"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
   <script type="module" src="./js/mechanic_driver_defects_today.js?v=20260908-self-assign-defect"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>
