@@ -40,7 +40,7 @@
       <button class="nav-item" data-view="defects" type="button">Driver Defects</button>
       <a class="nav-item" href="./mechanic.html?from=workshop">Mechanic Work Queue</a>
       <button class="nav-item disabled" type="button" disabled>Safety Checks <span>Next</span></button>
-      <button class="nav-item disabled" type="button" disabled>Reports <span>Next</span></button>
+      <button class="nav-item" data-view="reports" type="button">Reports</button>
     </aside>
 
     <main class="main-content">
@@ -166,6 +166,29 @@
           <div id="workshopDefectList" class="defect-list"><div class="defect-empty">Open Driver Defects to load reports.</div></div>
         </section>
       </section>
+
+      <section id="reportsView" class="view">
+        <div class="page-head">
+          <div><h1>Compliance Reports</h1><p>Review, filter and print 90-day safety inspection records.</p></div>
+          <button id="refreshComplianceReports" class="button secondary" type="button">Refresh</button>
+        </div>
+        <div id="complianceReportMetrics" class="metrics-grid"></div>
+        <section class="panel table-panel">
+          <div class="report-filter-grid">
+            <label>Search<input id="complianceReportSearch" type="search" placeholder="Job, bus, rego or mechanic" /></label>
+            <label>Status<select id="complianceReportStatus"><option value="">All statuses</option><option value="Closed">Completed / Closed</option><option value="Waiting Approval">Waiting Approval</option><option value="Active">Active inspection</option></select></label>
+            <label>Vehicle type<select id="complianceReportVehicleType"><option value="">Diesel and Electric</option><option value="Diesel">Diesel</option><option value="Electric">Electric</option></select></label>
+            <label>Inspection from<input id="complianceReportFrom" type="date" /></label>
+            <label>Inspection to<input id="complianceReportTo" type="date" /></label>
+            <button id="clearComplianceReportFilters" class="button secondary" type="button">Clear Filters</button>
+          </div>
+          <div id="complianceReportList"></div>
+        </section>
+        <section class="panel table-panel">
+          <div class="panel-head"><div><h2>Fleet 90-Day Status</h2><span class="hint">Every fleet record, including buses without a recorded inspection date.</span></div></div>
+          <div id="complianceFleetStatus"></div>
+        </section>
+      </section>
     </main>
   </div>
 
@@ -204,5 +227,6 @@
   <script type="module" src="./js/workshop_job_edit.js?v=20260914-review-actions"></script>
   <script type="module" src="./js/workshop_driver_defects.js?v=20260908-job-card"></script>
   <script type="module" src="./js/workshop_print_fix.js"></script>
+  <script type="module" src="./js/workshop_compliance_reports.js?v=20260914-stage1"></script>
 </body>
 </html>
