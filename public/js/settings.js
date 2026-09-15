@@ -212,6 +212,8 @@ export async function renderSettingsPage() {
               <i data-lucide="triangle-alert"></i>
               <span>This message will be sent immediately and cannot be recalled. Only registered devices with notifications enabled will receive it.</span>
             </div>
+
+            <div id="generalPushReviewResult" class="settings-review-result" role="status" aria-live="polite" hidden></div>
           </div>
 
           <footer class="settings-review-actions">
@@ -253,6 +255,7 @@ export async function renderSettingsPage() {
   const generalCancelBtn = document.getElementById("cancelGeneralPush");
   const generalCancelTopBtn = document.getElementById("cancelGeneralPushTop");
   const generalConfirmBtn = document.getElementById("confirmGeneralPush");
+  const generalReviewResult = document.getElementById("generalPushReviewResult");
 
   let employees = [];
   let settings = {};
@@ -282,6 +285,11 @@ export async function renderSettingsPage() {
     if (generalReviewSender) {
       generalReviewSender.textContent =
         auth.currentUser?.displayName || auth.currentUser?.email || "Portal administrator";
+    }
+    if (generalReviewResult) {
+      generalReviewResult.hidden = true;
+      generalReviewResult.textContent = "";
+      generalReviewResult.className = "settings-review-result";
     }
     generalReviewModal.hidden = false;
     generalReviewDialog?.focus();
@@ -330,6 +338,11 @@ export async function renderSettingsPage() {
     generalConfirmBtn.textContent = "Sending…";
     generalCancelBtn.disabled = true;
     generalCancelTopBtn.disabled = true;
+    if (generalReviewResult) {
+      generalReviewResult.hidden = false;
+      generalReviewResult.textContent = "Sending notification. Please wait…";
+      generalReviewResult.className = "settings-review-result sending";
+    }
     if (generalResultEl) {
       generalResultEl.textContent = "Sending notification. Please wait…";
       generalResultEl.className = "settings-save-message";
@@ -341,10 +354,11 @@ export async function renderSettingsPage() {
       const result = response.data || {};
 
       if (generalResultEl) {
-        generalResultEl.textContent =
-          `Notification sent to ${result.successCount || 0} device${result.successCount === 1 ? "" : "s"}. ` +
-          `${result.noDeviceCount || 0} active user${result.noDeviceCount === 1 ? " has" : "s have"} no registered device` +
-          `${result.failureCount ? `; ${result.failureCount} delivery failed` : ""}.`;
+        generalResultEl.textContent = result.dryRun
+          ? "Local dry run successful. No notification was sent."
+          : `Notification sent to ${result.successCount || 0} device${result.successCount === 1 ? "" : "s"}. ` +
+            `${result.noDeviceCount || 0} active user${result.noDeviceCount === 1 ? " has" : "s have"} no registered device` +
+            `${result.failureCount ? `; ${result.failureCount} delivery failed` : ""}.`;
         generalResultEl.className = "settings-save-message success";
       }
 
@@ -358,6 +372,11 @@ export async function renderSettingsPage() {
       if (generalResultEl) {
         generalResultEl.textContent = error?.message || "Unable to send the notification.";
         generalResultEl.className = "settings-save-message error";
+      }
+      if (generalReviewResult) {
+        generalReviewResult.hidden = false;
+        generalReviewResult.textContent = error?.message || "Unable to send the notification.";
+        generalReviewResult.className = "settings-review-result error";
       }
     } finally {
       generalPushSending = false;
