@@ -169,6 +169,60 @@ export async function renderSettingsPage() {
           <button id="sendGeneralPush" type="button">Review and send</button>
         </div>
       </section>
+
+      <div id="generalPushReviewModal" class="settings-review-layer" hidden>
+        <section
+          class="settings-review-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="generalPushReviewHeading"
+          aria-describedby="generalPushReviewWarning"
+          tabindex="-1"
+        >
+          <header class="settings-review-header">
+            <div class="settings-review-icon"><i data-lucide="bell-ring"></i></div>
+            <div>
+              <div class="defect-eyebrow">Final confirmation</div>
+              <h3 id="generalPushReviewHeading">Review push notification</h3>
+              <p>Check the audience and message before sending.</p>
+            </div>
+            <button id="cancelGeneralPushTop" class="settings-review-close" type="button" aria-label="Close review">
+              <i data-lucide="x"></i>
+            </button>
+          </header>
+
+          <div class="settings-review-body">
+            <dl class="settings-review-meta">
+              <div><dt>Audience</dt><dd>All active portal users</dd></div>
+              <div><dt>Delivery</dt><dd>Push notification</dd></div>
+              <div><dt>Sender</dt><dd id="generalPushReviewSender">Portal administrator</dd></div>
+            </dl>
+
+            <div class="settings-phone-preview" aria-label="Notification preview">
+              <div class="settings-phone-preview-brand">
+                <span class="settings-phone-preview-logo">PB</span>
+                <strong>Punchbowl Driver Portal</strong>
+                <span>now</span>
+              </div>
+              <h4 id="generalPushReviewTitle"></h4>
+              <p id="generalPushReviewMessage"></p>
+            </div>
+
+            <div id="generalPushReviewWarning" class="settings-review-warning">
+              <i data-lucide="triangle-alert"></i>
+              <span>This message will be sent immediately and cannot be recalled. Only registered devices with notifications enabled will receive it.</span>
+            </div>
+          </div>
+
+          <footer class="settings-review-actions">
+            <button id="cancelGeneralPush" class="btn settings-review-cancel" type="button">Cancel</button>
+            <button id="confirmGeneralPush" type="button">
+              <i data-lucide="send"></i>
+              Send notification
+            </button>
+          </footer>
+        </section>
+      </div>
     </div>
   `;
 
@@ -191,10 +245,19 @@ export async function renderSettingsPage() {
   const generalMessageCountEl = document.getElementById("generalPushMessageCount");
   const generalSendBtn = document.getElementById("sendGeneralPush");
   const generalResultEl = document.getElementById("generalPushResult");
+  const generalReviewModal = document.getElementById("generalPushReviewModal");
+  const generalReviewDialog = generalReviewModal?.querySelector(".settings-review-dialog");
+  const generalReviewTitle = document.getElementById("generalPushReviewTitle");
+  const generalReviewMessage = document.getElementById("generalPushReviewMessage");
+  const generalReviewSender = document.getElementById("generalPushReviewSender");
+  const generalCancelBtn = document.getElementById("cancelGeneralPush");
+  const generalCancelTopBtn = document.getElementById("cancelGeneralPushTop");
+  const generalConfirmBtn = document.getElementById("confirmGeneralPush");
 
   let employees = [];
   let settings = {};
   let generalPushSending = false;
+  let pendingGeneralPush = null;
 
   function updateGeneralPushCounts() {
     if (generalTitleCountEl) generalTitleCountEl.textContent = String(generalTitleEl?.value.length || 0);
@@ -204,7 +267,36 @@ export async function renderSettingsPage() {
   generalTitleEl?.addEventListener("input", updateGeneralPushCounts);
   generalMessageEl?.addEventListener("input", updateGeneralPushCounts);
 
-  generalSendBtn?.addEventListener("click", async () => {
+  function closeGeneralPushReview() {
+    if (!generalReviewModal || generalPushSending) return;
+    generalReviewModal.hidden = true;
+    pendingGeneralPush = null;
+    generalSendBtn?.focus();
+  }
+
+  function openGeneralPushReview(title, message) {
+    if (!generalReviewModal) return;
+    pendingGeneralPush = { title, message };
+    if (generalReviewTitle) generalReviewTitle.textContent = title;
+    if (generalReviewMessage) generalReviewMessage.textContent = message;
+    if (generalReviewSender) {
+      generalReviewSender.textContent =
+        auth.currentUser?.displayName || auth.currentUser?.email || "Portal administrator";
+    }
+    generalReviewModal.hidden = false;
+    generalReviewDialog?.focus();
+  }
+
+  generalCancelBtn?.addEventListener("click", closeGeneralPushReview);
+  generalCancelTopBtn?.addEventListener("click", closeGeneralPushReview);
+  generalReviewModal?.addEventListener("click", (event) => {
+    if (event.target === generalReviewModal) closeGeneralPushReview();
+  });
+  generalReviewDialog?.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeGeneralPushReview();
+  });
+
+  generalSendBtn?.addEventListener("click", () => {
     if (generalPushSending) return;
 
     const title = String(generalTitleEl?.value || "").trim();
@@ -219,14 +311,25 @@ export async function renderSettingsPage() {
       return;
     }
 
-    const confirmed = window.confirm(
-      `Send this notification to all active portal users?\n\n${title}\n${message}`
-    );
-    if (!confirmed) return;
+    if (generalResultEl) {
+      generalResultEl.textContent = "";
+      generalResultEl.className = "settings-save-message";
+    }
+    openGeneralPushReview(title, message);
+  });
+
+  generalConfirmBtn?.addEventListener("click", async () => {
+    if (generalPushSending || !pendingGeneralPush) return;
+
+    const { title, message } = pendingGeneralPush;
 
     generalPushSending = true;
     generalSendBtn.disabled = true;
     generalSendBtn.textContent = "Sending…";
+    generalConfirmBtn.disabled = true;
+    generalConfirmBtn.textContent = "Sending…";
+    generalCancelBtn.disabled = true;
+    generalCancelTopBtn.disabled = true;
     if (generalResultEl) {
       generalResultEl.textContent = "Sending notification. Please wait…";
       generalResultEl.className = "settings-save-message";
@@ -248,6 +351,8 @@ export async function renderSettingsPage() {
       generalTitleEl.value = "";
       generalMessageEl.value = "";
       updateGeneralPushCounts();
+      generalReviewModal.hidden = true;
+      pendingGeneralPush = null;
     } catch (error) {
       console.error("General push notification failed", error);
       if (generalResultEl) {
@@ -258,6 +363,11 @@ export async function renderSettingsPage() {
       generalPushSending = false;
       generalSendBtn.disabled = false;
       generalSendBtn.textContent = "Review and send";
+      generalConfirmBtn.disabled = false;
+      generalConfirmBtn.innerHTML = '<i data-lucide="send"></i> Send notification';
+      generalCancelBtn.disabled = false;
+      generalCancelTopBtn.disabled = false;
+      window.lucide?.createIcons?.();
     }
   });
 
