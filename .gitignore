@@ -69,4 +69,4 @@ node_modules/
 .dataconnect
 
 # Local Firebase Functions emulator parameters
-functions/.env.local
+**/.env.local
