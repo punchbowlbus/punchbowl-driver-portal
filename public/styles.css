@@ -3624,6 +3624,28 @@ button.btn.danger[data-remove-multi-return]:hover {
   margin-top: 1px;
 }
 
+.settings-review-result {
+  padding: 11px 13px;
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-review-result.sending {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.settings-review-result.error {
+  border-color: #fecdca;
+  background: #fef3f2;
+  color: #b42318;
+}
+
 .settings-review-actions {
   display: flex;
   justify-content: flex-end;
