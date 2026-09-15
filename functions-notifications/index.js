@@ -5,6 +5,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
+const { getMessaging } = require("firebase-admin/messaging");
 
 admin.initializeApp();
 const db = getFirestore();
@@ -96,7 +97,7 @@ exports.sendGeneralPushNotification = onCall({
 
   for (let start = 0; start < tokens.length; start += 500) {
     const tokenBatch = tokens.slice(start, start + 500);
-    const response = await admin.messaging().sendEachForMulticast({
+    const response = await getMessaging().sendEachForMulticast({
       tokens: tokenBatch,
       data: { type: "generalNotification" },
       webpush: {
