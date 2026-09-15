@@ -3436,6 +3436,222 @@ button.btn.danger[data-remove-multi-return]:hover {
   color: #c9252d;
 }
 
+.settings-review-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.62);
+  backdrop-filter: blur(3px);
+}
+
+.settings-review-layer[hidden] {
+  display: none;
+}
+
+.settings-review-dialog {
+  width: min(100%, 620px);
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  border: 1px solid #d0d5dd;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  outline: none;
+}
+
+.settings-review-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid #eaecf0;
+}
+
+.settings-review-header h3 {
+  margin: 2px 0 4px;
+  color: #101828;
+  font-size: 21px;
+}
+
+.settings-review-header p {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.settings-review-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 12px;
+  background: #fff1f2;
+  color: #c9252d;
+}
+
+.settings-review-icon svg,
+.settings-review-close svg,
+.settings-review-actions svg {
+  width: 19px;
+  height: 19px;
+}
+
+.settings-review-close {
+  display: grid;
+  width: 38px;
+  min-height: 38px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #667085;
+}
+
+.settings-review-close:hover {
+  border-color: #d0d5dd;
+  background: #f9fafb;
+}
+
+.settings-review-body {
+  display: grid;
+  gap: 18px;
+  padding: 22px 24px;
+}
+
+.settings-review-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.settings-review-meta > div {
+  padding: 11px 12px;
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  background: #f9fafb;
+}
+
+.settings-review-meta dt {
+  margin-bottom: 3px;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.settings-review-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #101828;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.settings-phone-preview {
+  padding: 14px 16px 16px;
+  border: 1px solid #d0d5dd;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #ffffff, #f8fafc);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.settings-phone-preview-brand {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #475467;
+  font-size: 12px;
+}
+
+.settings-phone-preview-brand strong {
+  color: #344054;
+}
+
+.settings-phone-preview-brand > span:last-child {
+  margin-left: auto;
+}
+
+.settings-phone-preview-logo {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  background: #c9252d;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.settings-phone-preview h4 {
+  margin: 11px 0 4px;
+  color: #101828;
+  font-size: 15px;
+}
+
+.settings-phone-preview p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #344054;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.settings-review-warning {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid #fedf89;
+  border-radius: 10px;
+  background: #fffaeb;
+  color: #854a0e;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.settings-review-warning svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.settings-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid #eaecf0;
+  background: #f9fafb;
+}
+
+.settings-review-actions button {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+}
+
+.settings-review-actions .settings-review-cancel {
+  border: 1px solid #d0d5dd;
+  background: #fff;
+  color: #344054;
+}
+
+.settings-review-actions #confirmGeneralPush {
+  background: #c9252d;
+  color: #fff;
+}
+
 @media (max-width: 900px) {
   .settings-routing-grid {
     grid-template-columns: 1fr;
@@ -3485,6 +3701,27 @@ button.btn.danger[data-remove-multi-return]:hover {
 
   .settings-audience-badge {
     margin-left: 0;
+  }
+
+  .settings-review-layer {
+    padding: 10px;
+  }
+
+  .settings-review-header,
+  .settings-review-body {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .settings-review-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-review-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding-right: 16px;
+    padding-left: 16px;
   }
 }
 
@@ -5479,4 +5716,3 @@ body.dispatch-board-fullscreen { overflow: hidden; }
 .charter-days-grid input:checked + span { color: var(--charter-ink); }
 .charter-days-grid label:has(input:checked) { border-color: var(--charter-red); background: #fee7e8; }
 .charter-days-grid input { margin: 0; cursor: pointer; }
-
