@@ -219,12 +219,14 @@ function loadShifts({ mode } = { mode: "driver" }) {
         btn.disabled = true;
         btn.textContent = "Enabling...";
 
-        await registerPortalNotifications(state.employee);
+        const result = await registerPortalNotifications(state.employee, {
+          requestPermission: true
+        });
 
-        alert("Notification permission: " + Notification.permission);
+        alert(result.message);
 
         btn.textContent =
-          Notification.permission === "granted"
+          result.ok
             ? "Notifications Enabled"
             : "Enable Notifications";
 
@@ -362,7 +364,7 @@ export async function go(pageId) {
     if (!state.isAdmin) return showError("No admin access");
 
     stopAllListeners();
-    const mod = await import("./settings.js?v=5");
+    const mod = await import("./settings.js?v=6");
     await mod.renderSettingsPage();
     return;
   }
@@ -1161,9 +1163,15 @@ function setupMobileMenu() {
   window.closeMobileMenu = closeMenu;
 }
 
-async function registerPortalNotifications(employee) {
+async function registerPortalNotifications(employee, { requestPermission = false } = {}) {
   try {
-    if (!employee) return;
+    if (!employee) {
+      return {
+        ok: false,
+        status: "no-employee",
+        message: "Your signed-in account is not linked to an employee record."
+      };
+    }
 
     console.log("PWA notification check started");
     console.log("Notification supported:", "Notification" in window);
@@ -1172,10 +1180,6 @@ async function registerPortalNotifications(employee) {
     console.log("Employee for notification:", employee);
 
     const empNo = String(employee.employeeNumber || "").trim();
-    if (notificationRegisteredForEmpNo === empNo) {
-  console.log("FCM already registered for portal user:", empNo);
-  return;
-}
     const role = String(employee.role || "").trim().toLowerCase();
     const accessLevel = String(employee.accessLevel || "").trim().toLowerCase();
     const department = String(employee.department || "").trim().toLowerCase();
@@ -1190,19 +1194,60 @@ async function registerPortalNotifications(employee) {
       department.includes("operation") ||
       department.includes("management");
 
-    if (!empNo || !canReceivePortalNotifications || status !== "active") return;
+    if (!empNo || !canReceivePortalNotifications || status !== "active") {
+      return {
+        ok: false,
+        status: "not-eligible",
+        message: "This employee account is not active or is not eligible for portal alerts."
+      };
+    }
 
     if (!("Notification" in window)) {
       console.log("Notifications not supported in this browser");
-      return;
+      return {
+        ok: false,
+        status: "unsupported",
+        message: "Notifications are not supported by this browser."
+      };
     }
 
-    const permission = await Notification.requestPermission();
+    const isIos = /iPad|iPhone|iPod/i.test(navigator.userAgent) ||
+      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const isStandalone = window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true;
+
+    if (requestPermission && isIos && !isStandalone) {
+      return {
+        ok: false,
+        status: "install-required",
+        message: "On iPhone, first add this portal to the Home Screen, then open it from the Home Screen icon and try again."
+      };
+    }
+
+    let permission = Notification.permission;
+    if (permission === "default" && requestPermission) {
+      permission = await Notification.requestPermission();
+    }
     console.log("Permission result:", permission);
 
     if (permission !== "granted") {
       console.log("Notification permission not granted");
-      return;
+      return {
+        ok: false,
+        status: permission === "denied" ? "denied" : "permission-required",
+        message: permission === "denied"
+          ? "Notifications are blocked. Allow Punchbowl Driver Portal in the device notification settings, then try again."
+          : "Tap Enable alerts on this device to allow notifications."
+      };
+    }
+
+    if (notificationRegisteredForEmpNo === empNo) {
+      console.log("FCM already registered for portal user:", empNo);
+      return {
+        ok: true,
+        status: "already-registered",
+        message: "Alerts are already enabled on this device."
+      };
     }
 
     const token = await getToken(messaging, {
@@ -1211,7 +1256,11 @@ async function registerPortalNotifications(employee) {
 
     if (!token) {
       console.log("No FCM token returned");
-      return;
+      return {
+        ok: false,
+        status: "no-token",
+        message: "Notification permission was allowed, but this device did not return a push token. Please close and reopen the app, then try again."
+      };
     }
 
     await setDoc(
@@ -1225,12 +1274,24 @@ async function registerPortalNotifications(employee) {
 
     console.log("FCM token saved for portal user:", empNo);
     notificationRegisteredForEmpNo = empNo;
+    return {
+      ok: true,
+      status: "registered",
+      message: "Alerts are enabled on this device."
+    };
   } catch (err) {
     console.error("Notification registration failed:", err);
+    return {
+      ok: false,
+      status: "error",
+      message: err?.message || "Notification setup failed. Please try again."
+    };
   }
 }
 
-window.enablePortalNotifications = () => registerPortalNotifications(state.employee);
+window.enablePortalNotifications = () => registerPortalNotifications(state.employee, {
+  requestPermission: true
+});
 
 /* =========================================================
    Auth Boot

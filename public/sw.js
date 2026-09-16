@@ -1,4 +1,4 @@
-const CACHE = "pbc-v55"; // Refresh cached assets after Workshop updates
+const CACHE = "pbc-v56"; // Refresh cached assets after notification permission fix
 
 const ASSETS = [
   "/",

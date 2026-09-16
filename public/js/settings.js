@@ -262,6 +262,10 @@ export async function renderSettingsPage() {
   let generalPushSending = false;
   let pendingGeneralPush = null;
 
+  if (enableAlertsBtn && "Notification" in window && Notification.permission === "granted") {
+    enableAlertsBtn.textContent = "Alerts enabled on this device";
+  }
+
   function updateGeneralPushCounts() {
     if (generalTitleCountEl) generalTitleCountEl.textContent = String(generalTitleEl?.value.length || 0);
     if (generalMessageCountEl) generalMessageCountEl.textContent = String(generalMessageEl?.value.length || 0);
@@ -452,10 +456,27 @@ export async function renderSettingsPage() {
 
   enableAlertsBtn?.addEventListener("click", async () => {
     enableAlertsBtn.disabled = true;
+    enableAlertsBtn.textContent = "Enabling alerts…";
+    if (messageEl) {
+      messageEl.textContent = "";
+      messageEl.className = "settings-save-message";
+    }
     try {
-      await window.enablePortalNotifications?.();
-      enableAlertsBtn.textContent = window.Notification?.permission === "granted" ?
-        "Alerts enabled on this device" : "Alerts not enabled";
+      const result = await window.enablePortalNotifications?.();
+      const enabled = result?.ok === true;
+      enableAlertsBtn.textContent = enabled ?
+        "Alerts enabled on this device" : "Enable alerts on this device";
+      if (messageEl) {
+        messageEl.textContent = result?.message || "Unable to start notification setup.";
+        messageEl.className = `settings-save-message ${enabled ? "success" : "error"}`;
+      }
+    } catch (error) {
+      console.error("Notification setup failed", error);
+      enableAlertsBtn.textContent = "Enable alerts on this device";
+      if (messageEl) {
+        messageEl.textContent = error?.message || "Notification setup failed. Please try again.";
+        messageEl.className = "settings-save-message error";
+      }
     } finally {
       enableAlertsBtn.disabled = false;
     }
