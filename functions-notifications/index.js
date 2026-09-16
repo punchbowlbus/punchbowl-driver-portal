@@ -3,6 +3,7 @@
  * This codebase intentionally has no Charter/Brevo dependencies or parameters.
  */
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -144,4 +145,136 @@ exports.sendGeneralPushNotification = onCall({
   });
 
   return { notificationId: logRef.id, successCount, failureCount, noDeviceCount };
+});
+
+/* =========================================================
+   Driver defect alerts — Firestore trigger
+========================================================= */
+exports.notifyOnDefectReportCreated = onDocumentCreated({
+  document: "defectReports/{reportId}",
+  region: "australia-southeast1",
+  maxInstances: 10,
+  retry: false
+}, async (event) => {
+  const reportSnapshot = event.data;
+  if (!reportSnapshot?.exists) return;
+
+  const report = reportSnapshot.data() || {};
+  if (report.deleted === true) return;
+
+  const settingsSnapshot = await db.doc("systemSettings/defectNotifications").get();
+  if (!settingsSnapshot.exists) {
+    console.log("Defect notification skipped: settings are not configured", {
+      reportId: event.params.reportId
+    });
+    return;
+  }
+
+  const settings = settingsSnapshot.data() || {};
+  if (settings.enabled === false) {
+    console.log("Defect notification skipped: notifications are disabled", {
+      reportId: event.params.reportId
+    });
+    return;
+  }
+
+  const unsafe = normalized(report.safeToDrive) === "no";
+  const recipientIds = new Set();
+
+  if (unsafe && settings.notifyOccForUnsafe !== false) {
+    (settings.occRecipientIds || []).forEach((id) => recipientIds.add(String(id)));
+  }
+  if (!unsafe && settings.notifyOccForSafe !== false) {
+    (settings.occRecipientIds || []).forEach((id) => recipientIds.add(String(id)));
+  }
+  if (unsafe && settings.notifySupervisorsForUnsafe !== false) {
+    (settings.supervisorRecipientIds || []).forEach((id) => recipientIds.add(String(id)));
+  }
+
+  const selectedIds = [...recipientIds].filter(Boolean);
+  if (!selectedIds.length) {
+    console.log("Defect notification skipped: no recipients selected for this route", {
+      reportId: event.params.reportId,
+      unsafe
+    });
+    return;
+  }
+
+  const recipientSnapshots = await db.getAll(
+    ...selectedIds.map((id) => db.collection("employees").doc(id))
+  );
+  const activeRecipients = recipientSnapshots
+    .filter((snapshot) => snapshot.exists)
+    .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }))
+    .filter((employee) => normalized(employee.status) === "active");
+  const tokens = [...new Set(activeRecipients
+    .map((employee) => String(employee.fcmToken || "").trim())
+    .filter(Boolean))];
+  const noDeviceCount = activeRecipients.filter(
+    (employee) => !String(employee.fcmToken || "").trim()
+  ).length;
+
+  const reportNumber = String(report.reportNumber || event.params.reportId);
+  const fleetNumber = String(report.fleetNumber || report.busNumber || "Unknown bus");
+  const category = String(report.category || "Vehicle defect");
+  const reporter = String(report.reportedByName || "Driver");
+  const title = unsafe ? `UNSAFE VEHICLE — Bus ${fleetNumber}` : `New defect — Bus ${fleetNumber}`;
+  const body = `${reportNumber} • ${category} • Reported by ${reporter}`.slice(0, 240);
+
+  let successCount = 0;
+  let failureCount = 0;
+  const failureCodes = [];
+
+  for (let start = 0; start < tokens.length; start += 500) {
+    const response = await getMessaging().sendEachForMulticast({
+      tokens: tokens.slice(start, start + 500),
+      data: {
+        type: "driverDefect",
+        reportId: String(event.params.reportId),
+        reportNumber,
+        safeToDrive: unsafe ? "No" : "Yes"
+      },
+      webpush: {
+        notification: {
+          title,
+          body,
+          icon: "https://punchbowl-driver-portal.web.app/icons/icon-192.png",
+          badge: "https://punchbowl-driver-portal.web.app/icons/icon-192.png",
+          requireInteraction: unsafe,
+          tag: `defect-${event.params.reportId}`
+        },
+        fcmOptions: { link: "https://punchbowl-driver-portal.web.app" }
+      }
+    });
+
+    successCount += response.successCount;
+    failureCount += response.failureCount;
+    response.responses.forEach((result) => {
+      if (!result.success) failureCodes.push(result.error?.code || "unknown");
+    });
+  }
+
+  await db.collection("defectNotificationDeliveries").doc(event.params.reportId).set({
+    reportId: event.params.reportId,
+    reportNumber,
+    unsafe,
+    recipientIds: selectedIds,
+    activeRecipientCount: activeRecipients.length,
+    tokenCount: tokens.length,
+    noDeviceCount,
+    successCount,
+    failureCount,
+    failureCodes: [...new Set(failureCodes)],
+    emailRequested: settings.emailEnabled === true,
+    emailSent: false,
+    createdAt: FieldValue.serverTimestamp()
+  }, { merge: true });
+
+  console.log("Defect notification completed", {
+    reportId: event.params.reportId,
+    unsafe,
+    successCount,
+    failureCount,
+    noDeviceCount
+  });
 });
