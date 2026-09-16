@@ -1,4 +1,4 @@
-const CACHE = "pbc-v56"; // Refresh cached assets after notification permission fix
+const CACHE = "pbc-v58"; // Refresh cached assets after Super Admin alert support
 
 const ASSETS = [
   "/",

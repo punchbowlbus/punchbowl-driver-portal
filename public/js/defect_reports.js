@@ -281,9 +281,11 @@ async function renderAdminDefectDashboard() {
   const safetyEl = document.getElementById("adminDefectSafety");
   const refreshBtn = document.getElementById("refreshAdminDefects");
   const enableAlertsBtn = document.getElementById("enableAdminDefectAlerts");
+  const linkedReportId = new URLSearchParams(window.location.search).get("reportId") || "";
 
   let reports = [];
-  let activeTab = "overview";
+  let activeTab = linkedReportId ? "open" : "overview";
+  if (linkedReportId && searchEl) searchEl.value = linkedReportId;
 
   function renderSummary() {
     if (!summaryEl) return;
@@ -332,6 +334,7 @@ async function renderAdminDefectDashboard() {
 
       if (search) {
         const haystack = [
+          report.id,
           report.reportNumber,
           report.fleetNumber,
           report.rego,
@@ -471,6 +474,7 @@ async function renderAdminDefectDashboard() {
   }
 
   [...document.querySelectorAll("[data-defect-tab]")].forEach((button) => {
+    button.classList.toggle("active", button.getAttribute("data-defect-tab") === activeTab);
     button.onclick = () => {
       activeTab = button.getAttribute("data-defect-tab") || "overview";
       document.querySelectorAll("[data-defect-tab]").forEach((item) => {

@@ -18,7 +18,8 @@ import {
   getDownloadURL
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
 import { getToken } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
-import { auth, provider, db, messaging, storage } from "./firebase.js";
+import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-functions.js";
+import { auth, provider, db, functions, messaging, storage } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
 import { state } from "./state.js";
 import { normalizeEmail, escapeHtml } from "./utils.js";
@@ -364,7 +365,7 @@ export async function go(pageId) {
     if (!state.isAdmin) return showError("No admin access");
 
     stopAllListeners();
-    const mod = await import("./settings.js?v=6");
+    const mod = await import("./settings.js?v=7");
     await mod.renderSettingsPage();
     return;
   }
@@ -1031,7 +1032,7 @@ onSnapshot(
   if (pageId === "defectReport") {
     stopAllListeners();
 
-    const mod = await import("./defect_reports.js?v=8");
+    const mod = await import("./defect_reports.js?v=9");
     await mod.renderDefectReportPage();
     return;
   }
@@ -1165,11 +1166,12 @@ function setupMobileMenu() {
 
 async function registerPortalNotifications(employee, { requestPermission = false } = {}) {
   try {
-    if (!employee) {
+    const portalAdmin = Boolean(state.currentUser && isAdminEmail(state.currentUser.email));
+    if (!employee && !portalAdmin) {
       return {
         ok: false,
         status: "no-employee",
-        message: "Your signed-in account is not linked to an employee record."
+        message: "Your signed-in account is not linked to an active portal recipient."
       };
     }
 
@@ -1179,11 +1181,11 @@ async function registerPortalNotifications(employee, { requestPermission = false
     console.log("Standalone mode:", window.matchMedia("(display-mode: standalone)").matches);
     console.log("Employee for notification:", employee);
 
-    const empNo = String(employee.employeeNumber || "").trim();
-    const role = String(employee.role || "").trim().toLowerCase();
-    const accessLevel = String(employee.accessLevel || "").trim().toLowerCase();
-    const department = String(employee.department || "").trim().toLowerCase();
-    const status = String(employee.status || "").trim().toLowerCase();
+    const empNo = String(employee?.employeeNumber || "").trim();
+    const role = String(employee?.role || "").trim().toLowerCase();
+    const accessLevel = String(employee?.accessLevel || "").trim().toLowerCase();
+    const department = String(employee?.department || "").trim().toLowerCase();
+    const status = String(employee?.status || "").trim().toLowerCase();
 
     const canReceivePortalNotifications =
       role === "driver" ||
@@ -1194,7 +1196,10 @@ async function registerPortalNotifications(employee, { requestPermission = false
       department.includes("operation") ||
       department.includes("management");
 
-    if (!empNo || !canReceivePortalNotifications || status !== "active") {
+    const activeEmployeeRecipient = Boolean(
+      empNo && canReceivePortalNotifications && status === "active"
+    );
+    if (!activeEmployeeRecipient && !portalAdmin) {
       return {
         ok: false,
         status: "not-eligible",
@@ -1241,8 +1246,9 @@ async function registerPortalNotifications(employee, { requestPermission = false
       };
     }
 
-    if (notificationRegisteredForEmpNo === empNo) {
-      console.log("FCM already registered for portal user:", empNo);
+    const registrationKey = activeEmployeeRecipient ? empNo : `portalAdmin:${state.currentUser.uid}`;
+    if (notificationRegisteredForEmpNo === registrationKey) {
+      console.log("FCM already registered for portal user:", registrationKey);
       return {
         ok: true,
         status: "already-registered",
@@ -1263,21 +1269,32 @@ async function registerPortalNotifications(employee, { requestPermission = false
       };
     }
 
-    await setDoc(
-      doc(db, "employees", empNo),
-      {
-        fcmToken: token,
-        fcmTokenUpdatedAt: serverTimestamp()
-      },
-      { merge: true }
-    );
+    let portalAdminRecipient = null;
+    if (activeEmployeeRecipient) {
+      await setDoc(
+        doc(db, "employees", empNo),
+        {
+          fcmToken: token,
+          fcmTokenUpdatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    } else {
+      const registerAdminDevice = httpsCallable(functions, "registerPortalAdminNotificationDevice");
+      const response = await registerAdminDevice({
+        token,
+        displayName: state.currentUser?.displayName || state.currentUser?.email || "Portal administrator"
+      });
+      portalAdminRecipient = response.data?.recipient || null;
+    }
 
-    console.log("FCM token saved for portal user:", empNo);
-    notificationRegisteredForEmpNo = empNo;
+    console.log("FCM token saved for portal user:", registrationKey);
+    notificationRegisteredForEmpNo = registrationKey;
     return {
       ok: true,
       status: "registered",
-      message: "Alerts are enabled on this device."
+      message: "Alerts are enabled on this device.",
+      recipient: portalAdminRecipient
     };
   } catch (err) {
     console.error("Notification registration failed:", err);
@@ -1366,7 +1383,8 @@ if (state.isAdmin) {
     });
   } catch {}
 
-  state.activePage = "operationsDashboard";
+  const requestedPage = new URLSearchParams(window.location.search).get("page");
+  state.activePage = requestedPage === "defectReport" ? "defectReport" : "operationsDashboard";
   go(state.activePage);
   return;
 }

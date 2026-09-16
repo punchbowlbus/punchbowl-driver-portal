@@ -50,6 +50,65 @@ async function requirePortalAdmin(request) {
   return email;
 }
 
+exports.registerPortalAdminNotificationDevice = onCall({
+  region: "australia-southeast1",
+  maxInstances: 10
+}, async (request) => {
+  const email = await requirePortalAdmin(request);
+  const token = String(request.data?.token || "").trim();
+  if (!token || token.length > 4096) {
+    throw new HttpsError("invalid-argument", "A valid notification device token is required.");
+  }
+
+  const displayName = String(
+    request.auth.token?.name || request.data?.displayName || email
+  ).trim().slice(0, 120);
+  const recipient = {
+    id: `portalAdmin:${request.auth.uid}`,
+    displayName,
+    email,
+    role: "Portal Super Admin",
+    accessLevel: "Super Admin",
+    status: "Active",
+    pushReady: true
+  };
+
+  await db.collection("portalNotificationUsers").doc(request.auth.uid).set({
+    displayName,
+    email,
+    role: "Portal Super Admin",
+    accessLevel: "Super Admin",
+    status: "Active",
+    fcmToken: token,
+    fcmTokenUpdatedAt: FieldValue.serverTimestamp(),
+    updatedByUid: request.auth.uid
+  }, { merge: true });
+
+  return { registered: true, recipient };
+});
+
+exports.getPortalAdminNotificationRecipients = onCall({
+  region: "australia-southeast1",
+  maxInstances: 10
+}, async (request) => {
+  await requirePortalAdmin(request);
+  const snapshot = await db.collection("portalNotificationUsers").get();
+  const recipients = snapshot.docs
+    .map((recipientDoc) => ({ id: recipientDoc.id, ...recipientDoc.data() }))
+    .filter((recipient) => normalized(recipient.status) === "active")
+    .map((recipient) => ({
+      id: `portalAdmin:${recipient.id}`,
+      displayName: String(recipient.displayName || recipient.email || "Portal administrator"),
+      email: String(recipient.email || ""),
+      role: "Portal Super Admin",
+      accessLevel: "Super Admin",
+      status: "Active",
+      pushReady: Boolean(String(recipient.fcmToken || "").trim())
+    }));
+
+  return { recipients };
+});
+
 exports.sendGeneralPushNotification = onCall({
   region: "australia-southeast1",
   maxInstances: 10
@@ -200,13 +259,25 @@ exports.notifyOnDefectReportCreated = onDocumentCreated({
     return;
   }
 
-  const recipientSnapshots = await db.getAll(
-    ...selectedIds.map((id) => db.collection("employees").doc(id))
-  );
-  const activeRecipients = recipientSnapshots
+  const employeeIds = selectedIds.filter((id) => !id.startsWith("portalAdmin:"));
+  const portalAdminIds = selectedIds
+    .filter((id) => id.startsWith("portalAdmin:"))
+    .map((id) => id.slice("portalAdmin:".length));
+  const employeeSnapshots = employeeIds.length ? await db.getAll(
+    ...employeeIds.map((id) => db.collection("employees").doc(id))
+  ) : [];
+  const portalAdminSnapshots = portalAdminIds.length ? await db.getAll(
+    ...portalAdminIds.map((id) => db.collection("portalNotificationUsers").doc(id))
+  ) : [];
+  const activeEmployeeRecipients = employeeSnapshots
     .filter((snapshot) => snapshot.exists)
     .map((snapshot) => ({ id: snapshot.id, ...snapshot.data() }))
     .filter((employee) => normalized(employee.status) === "active");
+  const activePortalAdminRecipients = portalAdminSnapshots
+    .filter((snapshot) => snapshot.exists)
+    .map((snapshot) => ({ id: `portalAdmin:${snapshot.id}`, ...snapshot.data() }))
+    .filter((recipient) => normalized(recipient.status) === "active");
+  const activeRecipients = [...activeEmployeeRecipients, ...activePortalAdminRecipients];
   const tokens = [...new Set(activeRecipients
     .map((employee) => String(employee.fcmToken || "").trim())
     .filter(Boolean))];
@@ -216,10 +287,13 @@ exports.notifyOnDefectReportCreated = onDocumentCreated({
 
   const reportNumber = String(report.reportNumber || event.params.reportId);
   const fleetNumber = String(report.fleetNumber || report.busNumber || "Unknown bus");
+  const rego = String(report.rego || "").trim();
   const category = String(report.category || "Vehicle defect");
+  const description = String(report.description || "No description supplied").trim();
   const reporter = String(report.reportedByName || "Driver");
-  const title = unsafe ? `UNSAFE VEHICLE — Bus ${fleetNumber}` : `New defect — Bus ${fleetNumber}`;
-  const body = `${reportNumber} • ${category} • Reported by ${reporter}`.slice(0, 240);
+  const busLabel = rego ? `Bus ${fleetNumber} (${rego})` : `Bus ${fleetNumber}`;
+  const title = unsafe ? `UNSAFE VEHICLE — ${busLabel}` : `New vehicle defect — ${busLabel}`;
+  const body = `${category}: ${description} • Reported by ${reporter} • ${reportNumber}`.slice(0, 240);
 
   let successCount = 0;
   let failureCount = 0;
@@ -243,7 +317,9 @@ exports.notifyOnDefectReportCreated = onDocumentCreated({
           requireInteraction: unsafe,
           tag: `defect-${event.params.reportId}`
         },
-        fcmOptions: { link: "https://punchbowl-driver-portal.web.app" }
+        fcmOptions: {
+          link: `https://punchbowl-driver-portal.web.app/?page=defectReport&reportId=${encodeURIComponent(event.params.reportId)}`
+        }
       }
     });
 

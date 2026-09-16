@@ -26,7 +26,7 @@ function employeeName(employee) {
 
 function employeeOption(employee, group, selectedIds) {
   const id = String(employee.id || employee.employeeNumber || "");
-  const tokenReady = Boolean(String(employee.fcmToken || "").trim());
+  const tokenReady = employee.pushReady === true || Boolean(String(employee.fcmToken || "").trim());
   const emailReady = String(employee.email || "").includes("@");
   const detail = [employee.role, employee.department, employee.accessLevel]
     .filter(Boolean)
@@ -428,14 +428,22 @@ export async function renderSettingsPage() {
   }
 
   try {
-    const [employeeSnapshot, settingsSnapshot] = await Promise.all([
+    const getPortalAdminRecipients = httpsCallable(functions, "getPortalAdminNotificationRecipients");
+    const [employeeSnapshot, settingsSnapshot, portalAdminResponse] = await Promise.all([
       getDocs(collection(db, "employees")),
-      getDoc(doc(db, SETTINGS_PATH))
+      getDoc(doc(db, SETTINGS_PATH)),
+      getPortalAdminRecipients()
     ]);
 
-    employees = employeeSnapshot.docs
+    const activeEmployees = employeeSnapshot.docs
       .map((item) => ({ id: item.id, ...item.data() }))
-      .filter((employee) => String(employee.status || "").trim().toLowerCase() === "active")
+      .filter((employee) => String(employee.status || "").trim().toLowerCase() === "active");
+    const employeeEmails = new Set(activeEmployees.map((employee) => String(employee.email || "").trim().toLowerCase()));
+    const portalAdmins = Array.isArray(portalAdminResponse.data?.recipients) ?
+      portalAdminResponse.data.recipients.filter(
+        (recipient) => !employeeEmails.has(String(recipient.email || "").trim().toLowerCase())
+      ) : [];
+    employees = [...activeEmployees, ...portalAdmins]
       .sort((a, b) => employeeName(a).localeCompare(employeeName(b)));
 
     settings = settingsSnapshot.exists() ? settingsSnapshot.data() : {};
@@ -464,6 +472,11 @@ export async function renderSettingsPage() {
     try {
       const result = await window.enablePortalNotifications?.();
       const enabled = result?.ok === true;
+      if (result?.recipient && !employees.some((employee) => employee.id === result.recipient.id)) {
+        employees.push(result.recipient);
+        employees.sort((a, b) => employeeName(a).localeCompare(employeeName(b)));
+        renderRecipients();
+      }
       enableAlertsBtn.textContent = enabled ?
         "Alerts enabled on this device" : "Enable alerts on this device";
       if (messageEl) {
