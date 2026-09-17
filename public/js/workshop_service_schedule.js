@@ -148,10 +148,10 @@ function ensureDialog() {
         </div>
       </div>
 
-      <div class="service-setup-section">
+      <div class="service-setup-section" id="airConditioningServiceSection">
         <h3>Annual air conditioning service</h3>
-        <p class="hint">The recorded date is read-only. Fleet Managers can enter a newly confirmed service date below. The next A/C service is due 12 months after that date.</p>
-        <div class="form-grid">
+        <p class="hint" id="airConditioningServiceHint">The recorded date is read-only. Fleet Managers can enter a newly confirmed service date below. The next A/C service is due 12 months after that date.</p>
+        <div class="form-grid" id="airConditioningServiceFields">
           <label>Last recorded A/C service date
             <input id="lastAirConditioningServiceDate" type="date" readonly />
           </label>
@@ -314,6 +314,7 @@ function openSchedule(bus) {
   const lastKm = num(bus.lastServiceOdometer);
   const lastType = bus.lastServiceType || "";
   const suggestedNext = bus.nextServiceType || nextServiceTypeFor(vehicleIsEv, lastType);
+  const airConditioningNotFitted = ["no", "false", "not fitted", "n/a"].includes(normalize(bus.airConditioned));
 
   document.getElementById("serviceScheduleBusLabel").textContent = `${fleetNo(bus)}${bus.rego ? ` · ${bus.rego}` : ""}`;
   document.getElementById("serviceVehicleType").textContent = vehicleIsEv ? "Electric (EV)" : "Diesel";
@@ -342,9 +343,16 @@ function openSchedule(bus) {
   const nextInterval = nextTypeSelect.value === "Small" ? smallKm : nextTypeSelect.value === "Medium" ? mediumKm : largeKm;
   document.getElementById("nextServiceOdometerPreview").value = lastKm != null && nextInterval != null ? String(lastKm + nextInterval) : "";
   document.getElementById("lastAirConditioningServiceDate").value = bus.lastAirConditioningServiceDate || "";
-  document.getElementById("newAirConditioningServiceDate").value = "";
-  document.getElementById("newAirConditioningServiceDate").max = localDateString();
-  document.getElementById("nextAirConditioningServiceDatePreview").value = bus.nextAirConditioningServiceDate || addMonths(bus.lastAirConditioningServiceDate || "", 12);
+  const newAirconDate = document.getElementById("newAirConditioningServiceDate");
+  newAirconDate.value = "";
+  newAirconDate.max = localDateString();
+  newAirconDate.disabled = airConditioningNotFitted;
+  document.getElementById("nextAirConditioningServiceDatePreview").value = airConditioningNotFitted ? "N/A" : (bus.nextAirConditioningServiceDate || addMonths(bus.lastAirConditioningServiceDate || "", 12));
+  document.getElementById("airConditioningServiceSection").classList.toggle("service-setup-not-applicable", airConditioningNotFitted);
+  document.getElementById("airConditioningServiceFields").hidden = airConditioningNotFitted;
+  document.getElementById("airConditioningServiceHint").textContent = airConditioningNotFitted
+    ? "Not applicable — this vehicle is recorded as not fitted with air conditioning."
+    : "The recorded date is read-only. Fleet Managers can enter a newly confirmed service date below. The next A/C service is due 12 months after that date.";
 
   document.getElementById("serviceScheduleDialog").showModal();
 }
