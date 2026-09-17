@@ -28,7 +28,7 @@ const els = {
   queueView: $("queueView"), jobCardView: $("jobCardView"), mechanicIdentity: $("mechanicIdentity"), refreshBtn: $("refreshBtn"), statusFilter: $("statusFilter"), jobQueue: $("jobQueue"),
   metricAssigned: $("metricAssigned"), metricProgress: $("metricProgress"), metricUrgent: $("metricUrgent"), metricApproval: $("metricApproval"),
   backToQueueBtn: $("backToQueueBtn"), jobCardStatusBadge: $("jobCardStatusBadge"), jobCardTitle: $("jobCardTitle"), jobCardVehicle: $("jobCardVehicle"), jobCardMeta: $("jobCardMeta"), jobWorkingMechanic: $("jobWorkingMechanic"), updateWorkingMechanicBtn: $("updateWorkingMechanicBtn"), readonlyJobDetails: $("readonlyJobDetails"),
-  jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), inspectionSignoffSection: $("inspectionSignoffSection"), inspectionCompletedDate: $("inspectionCompletedDate"), mechanicInspectionDeclaration: $("mechanicInspectionDeclaration"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
+  jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), inspectionSignoffSection: $("inspectionSignoffSection"), inspectionCompletedDate: $("inspectionCompletedDate"), mechanicInspectionDeclaration: $("mechanicInspectionDeclaration"), airconSignoffSection: $("airconSignoffSection"), airconServiceCompletedDate: $("airconServiceCompletedDate"), airconMechanicDeclaration: $("airconMechanicDeclaration"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
 };
 
 let currentUser = null;
@@ -276,6 +276,10 @@ function is90DayInspection(job) {
   return /-(90day|rms)$/.test(key) || (normalize(job.jobType).includes("safety inspection") && (category.includes("90") || category.includes("rms")));
 }
 
+function isAirConditioningService(job) {
+  return normalize(job?.serviceTemplateKey) === "aircon-annual" || normalize(job?.jobType) === "air conditioning service";
+}
+
 function savedChecklistValue(saved, key, item) {
   return saved[key] ?? saved[item] ?? "";
 }
@@ -297,7 +301,7 @@ function renderRequirementChecklist(job, requirement) {
     <details class="requirement-group" ${groupIndex < 2 ? "open" : ""} style="border:1px solid #e4e7ec;border-radius:10px;margin:0 0 10px;overflow:hidden">
       <summary style="cursor:pointer;padding:12px 14px;font-weight:800;background:#f8fafc">${esc(section)} <span class="hint">(${items.length})</span></summary>
       <div style="padding:4px 12px 10px">
-        ${items.map(({id,item,action,description,mandatory,index}) => {
+        ${items.map(({id,item,action,description,mandatory,requiresReading,index}) => {
           const key = String(id || `${job.serviceTemplateKey || job.jobType}-${index + 1}`);
           const current = savedChecklistValue(saved, key, item);
           const note = job.jobCard?.checklistNotes?.[key] || "";
@@ -306,11 +310,11 @@ function renderRequirementChecklist(job, requirement) {
             <div class="check-response">
             <select id="check_${index}" data-check-key="${esc(key)}" data-check-item="${esc(item)}" data-check-action="${esc(action || "")}" data-check-description="${esc(description || "")}" ${mandatory === false ? "" : 'data-required-work="1"'}>
               <option value="">Select result</option>
-              <option value="Pass" ${current === "Pass" ? "selected" : ""}>Completed / Pass</option>
+              <option value="Pass" ${current === "Pass" ? "selected" : ""}>${requiresReading ? "Reading recorded" : "Completed / Pass"}</option>
               <option value="Attention" ${current === "Attention" ? "selected" : ""}>Attention required</option>
               <option value="N/A" ${current === "N/A" ? "selected" : ""}>N/A</option>
             </select>
-            <input class="check-result-note" data-check-note="${esc(key)}" value="${esc(note)}" placeholder="Reason/details required for Attention or N/A" ${current === "Attention" || current === "N/A" ? "" : "hidden"} />
+            <input class="check-result-note" data-check-note="${esc(key)}" ${requiresReading ? 'data-reading-required="1"' : ""} value="${esc(note)}" placeholder="${requiresReading ? "Enter measured pressure reading and unit" : "Reason/details required for Attention or N/A"}" ${requiresReading || current === "Attention" || current === "N/A" ? "" : "hidden"} />
             </div>
           </div>`;
         }).join("")}
@@ -370,6 +374,11 @@ function openJob(id) {
   els.inspectionSignoffSection.hidden = !inspection;
   els.inspectionCompletedDate.value = job.inspectionCompletedDate || job.jobCard?.inspectionCompletedDate || localDateString();
   els.mechanicInspectionDeclaration.checked = job.jobCard?.mechanicInspectionDeclaration === true;
+  const aircon = isAirConditioningService(job);
+  els.airconSignoffSection.hidden = !aircon;
+  els.airconServiceCompletedDate.value = job.airConditioningServiceDate || job.jobCard?.airConditioningServiceDate || localDateString();
+  els.airconServiceCompletedDate.max = localDateString();
+  els.airconMechanicDeclaration.checked = job.jobCard?.airconMechanicDeclaration === true;
   renderParts(job.jobCard?.partsUsed || []);
   const locked = ["Completed","Closed","Waiting Approval"].includes(job.status);
   els.jobCardForm.classList.toggle("jobcard-locked", locked);
@@ -379,6 +388,8 @@ function openJob(id) {
   els.completeJobBtn.disabled = locked;
   els.inspectionCompletedDate.disabled = locked;
   els.mechanicInspectionDeclaration.disabled = locked;
+  els.airconServiceCompletedDate.disabled = locked;
+  els.airconMechanicDeclaration.disabled = locked;
   window.scrollTo({top:0,behavior:"smooth"});
 }
 window.openMechanicJobCard = openJob;
@@ -416,7 +427,9 @@ function collectJobCard() {
     labourFinish: els.labourFinish.value,
     mechanicNotes: els.mechanicNotes.value.trim(),
     inspectionCompletedDate:els.inspectionCompletedDate?.value || "",
-    mechanicInspectionDeclaration:els.mechanicInspectionDeclaration?.checked === true
+    mechanicInspectionDeclaration:els.mechanicInspectionDeclaration?.checked === true,
+    airConditioningServiceDate:els.airconServiceCompletedDate?.value || "",
+    airconMechanicDeclaration:els.airconMechanicDeclaration?.checked === true
   };
 }
 
@@ -436,6 +449,11 @@ async function saveJobCard(status, message) {
     if (missingNotes.length) return showStatus(`Enter a reason or details for every Attention required or N/A result. ${missingNotes.length} item${missingNotes.length === 1 ? " needs" : "s need"} details.`, "error");
     if (is90DayInspection(selectedJob) && !card.inspectionCompletedDate) return showStatus("Enter the date the 90-day inspection was completed.", "error");
     if (is90DayInspection(selectedJob) && !card.mechanicInspectionDeclaration) return showStatus("Confirm the mechanic inspection declaration before sending for approval.", "error");
+    const missingReadings = [...els.jobChecklist.querySelectorAll("[data-reading-required='1']")].filter((el) => !el.value.trim());
+    if (isAirConditioningService(selectedJob) && missingReadings.length) return showStatus("Record both low-pressure and high-pressure gas readings before completing the A/C service.", "error");
+    if (isAirConditioningService(selectedJob) && !card.airConditioningServiceDate) return showStatus("Enter the actual A/C service completed date.", "error");
+    if (isAirConditioningService(selectedJob) && card.airConditioningServiceDate > localDateString()) return showStatus("The A/C service completed date cannot be in the future.", "error");
+    if (isAirConditioningService(selectedJob) && !card.airconMechanicDeclaration) return showStatus("Confirm the MVRIA mechanic declaration before sending the A/C service for approval.", "error");
   }
   const payload = { jobCard: card, status, updatedAt: serverTimestamp(), updatedByEmail: normalize(currentUser?.email) };
   if (status === "In Progress" && !selectedJob.startedAt) payload.startedAt = serverTimestamp();
@@ -446,6 +464,15 @@ async function saveJobCard(status, message) {
     if (is90DayInspection(selectedJob)) {
       payload.inspectionCompletedDate = card.inspectionCompletedDate;
       payload.mechanicInspectionSignOff = {
+        name:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Mechanic",
+        employeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
+        email:normalize(currentUser?.email),
+        signedAt:serverTimestamp()
+      };
+    }
+    if (isAirConditioningService(selectedJob)) {
+      payload.airConditioningServiceDate = card.airConditioningServiceDate;
+      payload.airConditioningMechanicSignOff = {
         name:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Mechanic",
         employeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
         email:normalize(currentUser?.email),
@@ -518,6 +545,7 @@ els.jobChecklist.addEventListener("change", (event) => {
   if (!select) return;
   const note = els.jobChecklist.querySelector(`[data-check-note="${CSS.escape(select.dataset.checkKey)}"]`);
   if (!note) return;
+  if (note.dataset.readingRequired === "1") { note.hidden = false; return; }
   note.hidden = !["Attention","N/A"].includes(select.value);
   if (note.hidden) note.value = "";
 });

@@ -15,8 +15,37 @@ const map=(rows,prefix)=>rows.map((r,i)=>({
  mandatory:true,
  description:prefix==='evi' ? (EID[i] || '') : prefix==='di' ? (DID[i] || '') : ''
 }));
+const AC=[
+ ["Cabin","Cabin filter","Clean","Clean the cabin filter and replace it if necessary."],
+ ["Engine bay","Compressor belt","Check","Check compressor belt condition and tension."],
+ ["Engine bay","Compressor oil level","Check","Check compressor oil level and add oil if required."],
+ ["Engine bay","Filter drier","Check","Check the condition of the filter drier."],
+ ["Interior","Recorded faults","Check","Check the system for recorded faults."],
+ ["Engine bay","Heater valve","Check","Check heater valve operation and inspect for leaks."],
+ ["Body","Unit security","Check","Check unit mounting bolts and clamps for security."],
+ ["Roof","Condenser and evaporator coils","Clean","Clean the condenser and evaporator coils."],
+ ["Engine bay","Unit case lids","Check","Check case lids for cracks or damage and report findings."],
+ ["Interior","Inside A/C unit","Clean","Fully clean inside the air-conditioning unit."],
+ ["Engine bay","Refrigerant leaks","Check","Inspect the refrigerant system for leaks."],
+ ["Engine bay","Gas charge","Check","Check the refrigerant gas charge."],
+ ["Body","Drain hoses","Check and clean","Check and clean all drain hoses."],
+ ["Engine bay","Refrigerant hoses","Check","Check hoses for chafing or damage."],
+ ["Engine bay","Suction and discharge pressure","Check","Check suction and discharge pressures."],
+ ["Body","Electrical connections","Check","Check all air-conditioning electrical connections."],
+ ["Engine bay","HP and LP pressure switches","Check","Check high-pressure and low-pressure switch operation."],
+ ["Interior","Electrical thermostat","Check","Check electrical thermostat operation."],
+ ["Engine bay","Heater boost pump","Check","Check the heater boost pump for leaks."],
+ ["Engine bay","Clutch and idle pulley bearings","Check","Check for noise and wear."],
+ ["Roof","Evaporator and condenser fan motors","Check","Check fan motors and replace brushes if required."],
+ ["Cabin","A/C system function test","Test","Test cooling mode, heating mode and temperature set points."],
+ ["Service","Filter-drier filter","Replace","Replace the filter-drier filter."],
+ ["Readings","Low-pressure gas reading","Reading","Record the measured low-pressure gas reading."],
+ ["Readings","High-pressure gas reading","Reading","Record the measured high-pressure gas reading."]
+];
+const mapAirConditioning=()=>AC.map((r,i)=>({id:`ac-${i+1}`,section:r[0],item:r[1],action:r[2],description:r[3],mandatory:true,requiresReading:r[2]==='Reading'}));
 export function getRequirementTemplate(key){
  const k=String(key||'').trim().toLowerCase();
+ if(k==='aircon-annual')return {title:'Annual Air Conditioning Service',source:'Punchbowl Bus Air Conditioning Service Sheet',schedule:'Every 12 months from the actual service completion date',items:mapAirConditioning()};
  if(k.startsWith('diesel-')&&['small','medium','large'].some(x=>k===`diesel-${x}`)){const t=k.split('-')[1],f=t==='small'?'S':t==='medium'?'M':'L';return {title:`Diesel ${t[0].toUpperCase()+t.slice(1)} Service`,source:'Diesel Service Excel',items:map(D.filter(r=>r[3].includes(f)),'ds')};}
  if(k==='ev-small'||k==='ev-large'){const t=k.split('-')[1],f=t==='small'?'S':'L';return {title:`EV ${t[0].toUpperCase()+t.slice(1)} Service`,source:'EV Service Excel',schedule:t==='small'?'30,000 km or 90 days':'60,000 km or 180 days',items:map(E.filter(r=>r[3].includes(f)),'evs')};}
  if(k==='diesel-90day'||k==='diesel-rms')return {title:k.endsWith('rms')?'Diesel RMS Inspection':'Diesel 90 Day Safety Inspection',source:'Diesel 90 Day/RMS Excel',items:map(DI,'di')};

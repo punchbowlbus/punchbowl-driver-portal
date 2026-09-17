@@ -1,4 +1,4 @@
-const CACHE = "pbc-v60"; // Refresh cached assets after unified defect status workflow
+const CACHE = "pbc-v61"; // Refresh cached assets after annual A/C service tracking
 
 const ASSETS = [
   "/",

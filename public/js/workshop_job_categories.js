@@ -126,6 +126,10 @@ async function refreshCategoryUi() {
   const bus = await selectedBus();
   const vehicleIsEv = isEv(bus);
 
+  if (bus && type === "Air Conditioning Service" && !$("jobDueDate")?.value && bus.nextAirConditioningServiceDate) {
+    $("jobDueDate").value = bus.nextAirConditioningServiceDate;
+  }
+
   if (!bus || type !== "Scheduled Service") {
     wrap.hidden = true;
     select.required = false;
@@ -168,6 +172,7 @@ async function refreshDuePreview(busArg = null) {
 }
 
 function templateKey(bus, jobType, category) {
+  if (jobType === "Air Conditioning Service") return "aircon-annual";
   const prefix = isEv(bus) ? "ev" : "diesel";
   if (jobType === "Scheduled Service") return `${prefix}-${String(category || "").toLowerCase()}`;
   if (jobType === "90 Day Safety Check") return `${prefix}-90day`;
@@ -217,7 +222,8 @@ async function createJobWithCategory(event) {
       item: item.item || "",
       action: item.action || "",
       description: item.description || "",
-      mandatory: item.mandatory !== false
+      mandatory: item.mandatory !== false,
+      requiresReading:item.requiresReading === true
     }))
   } : null;
 
