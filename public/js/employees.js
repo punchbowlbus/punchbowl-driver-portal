@@ -14,6 +14,7 @@ const ROLES = ["Driver", "Admin", "Mechanic", "Dispatcher", "Accounts", "Manager
 const EMPLOYMENT_TYPES = ["Full Time", "Part Time", "Casual", "Contract"];
 const ACCESS_LEVELS = ["Driver", "Admin", "Super Admin"];
 const STATUSES = ["Active", "Inactive", "On Leave"];
+const DRIVER_LICENCE_CLASSES = ["C", "LR", "MR", "HR", "HC", "MC"];
 
 function options(items, placeholder) {
   return [
@@ -33,13 +34,17 @@ function expiryState(value) {
 }
 
 function employeeComplianceState(employee) {
-  if (employee.role !== "Driver") return "none";
-  const states = [
-    employee.licenceExpiry,
-    employee.daExpiry,
-    employee.wwccExpiry,
-    employee.medicalExpiry
-  ].map(expiryState);
+  const role = String(employee.role || "");
+  if (role !== "Driver" && role !== "Mechanic") return "none";
+  if (role === "Mechanic" && (!employee.tradespersonCertificateNumber || !employee.tradespersonCertificateExpiry)) return "missing";
+  const dates = role === "Driver" ? [
+    employee.licenceExpiry, employee.daExpiry, employee.wwccExpiry, employee.medicalExpiry
+  ] : [
+    employee.mechanicDriverLicenceExpiry,
+    employee.tradespersonCertificateExpiry,
+    employee.refrigerantHandlingLicenceExpiry
+  ];
+  const states = dates.map(expiryState);
   if (states.includes("expired")) return "expired";
   if (states.includes("warning")) return "warning";
   return states.includes("valid") ? "valid" : "none";
@@ -131,6 +136,21 @@ export function renderEmployeesPage() {
           </div>
         </div>
 
+        <div id="mechanicFieldsWrap" class="employees-form-section" hidden>
+          <div class="employees-section-heading"><span>3</span><div><h4>Mechanic compliance</h4><p>NSW driving and motor vehicle tradesperson credentials, including A/C refrigerant licensing.</p></div></div>
+          <div class="employees-form-grid">
+            <label class="employees-field"><span>NSW driver licence number</span><input id="empMechanicDriverLicenceNumber" type="text" maxlength="80" /></label>
+            <label class="employees-field"><span>Driver licence class</span><select id="empMechanicDriverLicenceClass">${options(DRIVER_LICENCE_CLASSES, "Select licence class")}</select></label>
+            <label class="employees-field"><span>Driver licence expiry</span><input id="empMechanicDriverLicenceExpiry" type="date" /></label>
+            <label class="employees-field"><span>NSW Motor Vehicle Tradesperson Certificate number</span><input id="empTradespersonCertificateNumber" type="text" maxlength="80" /></label>
+            <label class="employees-field"><span>Tradesperson certificate expiry</span><input id="empTradespersonCertificateExpiry" type="date" /></label>
+            <label class="employees-field"><span>NSW repair class(es)</span><input id="empTradespersonRepairClasses" type="text" maxlength="240" placeholder="e.g. Motor mechanic, automotive electrician" /></label>
+            <label class="employees-field"><span>ARCtick Refrigerant Handling Licence number</span><input id="empRefrigerantHandlingLicenceNumber" type="text" maxlength="80" /></label>
+            <label class="employees-field"><span>Refrigerant Handling Licence expiry</span><input id="empRefrigerantHandlingLicenceExpiry" type="date" /></label>
+          </div>
+          <div class="employees-access-hint">A Refrigerant Handling Licence is required when the employee handles regulated refrigerant or performs work that risks refrigerant emissions.</div>
+        </div>
+
         <div class="employees-form-actions">
           <button id="saveEmployeeBtn" type="button" class="employees-primary-btn">Save Employee</button>
           <button id="cancelEmployeeBtn" type="button" class="btn">Cancel</button>
@@ -185,6 +205,7 @@ export function renderEmployeesPage() {
   const roleEl = document.getElementById("empRole");
   const accessEl = document.getElementById("empAccessLevel");
   const driverFieldsWrap = document.getElementById("driverFieldsWrap");
+  const mechanicFieldsWrap = document.getElementById("mechanicFieldsWrap");
   const accessHint = document.getElementById("employeeAccessHint");
 
   let employeesCache = [];
@@ -227,9 +248,9 @@ export function renderEmployeesPage() {
     accessHint.className = `employees-access-hint ${dualAccess ? "warning" : ""}`;
   }
 
-  function toggleDriverFields() {
-    if (!driverFieldsWrap) return;
+  function toggleComplianceFields() {
     driverFieldsWrap.hidden = roleEl?.value !== "Driver";
+    mechanicFieldsWrap.hidden = roleEl?.value !== "Mechanic";
     updateAccessHint();
   }
 
@@ -238,12 +259,18 @@ export function renderEmployeesPage() {
       .forEach((id) => { if (field(id)) field(id).value = ""; });
   }
 
+  function clearMechanicFields() {
+    ["empMechanicDriverLicenceNumber", "empMechanicDriverLicenceClass", "empMechanicDriverLicenceExpiry", "empTradespersonCertificateNumber", "empTradespersonCertificateExpiry", "empTradespersonRepairClasses", "empRefrigerantHandlingLicenceNumber", "empRefrigerantHandlingLicenceExpiry"]
+      .forEach((id) => { if (field(id)) field(id).value = ""; });
+  }
+
   function clearForm() {
     ["empNo", "empDisplayName", "empFirstName", "empLastName", "empEmail", "empPhone", "empDepartment", "empRole", "empEmploymentType", "empAccessLevel"]
       .forEach((id) => { if (field(id)) field(id).value = ""; });
     if (field("empStatus")) field("empStatus").value = "Active";
     clearDriverFields();
-    toggleDriverFields();
+    clearMechanicFields();
+    toggleComplianceFields();
     formDirty = false;
     showFormMessage("");
   }
@@ -269,12 +296,20 @@ export function renderEmployeesPage() {
       empWWCCExpiry: employee.wwccExpiry,
       empMedicalExpiry: employee.medicalExpiry,
       empFatigueCategory: employee.fatigueCategory,
-      empHomeDepot: employee.homeDepot
+      empHomeDepot: employee.homeDepot,
+      empMechanicDriverLicenceNumber: employee.mechanicDriverLicenceNumber,
+      empMechanicDriverLicenceClass: employee.mechanicDriverLicenceClass,
+      empMechanicDriverLicenceExpiry: employee.mechanicDriverLicenceExpiry,
+      empTradespersonCertificateNumber: employee.tradespersonCertificateNumber,
+      empTradespersonCertificateExpiry: employee.tradespersonCertificateExpiry,
+      empTradespersonRepairClasses: employee.tradespersonRepairClasses,
+      empRefrigerantHandlingLicenceNumber: employee.refrigerantHandlingLicenceNumber,
+      empRefrigerantHandlingLicenceExpiry: employee.refrigerantHandlingLicenceExpiry
     };
     Object.entries(values).forEach(([id, value]) => {
       if (field(id)) field(id).value = value || "";
     });
-    toggleDriverFields();
+    toggleComplianceFields();
     formDirty = false;
   }
 
@@ -352,6 +387,7 @@ export function renderEmployeesPage() {
     const state = employeeComplianceState(employee);
     if (state === "expired") return `<span class="employees-compliance expired">Expired</span>`;
     if (state === "warning") return `<span class="employees-compliance warning">Due soon</span>`;
+    if (state === "missing") return `<span class="employees-compliance warning">Details required</span>`;
     if (state === "valid") return `<span class="employees-compliance valid">Current</span>`;
     return `<span class="employees-compliance none">—</span>`;
   }
@@ -435,7 +471,15 @@ export function renderEmployeesPage() {
       wwccExpiry: role === "Driver" ? field("empWWCCExpiry").value : "",
       medicalExpiry: role === "Driver" ? field("empMedicalExpiry").value : "",
       fatigueCategory: role === "Driver" ? field("empFatigueCategory").value : "",
-      homeDepot: role === "Driver" ? field("empHomeDepot").value : ""
+      homeDepot: role === "Driver" ? field("empHomeDepot").value : "",
+      mechanicDriverLicenceNumber: role === "Mechanic" ? field("empMechanicDriverLicenceNumber").value.trim() : "",
+      mechanicDriverLicenceClass: role === "Mechanic" ? field("empMechanicDriverLicenceClass").value : "",
+      mechanicDriverLicenceExpiry: role === "Mechanic" ? field("empMechanicDriverLicenceExpiry").value : "",
+      tradespersonCertificateNumber: role === "Mechanic" ? field("empTradespersonCertificateNumber").value.trim() : "",
+      tradespersonCertificateExpiry: role === "Mechanic" ? field("empTradespersonCertificateExpiry").value : "",
+      tradespersonRepairClasses: role === "Mechanic" ? field("empTradespersonRepairClasses").value.trim() : "",
+      refrigerantHandlingLicenceNumber: role === "Mechanic" ? field("empRefrigerantHandlingLicenceNumber").value.trim() : "",
+      refrigerantHandlingLicenceExpiry: role === "Mechanic" ? field("empRefrigerantHandlingLicenceExpiry").value : ""
     };
   }
 
@@ -449,6 +493,11 @@ export function renderEmployeesPage() {
     if (!employee.employmentType) return "Employment type is required.";
     if (!employee.accessLevel) return "Access level is required.";
     if (!employee.status) return "Employee status is required.";
+    if (employee.role === "Mechanic") {
+      if (Boolean(employee.mechanicDriverLicenceNumber) !== Boolean(employee.mechanicDriverLicenceExpiry)) return "Enter both the mechanic's driver licence number and expiry date, or leave both blank.";
+      if (Boolean(employee.tradespersonCertificateNumber) !== Boolean(employee.tradespersonCertificateExpiry)) return "Enter both the NSW Motor Vehicle Tradesperson Certificate number and expiry date.";
+      if (Boolean(employee.refrigerantHandlingLicenceNumber) !== Boolean(employee.refrigerantHandlingLicenceExpiry)) return "Enter both the Refrigerant Handling Licence number and expiry date, or leave both blank.";
+    }
     return "";
   }
 
@@ -473,7 +522,7 @@ export function renderEmployeesPage() {
     element.addEventListener("change", () => { formDirty = true; });
   });
 
-  roleEl.onchange = toggleDriverFields;
+  roleEl.onchange = toggleComplianceFields;
   accessEl.onchange = updateAccessHint;
   addBtn.onclick = openAddForm;
   editBtn.onclick = openEditForm;
@@ -514,6 +563,14 @@ export function renderEmployeesPage() {
         employee.role !== "Driver" &&
         [editingEmployee.licenceNumber, editingEmployee.daNumber, editingEmployee.wwccNumber].some(Boolean) &&
         !confirm("Changing this employee from Driver will clear their driver compliance fields. Continue?")
+      ) return;
+
+      if (
+        editMode &&
+        editingEmployee?.role === "Mechanic" &&
+        employee.role !== "Mechanic" &&
+        [editingEmployee.mechanicDriverLicenceNumber, editingEmployee.tradespersonCertificateNumber, editingEmployee.refrigerantHandlingLicenceNumber].some(Boolean) &&
+        !confirm("Changing this employee from Mechanic will clear their mechanic compliance fields. Continue?")
       ) return;
 
       const wasEditMode = editMode;

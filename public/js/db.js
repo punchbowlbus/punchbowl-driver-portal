@@ -613,6 +613,16 @@ export async function saveEmployee(employee) {
       fatigueCategory: String(employee.fatigueCategory || "").trim(),
       homeDepot: String(employee.homeDepot || "").trim(),
 
+      // Mechanic compliance fields
+      mechanicDriverLicenceNumber: String(employee.mechanicDriverLicenceNumber || "").trim(),
+      mechanicDriverLicenceClass: String(employee.mechanicDriverLicenceClass || "").trim(),
+      mechanicDriverLicenceExpiry: String(employee.mechanicDriverLicenceExpiry || "").trim(),
+      tradespersonCertificateNumber: String(employee.tradespersonCertificateNumber || "").trim(),
+      tradespersonCertificateExpiry: String(employee.tradespersonCertificateExpiry || "").trim(),
+      tradespersonRepairClasses: String(employee.tradespersonRepairClasses || "").trim(),
+      refrigerantHandlingLicenceNumber: String(employee.refrigerantHandlingLicenceNumber || "").trim(),
+      refrigerantHandlingLicenceExpiry: String(employee.refrigerantHandlingLicenceExpiry || "").trim(),
+
       updatedAt: serverTimestamp(),
       createdAt: snap.exists() ? (snap.data().createdAt || serverTimestamp()) : serverTimestamp()
     },
@@ -770,4 +780,3 @@ export async function deactivateBus(fleetNumber) {
     updatedAt: serverTimestamp()
   });
 }
-
