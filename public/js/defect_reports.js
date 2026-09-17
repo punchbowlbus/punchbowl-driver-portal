@@ -18,6 +18,7 @@ import { auth, db, storage } from "./firebase.js";
 import { state } from "./state.js";
 import { els, showError } from "./ui.js";
 import { escapeHtml } from "./utils.js";
+import { DEFECT_STATUSES, isDefectCompleted, normalizeDefectStatus } from "./workshop_status.js";
 
 const MAX_PHOTOS = 3;
 const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
@@ -140,7 +141,7 @@ function renderRecentReports(reports) {
 
             <div class="defect-report-badges">
               <span class="defect-badge defect-status-badge">
-                ${escapeHtml(report.status || "New")}
+                ${escapeHtml(normalizeDefectStatus(report.status))}
               </span>
             </div>
           </div>
@@ -185,17 +186,10 @@ function renderRecentReports(reports) {
     .join("");
 }
 
-const ADMIN_DEFECT_STATUSES = [
-  "New",
-  "Acknowledged",
-  "Workshop Assigned",
-  "Completed"
-];
+const ADMIN_DEFECT_STATUSES = DEFECT_STATUSES;
 
 function isCompletedDefect(report) {
-  return ["completed", "closed"].includes(
-    String(report?.status || "").toLowerCase()
-  );
+  return isDefectCompleted(report);
 }
 
 async function loadAllDefectReports() {
@@ -342,7 +336,7 @@ async function renderAdminDefectDashboard() {
           report.reportedByEmployeeNumber,
           report.category,
           report.description,
-          report.status
+          normalizeDefectStatus(report.status)
         ].filter(Boolean).join(" ").toLowerCase();
         if (!haystack.includes(search)) return false;
       }
@@ -363,7 +357,7 @@ async function renderAdminDefectDashboard() {
     listEl.innerHTML = filtered.map((report) => {
       const unsafe = report.safeToDrive === "No";
       const photos = Array.isArray(report.photos) ? report.photos : [];
-      const currentStatus = report.status || "New";
+      const currentStatus = normalizeDefectStatus(report.status);
 
       return `
         <article class="defect-admin-report ${unsafe ? "unsafe" : ""}">

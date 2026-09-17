@@ -1,4 +1,4 @@
-const CACHE = "pbc-v59"; // Refresh cached assets after duty notification deep links
+const CACHE = "pbc-v60"; // Refresh cached assets after unified defect status workflow
 
 const ASSETS = [
   "/",
@@ -21,6 +21,7 @@ const ASSETS = [
   "/js/db.js",
   "/js/admin_v2.js",
   "/js/driver.js",
+  "/js/workshop_status.js",
 
   // NEW modules you are using now
   "/js/shifts_ui.js",

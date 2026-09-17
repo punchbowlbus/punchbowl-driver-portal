@@ -1,5 +1,6 @@
 import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { db } from "./firebase.js";
+import { DEFECT_STATUS, isDefectCompleted, normalizeDefectStatus } from "./workshop_status.js";
 
 const esc = (v) => String(v ?? "").replace(/[&<>'\"]/g, (m) => ({
   "&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"
@@ -29,7 +30,7 @@ function busLabel(r) {
 }
 
 function isDone(r) {
-  return ["completed", "closed"].includes(String(r.status || "").toLowerCase());
+  return isDefectCompleted(r);
 }
 
 function ensureJobDialog() {
@@ -114,7 +115,7 @@ async function createAndAssignJob(event) {
         managerNotes:document.getElementById("mechanicDefectJobNotes").value.trim(), diagnosis:"", workCompleted:"", partsUsed:[], labourEntries:[], returnToServiceApproved:false,
         createdByUid:mechanic.uid, createdByEmail:mechanic.email, createdAt:serverTimestamp(), updatedAt:serverTimestamp(), schemaVersion:1
       });
-      tx.set(defectRef, {status:"Workshop Assigned", workshopJobId:jobRef.id, workshopJobNumber:jobNumber, convertedToJobAt:serverTimestamp(), convertedToJobByUid:mechanic.uid, convertedToJobByEmail:mechanic.email, updatedAt:serverTimestamp()}, {merge:true});
+      tx.set(defectRef, {status:DEFECT_STATUS.ASSIGNED, workshopJobStatus:"Assigned", workshopJobId:jobRef.id, workshopJobNumber:jobNumber, convertedToJobAt:serverTimestamp(), convertedToJobByUid:mechanic.uid, convertedToJobByEmail:mechanic.email, updatedAt:serverTimestamp()}, {merge:true});
     });
     document.getElementById("mechanicDefectJobDialog").close();
   } catch (error) {
@@ -167,7 +168,7 @@ function render(reports) {
         </div>
         <div class="mechanic-defect-badges">
           <span class="badge ${unsafe ? "bad" : "good"}">${unsafe ? "Unsafe to drive" : "Safe to drive"}</span>
-          <span class="badge info">${esc(r.status || "New")}</span>
+          <span class="badge info">${esc(normalizeDefectStatus(r.status))}</span>
         </div>
       </div>
       <div class="mechanic-defect-meta">

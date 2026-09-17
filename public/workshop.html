@@ -217,7 +217,7 @@
           <section class="panel table-panel">
             <div class="report-filter-grid">
               <label>Search<input id="driverDefectReportSearch" type="search" placeholder="Report, bus, driver or description" /></label>
-              <label>Status<select id="driverDefectReportStatus"><option value="">All statuses</option><option>New</option><option>Acknowledged</option><option>Workshop Assigned</option><option>Completed</option><option>Closed</option></select></label>
+              <label>Status<select id="driverDefectReportStatus"><option value="">All statuses</option><option>New</option><option>Acknowledged</option><option>Assigned</option><option>Completed</option></select></label>
               <label>Category<select id="driverDefectReportCategory"><option value="">All categories</option></select></label>
               <label>Safety<select id="driverDefectReportSafety"><option value="">Safe and unsafe</option><option value="No">Unsafe to drive</option><option value="Yes">Safe to drive</option></select></label>
               <label>Reported from<input id="driverDefectReportFrom" type="date" /></label>
@@ -253,6 +253,7 @@
         <label>Bus<select id="jobBus" required><option value="">Select bus</option></select></label>
         <label>Job type<select id="jobType" required><option value="Defect Repair">Defect Repair</option><option value="Scheduled Service">Scheduled Service</option><option value="Safety Inspection">Safety Inspection</option><option value="Preventive Maintenance">Preventive Maintenance</option><option value="Breakdown Repair">Breakdown Repair</option><option value="Tyres">Tyres</option><option value="Electrical">Electrical</option><option value="Body Repair">Body Repair</option><option value="Other">Other</option></select></label>
         <label>Priority<select id="jobPriority"><option>Normal</option><option>High</option><option>Urgent</option><option>Safety Critical</option></select></label>
+        <label id="jobSafeToDriveWrap">Vehicle safe to drive?<select id="jobSafeToDrive"><option value="">Select</option><option value="Yes">Yes</option><option value="No">No</option></select></label>
         <label>Due date<input id="jobDueDate" type="date" /></label>
         <label class="full">Assigned mechanic<select id="jobMechanic"><option value="">Unassigned — Shared Workshop Queue</option></select></label>
         <label class="full">Reported fault / work requested<textarea id="jobFault" required placeholder="Describe the fault, service or inspection required"></textarea></label>

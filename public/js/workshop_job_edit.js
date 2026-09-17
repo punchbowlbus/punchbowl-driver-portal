@@ -1,4 +1,4 @@
-import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
+import { collection, doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { db } from "./firebase.js";
 
 const $ = (id) => document.getElementById(id);
@@ -36,6 +36,12 @@ function openEditDialog(job) {
   $("jobDueDate").value = job.dueDate || "";
   $("jobFault").value = job.reportedFault || "";
   $("jobManagerNotes").value = job.managerNotes || "";
+  if ($("jobSafeToDrive")) $("jobSafeToDrive").value = job.defectSafeToDrive || "";
+  if (job.sourceDefectId && !job.defectSafeToDrive) {
+    getDoc(doc(db, "defectReports", job.sourceDefectId)).then((snapshot) => {
+      if (snapshot.exists() && $("jobSafeToDrive")) $("jobSafeToDrive").value = snapshot.data().safeToDrive || "";
+    }).catch(() => {});
+  }
 
   const title = dialog.querySelector(".dialog-head h2");
   const help = dialog.querySelector(".dialog-head p");
@@ -102,6 +108,7 @@ document.head.appendChild(style);
 
 $("jobDialog")?.addEventListener("close", () => {
   window.workshopEditingJob = null;
+  window.workshopPendingSourceDefect = null;
   const title = $("jobDialog")?.querySelector(".dialog-head h2");
   const help = $("jobDialog")?.querySelector(".dialog-head p");
   const submit = $("jobForm")?.querySelector('button[type="submit"]');

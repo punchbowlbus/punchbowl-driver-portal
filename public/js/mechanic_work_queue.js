@@ -6,6 +6,7 @@ import {
   orderBy,
   query,
   arrayUnion,
+  runTransaction,
   serverTimestamp,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
@@ -19,6 +20,7 @@ import { auth, db, provider } from "./firebase.js";
 import { ADMIN_EMAILS } from "./config.js";
 import { getEmployeeByEmail } from "./db.js";
 import { getRequirementTemplate } from "./workshop_service_requirements.js?v=20260914-descriptions";
+import { DEFECT_STATUS } from "./workshop_status.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -451,7 +453,30 @@ async function saveJobCard(status, message) {
       };
     }
   }
-  try { await updateDoc(doc(db, "workshopJobs", selectedJob.id), payload); showStatus(message); }
+  try {
+    const jobRef = doc(db, "workshopJobs", selectedJob.id);
+    if (status === "Waiting Approval" && selectedJob.sourceDefectId) {
+      const defectRef = doc(db, "defectReports", selectedJob.sourceDefectId);
+      await runTransaction(db, async (tx) => {
+        const [jobSnap, defectSnap] = await Promise.all([tx.get(jobRef), tx.get(defectRef)]);
+        if (!jobSnap.exists()) throw new Error("Workshop job no longer exists.");
+        tx.update(jobRef, payload);
+        if (defectSnap.exists()) {
+          tx.set(defectRef, {
+            status:DEFECT_STATUS.COMPLETED,
+            workshopJobStatus:"Waiting Approval",
+            completedAt:serverTimestamp(),
+            completedByUid:currentUser?.uid || "",
+            completedByEmail:normalize(currentUser?.email),
+            updatedAt:serverTimestamp()
+          }, {merge:true});
+        }
+      });
+    } else {
+      await updateDoc(jobRef, payload);
+    }
+    showStatus(message);
+  }
   catch (err) { showStatus(err?.message || "Unable to update workshop job.", "error"); }
 }
 

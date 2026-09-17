@@ -1,12 +1,13 @@
 import { collection, doc, getDocs, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
+import { DEFECT_STATUSES, isDefectCompleted, normalizeDefectStatus } from "./workshop_status.js";
 
-const STATUSES = ["New", "Acknowledged", "Workshop Assigned", "Completed"];
+const STATUSES = DEFECT_STATUSES;
 let reports = [];
 let activeTab = "open";
 let loaded = false;
 const esc = (v) => String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[m]));
-const isDone = (r) => ["completed", "closed"].includes(String(r?.status || "").toLowerCase());
+const isDone = (r) => isDefectCompleted(r);
 
 function fmtDate(v) {
   const d = v?.toDate?.() || (v ? new Date(v) : null);
@@ -54,7 +55,7 @@ function filtered() {
     if (date && String(r.defectDate || "") !== date) return false;
     if (category && r.category !== category) return false;
     if (safety && r.safeToDrive !== safety) return false;
-    if (q && ![r.reportNumber,r.fleetNumber,r.rego,r.reportedByName,r.reportedByEmployeeNumber,r.category,r.description,r.status].filter(Boolean).join(" ").toLowerCase().includes(q)) return false;
+    if (q && ![r.reportNumber,r.fleetNumber,r.rego,r.reportedByName,r.reportedByEmployeeNumber,r.category,r.description,normalizeDefectStatus(r.status)].filter(Boolean).join(" ").toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -67,7 +68,7 @@ function renderList() {
   el.innerHTML = list.map((r) => {
     const unsafe = r.safeToDrive === "No";
     const photos = Array.isArray(r.photos) ? r.photos : [];
-    const status = r.status || "New";
+    const status = normalizeDefectStatus(r.status);
     const jobAction = r.workshopJobId || r.workshopJobNumber
       ? `<button class="button defect-job-created" type="button" disabled>Job ${esc(r.workshopJobNumber || "created")}</button>`
       : !isDone(r) ? `<button class="button defect-create-job" type="button" data-defect-create-job="${esc(r.id)}">Create Job Card</button>` : "";

@@ -10,6 +10,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
 import { auth, db } from "./firebase.js";
+import { DEFECT_STATUS } from "./workshop_status.js";
 
 let jobs = [];
 let buses = [];
@@ -272,7 +273,10 @@ async function returnToMechanic() {
       const ref = doc(db, "workshopJobs", selectedJob.id);
       const snap = await tx.get(ref);
       if (!snap.exists()) throw new Error("Workshop job no longer exists.");
-      if (snap.data().status !== "Waiting Approval") throw new Error("This job is no longer waiting for approval.");
+      const latestJob = snap.data();
+      if (latestJob.status !== "Waiting Approval") throw new Error("This job is no longer waiting for approval.");
+      const defectRef = latestJob.sourceDefectId ? doc(db, "defectReports", latestJob.sourceDefectId) : null;
+      const defectSnap = defectRef ? await tx.get(defectRef) : null;
       tx.update(ref, {
         status:"In Progress",
         fleetManagerReviewResult:"Returned to Mechanic",
@@ -281,6 +285,15 @@ async function returnToMechanic() {
         fleetManagerReviewedAt:serverTimestamp(),
         updatedAt:serverTimestamp()
       });
+      if (defectRef && defectSnap?.exists()) {
+        tx.set(defectRef, {
+          status:DEFECT_STATUS.ASSIGNED,
+          workshopJobStatus:"In Progress",
+          reopenedAt:serverTimestamp(),
+          reopenedReason:comments,
+          updatedAt:serverTimestamp()
+        }, {merge:true});
+      }
     });
     $("fleetManagerReviewDialog").close();
     toast(`${selectedJob.jobNumber || selectedJob.id} returned to the mechanic. Reason saved with date and time.`);
@@ -343,6 +356,8 @@ async function approveAndClose() {
         const busSnap = await tx.get(busRef);
         if (busSnap.exists()) busData = busSnap.data();
       }
+      const defectRef = latestJob.sourceDefectId ? doc(db, "defectReports", latestJob.sourceDefectId) : null;
+      const defectSnap = defectRef ? await tx.get(defectRef) : null;
 
       const currentJobOdo = num(latestJob.jobCard?.currentOdometer);
       const oldBusOdo = num(busData?.currentOdometer ?? busData?.odometer ?? busData?.odometerKm);
@@ -383,6 +398,16 @@ async function approveAndClose() {
         jobUpdate.inspectionDateAudit = inspectionDateAudit;
       }
       tx.update(jobRef, jobUpdate);
+
+      if (defectRef && defectSnap?.exists()) {
+        tx.set(defectRef, {
+          status:DEFECT_STATUS.COMPLETED,
+          workshopJobStatus:"Closed",
+          fleetManagerCompletedAt:serverTimestamp(),
+          fleetManagerCompletedByEmail:norm(auth.currentUser?.email),
+          updatedAt:serverTimestamp()
+        }, {merge:true});
+      }
 
       if (busRef && busData) {
         const busUpdate = {

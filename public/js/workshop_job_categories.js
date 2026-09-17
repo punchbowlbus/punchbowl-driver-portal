@@ -3,11 +3,13 @@ import {
   collection,
   doc,
   getDoc,
+  runTransaction,
   serverTimestamp,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
 import { getRequirementTemplate } from "./workshop_service_requirements.js";
+import { DEFECT_STATUS, isDefectCompleted } from "./workshop_status.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -117,6 +119,10 @@ async function refreshCategoryUi() {
   if (!wrap || !select) return;
 
   const type = $("jobType")?.value || "";
+  const safeToDriveWrap = $("jobSafeToDriveWrap");
+  const safeToDrive = $("jobSafeToDrive");
+  if (safeToDriveWrap) safeToDriveWrap.hidden = type !== "Defect Repair";
+  if (safeToDrive) safeToDrive.required = type === "Defect Repair";
   const bus = await selectedBus();
   const vehicleIsEv = isEv(bus);
 
@@ -179,9 +185,12 @@ async function createJobWithCategory(event) {
   if (!bus) return showStatus("Select a bus for this job.", "error");
 
   const jobType = $("jobType")?.value || "";
+  const sourceDefect = window.workshopPendingSourceDefect || null;
   const categoryRequired = jobType === "Scheduled Service";
   const category = categoryRequired ? String($("jobCategory")?.value || "").trim() : "";
   if (categoryRequired && !category) return showStatus("Select the service category to assign.", "error");
+  const safeToDrive = jobType === "Defect Repair" ? String($("jobSafeToDrive")?.value || sourceDefect?.safeToDrive || "").trim() : "";
+  if (jobType === "Defect Repair" && !safeToDrive) return showStatus("Confirm whether the vehicle is safe to drive.", "error");
 
   const fault = String($("jobFault")?.value || "").trim();
   if (!fault) return showStatus("Describe the work required.", "error");
@@ -189,6 +198,9 @@ async function createJobWithCategory(event) {
   const now = Date.now();
   const jobNumber = `WJ-${new Date().getFullYear()}-${String(now).slice(-6)}`;
   const assignedMechanic = String($("jobMechanic")?.value || "").trim();
+  const mechanicOption = $("jobMechanic")?.selectedOptions?.[0];
+  const assignedMechanicEmployeeNumber = assignedMechanic ? String(mechanicOption?.dataset.employeeNumber || "").trim() : "";
+  const assignedMechanicEmail = assignedMechanic ? normalizeEmail(mechanicOption?.dataset.employeeEmail) : "";
   const vehicleIsEv = isEv(bus);
   const interval = jobType === "Scheduled Service" ? serviceInterval(bus, category) : null;
   const requirementKey = templateKey(bus, jobType, category);
@@ -226,9 +238,15 @@ async function createJobWithCategory(event) {
     priority:$("jobPriority")?.value || "Normal",
     status:assignedMechanic ? "Assigned" : "New",
     assignedMechanic,
+    assignedMechanicName:assignedMechanic,
+    assignedMechanicEmployeeNumber,
+    assignedMechanicEmail,
     dueDate:$("jobDueDate")?.value || "",
-    source:"Fleet Manager",
-    sourceDefectId:"",
+    source:sourceDefect ? "Driver Defect" : (jobType === "Defect Repair" ? "Fleet Manager Defect" : "Fleet Manager"),
+    sourceDefectId:sourceDefect?.id || "",
+    sourceDefectNumber:sourceDefect?.reportNumber || "",
+    defectCategory:sourceDefect?.category || (jobType === "Defect Repair" ? "Mechanical" : ""),
+    defectSafeToDrive:safeToDrive,
     reportedFault:fault,
     managerNotes:String($("jobManagerNotes")?.value || "").trim(),
     odometerStart:currentOdo(bus),
@@ -261,7 +279,7 @@ async function createJobWithCategory(event) {
         && !current.jobCard?.labourStart;
       if (!canEdit) throw new Error("This job is locked because mechanic work has already started.");
 
-      await updateDoc(jobRef, {
+      const jobUpdate = {
         busId:payload.busId,
         fleetNumber:payload.fleetNumber,
         rego:payload.rego,
@@ -277,11 +295,106 @@ async function createJobWithCategory(event) {
         priority:payload.priority,
         status:payload.status,
         assignedMechanic:payload.assignedMechanic,
+        assignedMechanicName:payload.assignedMechanicName,
+        assignedMechanicEmployeeNumber:payload.assignedMechanicEmployeeNumber,
+        assignedMechanicEmail:payload.assignedMechanicEmail,
+        defectSafeToDrive:payload.defectSafeToDrive,
         dueDate:payload.dueDate,
         reportedFault:payload.reportedFault,
         managerNotes:payload.managerNotes,
         updatedAt:serverTimestamp(),
         updatedByEmail:normalizeEmail(auth.currentUser?.email)
+      };
+      if (current.sourceDefectId) {
+        const defectRef = doc(db, "defectReports", current.sourceDefectId);
+        await runTransaction(db, async (tx) => {
+          const [latestJob, defectSnap] = await Promise.all([tx.get(jobRef), tx.get(defectRef)]);
+          if (!latestJob.exists()) throw new Error("This workshop job no longer exists.");
+          if (!defectSnap.exists()) throw new Error("The linked defect report no longer exists.");
+          tx.update(jobRef, jobUpdate);
+          tx.set(defectRef, {
+            status:DEFECT_STATUS.ASSIGNED,
+            safeToDrive,
+            description:payload.reportedFault,
+            priority:payload.priority === "Safety Critical" ? "Critical" : payload.priority,
+            assignedMechanic,
+            assignedMechanicEmployeeNumber,
+            assignedMechanicEmail,
+            workshopJobStatus:payload.status,
+            adminNotes:payload.managerNotes,
+            updatedAt:serverTimestamp()
+          }, {merge:true});
+        });
+      } else {
+        await updateDoc(jobRef, jobUpdate);
+      }
+    } else if (sourceDefect) {
+      const defectRef = doc(db, "defectReports", sourceDefect.id);
+      const jobRef = doc(collection(db, "workshopJobs"));
+      await runTransaction(db, async (tx) => {
+        const defectSnap = await tx.get(defectRef);
+        if (!defectSnap.exists()) throw new Error("This defect report no longer exists.");
+        const current = defectSnap.data();
+        if (current.workshopJobId || current.workshopJobNumber) throw new Error(`A job card already exists: ${current.workshopJobNumber || current.workshopJobId}`);
+        if (isDefectCompleted(current)) throw new Error("A completed defect cannot be converted into a new job card.");
+        tx.set(jobRef, payload);
+        tx.set(defectRef, {
+          status:DEFECT_STATUS.ASSIGNED,
+          safeToDrive,
+          assignedMechanic,
+          assignedMechanicEmployeeNumber,
+          assignedMechanicEmail,
+          workshopJobStatus:payload.status,
+          workshopJobId:jobRef.id,
+          workshopJobNumber:jobNumber,
+          convertedToJobAt:serverTimestamp(),
+          convertedToJobByUid:auth.currentUser?.uid || "",
+          convertedToJobByEmail:normalizeEmail(auth.currentUser?.email),
+          updatedAt:serverTimestamp()
+        }, {merge:true});
+      });
+    } else if (jobType === "Defect Repair") {
+      const jobRef = doc(collection(db, "workshopJobs"));
+      const defectRef = doc(collection(db, "defectReports"));
+      const reportNumber = `DR-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${defectRef.id.slice(0,6).toUpperCase()}`;
+      payload.sourceDefectId = defectRef.id;
+      payload.sourceDefectNumber = reportNumber;
+      await runTransaction(db, async (tx) => {
+        tx.set(jobRef, payload);
+        tx.set(defectRef, {
+          reportNumber,
+          status:DEFECT_STATUS.ASSIGNED,
+          priority:payload.priority === "Safety Critical" ? "Critical" : payload.priority,
+          defectDate:new Date().toLocaleDateString("en-CA"),
+          category:"Mechanical",
+          safeToDrive,
+          description:fault,
+          busId:bus.id,
+          fleetNumber:fleetNo(bus, bus.id),
+          rego:bus.rego || "",
+          depot:bus.depot || "",
+          photos:[],
+          photoCount:0,
+          reportedByUid:auth.currentUser?.uid || "",
+          reportedByEmail:auth.currentUser?.email || "",
+          reportedByName:auth.currentUser?.displayName || auth.currentUser?.email || "Fleet Manager",
+          reportedByEmployeeNumber:"",
+          reportedAtIso:new Date().toISOString(),
+          reportedSource:"Fleet Manager",
+          assignedMechanic,
+          assignedMechanicEmployeeNumber,
+          assignedMechanicEmail,
+          workshopJobStatus:payload.status,
+          workshopJobId:jobRef.id,
+          workshopJobNumber:jobNumber,
+          convertedToJobAt:serverTimestamp(),
+          convertedToJobByUid:auth.currentUser?.uid || "",
+          convertedToJobByEmail:normalizeEmail(auth.currentUser?.email),
+          adminNotes:payload.managerNotes,
+          deleted:false,
+          createdAt:serverTimestamp(),
+          updatedAt:serverTimestamp()
+        });
       });
     } else {
       await addDoc(collection(db, "workshopJobs"), payload);
@@ -295,6 +408,7 @@ async function createJobWithCategory(event) {
       ? `✓ Workshop job ${editingJob.jobNumber || editingJob.id} updated.`
       : `✓ Workshop job ${jobNumber} created${categoryText}${checklistText}.`);
     window.workshopEditingJob = null;
+    window.workshopPendingSourceDefect = null;
   } catch (err) {
     showStatus(err?.message || "Unable to create workshop job.", "error");
   } finally {

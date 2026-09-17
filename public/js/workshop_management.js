@@ -20,6 +20,7 @@ import {
 import { auth, db, provider } from "./firebase.js";
 import { ADMIN_EMAILS } from "./config.js";
 import { getEmployeeByEmail } from "./db.js";
+import { DEFECT_STATUS, isDefectCompleted } from "./workshop_status.js";
 
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -267,10 +268,10 @@ async function createWorkshopJob(e) {
         if (!defectSnap.exists()) throw new Error("This defect report no longer exists.");
         const current = defectSnap.data();
         if (current.workshopJobId || current.workshopJobNumber) throw new Error(`A job card already exists: ${current.workshopJobNumber || current.workshopJobId}`);
-        if (["completed", "closed"].includes(String(current.status || "").toLowerCase())) throw new Error("A completed defect cannot be converted into a new job card.");
+        if (isDefectCompleted(current)) throw new Error("A completed defect cannot be converted into a new job card.");
         tx.set(jobRef, jobPayload);
         tx.set(defectRef, {
-          status:"Workshop Assigned", workshopJobId:jobRef.id, workshopJobNumber:jobNumber,
+          status:DEFECT_STATUS.ASSIGNED, workshopJobStatus:jobPayload.status, workshopJobId:jobRef.id, workshopJobNumber:jobNumber,
           convertedToJobAt:serverTimestamp(), convertedToJobByUid:currentUser.uid || "",
           convertedToJobByEmail:normalizeEmail(currentUser.email), updatedAt:serverTimestamp()
         }, {merge:true});
@@ -289,6 +290,7 @@ async function createWorkshopJob(e) {
 function openJobDialog(input="") {
   els.jobForm.reset();
   pendingSourceDefect = input && typeof input === "object" ? input : null;
+  window.workshopPendingSourceDefect = pendingSourceDefect;
   const busId = pendingSourceDefect?.busId || input || "";
   if (busId) els.jobBus.value = busId;
   if (pendingSourceDefect) {
@@ -297,6 +299,8 @@ function openJobDialog(input="") {
     els.jobDueDate.value = pendingSourceDefect.defectDate || todayStr();
     els.jobFault.value = pendingSourceDefect.description || "";
     els.jobManagerNotes.value = pendingSourceDefect.adminNotes || "";
+    const safeToDrive = document.getElementById("jobSafeToDrive");
+    if (safeToDrive) safeToDrive.value = pendingSourceDefect.safeToDrive || "";
     const title = els.jobDialog.querySelector(".dialog-head h2");
     const help = els.jobDialog.querySelector(".dialog-head p");
     if (title) title.textContent = "Create Job Card from Driver Defect";
@@ -307,11 +311,13 @@ function openJobDialog(input="") {
     if (title) title.textContent = "Create Workshop Job";
     if (help) help.textContent = "Choose the job type. Leave mechanic unassigned to send it to the shared Workshop queue.";
   }
+  els.jobType.dispatchEvent(new Event("change", {bubbles:true}));
   els.jobDialog.showModal();
 }
 window.openWorkshopJobDialog = openJobDialog;
 function closeJobDialog() {
   pendingSourceDefect = null;
+  window.workshopPendingSourceDefect = null;
   els.jobDialog.close();
 }
 function switchView(name) {
