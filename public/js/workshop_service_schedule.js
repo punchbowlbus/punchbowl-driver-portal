@@ -150,10 +150,13 @@ function ensureDialog() {
 
       <div class="service-setup-section">
         <h3>Annual air conditioning service</h3>
-        <p class="hint">The next A/C service is due 12 months after the last completed service date.</p>
+        <p class="hint">The recorded date is read-only. Fleet Managers can enter a newly confirmed service date below. The next A/C service is due 12 months after that date.</p>
         <div class="form-grid">
-          <label>Last A/C service date
-            <input id="lastAirConditioningServiceDate" type="date" />
+          <label>Last recorded A/C service date
+            <input id="lastAirConditioningServiceDate" type="date" readonly />
+          </label>
+          <label>Enter new A/C service date
+            <input id="newAirConditioningServiceDate" type="date" />
           </label>
           <label>Next A/C service due
             <input id="nextAirConditioningServiceDatePreview" readonly />
@@ -198,7 +201,7 @@ function ensureDialog() {
   const lastType = document.getElementById("lastServiceType");
   const lastKm = document.getElementById("lastServiceOdometer");
   const nextType = document.getElementById("nextServiceType");
-  const lastAirconDate = document.getElementById("lastAirConditioningServiceDate");
+  const newAirconDate = document.getElementById("newAirConditioningServiceDate");
 
   function updatePreview() {
     if (!selectedBus) return;
@@ -219,8 +222,9 @@ function ensureDialog() {
     nextType.value = nextServiceTypeFor(isEv(selectedBus), lastType.value);
     updatePreview();
   });
-  lastAirconDate.addEventListener("change", () => {
-    document.getElementById("nextAirConditioningServiceDatePreview").value = addMonths(lastAirconDate.value, 12);
+  newAirconDate.addEventListener("change", () => {
+    const recordedDate = selectedBus?.lastAirConditioningServiceDate || "";
+    document.getElementById("nextAirConditioningServiceDatePreview").value = addMonths(newAirconDate.value || recordedDate, 12);
   });
 
   document.getElementById("closeServiceScheduleDialog").addEventListener("click", () => dialog.close());
@@ -239,7 +243,8 @@ function ensureDialog() {
     const lastServiceKm = num(lastKm.value);
     const currentLastType = lastType.value || "";
     const currentNextType = nextType.value || nextServiceTypeFor(vehicleIsEv, currentLastType);
-    const airconDate = lastAirconDate.value || "";
+    const newAirconServiceDate = newAirconDate.value || "";
+    const recordedAirconServiceDate = selectedBus.lastAirConditioningServiceDate || "";
 
     if (smallKm == null || smallKm <= 0) return showDialogMessage("Enter a valid Small service interval in kilometres.");
     if (!vehicleIsEv && (mediumKm == null || mediumKm <= 0)) return showDialogMessage("Enter a valid Medium service interval in kilometres.");
@@ -247,7 +252,8 @@ function ensureDialog() {
     if (lastServiceKm != null && lastServiceKm < 0) return showDialogMessage("Enter a valid last service odometer reading.");
     if (current != null && lastServiceKm != null && lastServiceKm > current) return showDialogMessage(`Last service odometer cannot be higher than the current odometer (${current.toLocaleString("en-AU")} km).`);
     if (vehicleIsEv && currentNextType === "Medium") return showDialogMessage("EV service sequence uses Small and Large only.");
-    if (airconDate && airconDate > localDateString()) return showDialogMessage("The last A/C service date cannot be in the future.");
+    if (newAirconServiceDate && newAirconServiceDate > localDateString()) return showDialogMessage("The new A/C service date cannot be in the future.");
+    if (newAirconServiceDate && recordedAirconServiceDate && newAirconServiceDate < recordedAirconServiceDate) return showDialogMessage(`The new A/C service date cannot be earlier than the recorded date (${recordedAirconServiceDate}).`);
 
     const nextInterval = currentNextType === "Small" ? smallKm : currentNextType === "Medium" ? mediumKm : largeKm;
     const nextServiceKm = lastServiceKm != null && nextInterval != null ? lastServiceKm + nextInterval : null;
@@ -257,7 +263,7 @@ function ensureDialog() {
     saveBtn.textContent = "Saving...";
 
     try {
-      await updateDoc(doc(db, "buses", selectedBus.id), {
+      const update = {
         serviceProgram: vehicleIsEv ? "EV" : "Diesel",
         serviceSequence: vehicleIsEv ? ["Small", "Large"] : ["Small", "Medium", "Large"],
         serviceSmallIntervalKm: smallKm,
@@ -269,13 +275,22 @@ function ensureDialog() {
         lastServiceDate: document.getElementById("lastServiceDate").value || "",
         nextServiceType: currentNextType,
         nextServiceOdometer: nextServiceKm,
-        lastAirConditioningServiceDate: airconDate,
-        nextAirConditioningServiceDate: addMonths(airconDate, 12),
         serviceScheduleUpdatedAt: serverTimestamp(),
         serviceScheduleUpdatedBy: String(auth.currentUser?.email || "").trim().toLowerCase()
-      });
+      };
 
-      showPageStatus(`✓ Service setup saved for ${fleetNo(selectedBus)}. Next service: ${currentNextType}${nextServiceKm != null ? ` at ${formatKm(nextServiceKm)}` : ""}.`);
+      if (newAirconServiceDate) {
+        update.lastAirConditioningServiceDate = newAirconServiceDate;
+        update.nextAirConditioningServiceDate = addMonths(newAirconServiceDate, 12);
+        update.airConditioningTrackingUpdatedAt = serverTimestamp();
+        update.airConditioningTrackingUpdatedBy = String(auth.currentUser?.email || "").trim().toLowerCase();
+        update.airConditioningTrackingUpdateSource = "Fleet Manager manual entry";
+      }
+
+      await updateDoc(doc(db, "buses", selectedBus.id), update);
+
+      const airconStatus = newAirconServiceDate ? ` A/C tracking updated; next due ${addMonths(newAirconServiceDate, 12)}.` : "";
+      showPageStatus(`✓ Service setup saved for ${fleetNo(selectedBus)}. Next service: ${currentNextType}${nextServiceKm != null ? ` at ${formatKm(nextServiceKm)}` : ""}.${airconStatus}`);
       dialog.close();
     } catch (error) {
       showDialogMessage(error?.message || "Unable to save service setup.");
@@ -327,7 +342,8 @@ function openSchedule(bus) {
   const nextInterval = nextTypeSelect.value === "Small" ? smallKm : nextTypeSelect.value === "Medium" ? mediumKm : largeKm;
   document.getElementById("nextServiceOdometerPreview").value = lastKm != null && nextInterval != null ? String(lastKm + nextInterval) : "";
   document.getElementById("lastAirConditioningServiceDate").value = bus.lastAirConditioningServiceDate || "";
-  document.getElementById("lastAirConditioningServiceDate").max = localDateString();
+  document.getElementById("newAirConditioningServiceDate").value = "";
+  document.getElementById("newAirConditioningServiceDate").max = localDateString();
   document.getElementById("nextAirConditioningServiceDatePreview").value = bus.nextAirConditioningServiceDate || addMonths(bus.lastAirConditioningServiceDate || "", 12);
 
   document.getElementById("serviceScheduleDialog").showModal();

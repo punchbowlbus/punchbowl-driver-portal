@@ -1,4 +1,4 @@
-const CACHE = "pbc-v61"; // Refresh cached assets after annual A/C service tracking
+const CACHE = "pbc-v62"; // Refresh cached assets after Fleet Manager A/C date-entry update
 
 const ASSETS = [
   "/",
