@@ -1,4 +1,4 @@
-const CACHE = "pbc-v58"; // Refresh cached assets after Super Admin alert support
+const CACHE = "pbc-v59"; // Refresh cached assets after duty notification deep links
 
 const ASSETS = [
   "/",
@@ -52,6 +52,22 @@ self.addEventListener("activate", (event) => {
     const keys = await caches.keys();
     await Promise.all(keys.map((k) => (k === CACHE ? null : caches.delete(k))));
     await self.clients.claim();
+  })());
+});
+
+self.addEventListener("notificationclick", (event) => {
+  const link = event.notification?.data?.portalLink;
+  if (!link) return;
+
+  event.notification.close();
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const existing = windows.find((client) => new URL(client.url).origin === self.location.origin);
+    if (existing) {
+      await existing.navigate(link);
+      return existing.focus();
+    }
+    return self.clients.openWindow(link);
   })());
 });
 

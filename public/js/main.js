@@ -10,6 +10,7 @@ import {
   where,
   orderBy,
   onSnapshot,
+  getDoc,
   updateDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import {
@@ -17,7 +18,7 @@ import {
   uploadBytes,
   getDownloadURL
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
-import { getToken } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
+import { getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-functions.js";
 import { auth, provider, db, functions, messaging, storage } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
@@ -1310,6 +1311,67 @@ window.enablePortalNotifications = () => registerPortalNotifications(state.emplo
   requestPermission: true
 });
 
+onMessage(messaging, async (payload) => {
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+    const title = String(payload.notification?.title || "Punchbowl Driver Portal");
+    const body = String(payload.notification?.body || "You have a new portal update.");
+    const link = String(payload.data?.link || "https://punchbowl-driver-portal.web.app");
+    const registration = await navigator.serviceWorker?.ready;
+
+    if (registration?.showNotification) {
+      await registration.showNotification(title, {
+        body,
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        tag: payload.data?.dutySpanId
+          ? `foreground-duty-${payload.data.dutySpanId}-${payload.data?.eventType || "update"}`
+          : `foreground-${payload.data?.type || "portal"}`,
+        data: { portalLink: link }
+      });
+    }
+  } catch (error) {
+    console.error("Foreground notification display failed", error);
+  }
+});
+
+async function openLinkedDutyIfRequested() {
+  const params = new URLSearchParams(window.location.search);
+  const requestedPage = params.get("page");
+  const dutySpanId = String(params.get("dutySpanId") || "").trim();
+  if (requestedPage !== "dutySheet" || !dutySpanId) return false;
+
+  try {
+    const dutySnapshot = await getDoc(doc(db, "dutySpans", dutySpanId));
+    const dutySpan = dutySnapshot.exists()
+      ? { id: dutySnapshot.id, ...dutySnapshot.data() }
+      : null;
+    const currentEmployeeNumber = String(state.employee?.employeeNumber || "").trim();
+    const assignedEmployeeNumber = String(dutySpan?.driverEmployeeNumber || "").trim();
+    const mayOpen = Boolean(
+      dutySpan &&
+      dutySpan.deleted !== true &&
+      (state.isAdmin || (
+        state.isDriver &&
+        currentEmployeeNumber &&
+        assignedEmployeeNumber === currentEmployeeNumber
+      ))
+    );
+
+    state.selectedJobId = dutySpanId;
+    state.driverDutySpans = mayOpen ? [dutySpan] : [];
+    await go("jobDetails");
+    return true;
+  } catch (error) {
+    console.error("Unable to open linked duty", error);
+    state.selectedJobId = dutySpanId;
+    state.driverDutySpans = [];
+    await go("jobDetails");
+    return true;
+  }
+}
+
 /* =========================================================
    Auth Boot
 ========================================================= */
@@ -1377,6 +1439,8 @@ state.isDriver =
 if (state.isAdmin) {
   await registerPortalNotifications(state.employee);
 
+  if (await openLinkedDutyIfRequested()) return;
+
   try {
     ["operations", "charter", "planning", "administration"].forEach((group) => {
       localStorage.setItem(`pbc-menu-${group}`, "closed");
@@ -1393,7 +1457,10 @@ if (state.isAdmin) {
 if (state.isDriver) {
   await registerPortalNotifications(state.employee);
 
-  state.activePage = "notice";
+  if (await openLinkedDutyIfRequested()) return;
+
+  const requestedPage = new URLSearchParams(window.location.search).get("page");
+  state.activePage = requestedPage === "myWork" ? "myWork" : "notice";
   go(state.activePage);
   return;
 }

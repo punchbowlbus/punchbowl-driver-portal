@@ -3,7 +3,7 @@
  * This codebase intentionally has no Charter/Brevo dependencies or parameters.
  */
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -204,6 +204,248 @@ exports.sendGeneralPushNotification = onCall({
   });
 
   return { notificationId: logRef.id, successCount, failureCount, noDeviceCount };
+});
+
+/* =========================================================
+   Driver duty alerts — Firestore trigger
+========================================================= */
+function normalizedDutyStatus(value) {
+  const status = normalized(value);
+  if (status === "assigned") return "assigned";
+  if (status === "cancelled" || status === "canceled") return "cancelled";
+  return "pending";
+}
+
+function formatDutyTime(value) {
+  const minutes = Number(value);
+  if (!Number.isFinite(minutes)) return "--:--";
+  const safeMinutes = Math.max(0, Math.round(minutes));
+  return `${String(Math.floor(safeMinutes / 60)).padStart(2, "0")}:${String(safeMinutes % 60).padStart(2, "0")}`;
+}
+
+function formatDutyDate(value) {
+  const raw = String(value || "").trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (!match) return raw || "date not provided";
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat("en-AU", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Australia/Sydney"
+  }).format(date);
+}
+
+function dutySummary(duty) {
+  const dutyNumber = String(duty.dutyNumber || "").trim();
+  const dutyType = String(duty.dutyType || "Duty").trim();
+  const date = formatDutyDate(duty.serviceDate || duty.date);
+  const times = `${formatDutyTime(duty.startMin)}–${formatDutyTime(duty.endMin)}`;
+  const bus = String(duty.assignedBus || "").trim();
+  return `${dutyNumber ? `Duty ${dutyNumber}` : dutyType} • ${date} • ${times}${bus ? ` • Bus ${bus}` : ""}`.slice(0, 240);
+}
+
+function dutyChanged(before, after) {
+  const relevantFields = [
+    "serviceDate", "date", "startMin", "endMin", "assignedBus", "dutyNumber",
+    "dutyType", "startLocation", "endLocation", "routeNumber", "routePdfUrl", "breaks"
+  ];
+  return relevantFields.some((field) =>
+    JSON.stringify(before?.[field] ?? null) !== JSON.stringify(after?.[field] ?? null)
+  );
+}
+
+function classifyDutyNotifications(before, after) {
+  const notifications = [];
+  const beforeDriver = String(before?.driverEmployeeNumber || "").trim();
+  const afterDriver = String(after?.driverEmployeeNumber || "").trim();
+  const beforeStatus = normalizedDutyStatus(before?.dispatchStatus);
+  const afterStatus = normalizedDutyStatus(after?.dispatchStatus);
+
+  if (!after) {
+    if (beforeDriver && beforeStatus === "assigned") {
+      notifications.push({
+        employeeNumber: beforeDriver,
+        eventType: "removed",
+        title: "Duty removed",
+        body: "This duty has been removed from your work.",
+        linkToDuty: false
+      });
+    }
+    return notifications;
+  }
+
+  const driverChanged = Boolean(beforeDriver && beforeDriver !== afterDriver);
+  const removed = before?.deleted !== true && after?.deleted === true;
+
+  if (driverChanged && beforeStatus === "assigned") {
+    notifications.push({
+      employeeNumber: beforeDriver,
+      eventType: "reassigned-away",
+      title: "Duty reassigned",
+      body: "This duty has been removed from your work.",
+      linkToDuty: false
+    });
+  }
+
+  if (!afterDriver) return notifications;
+
+  if (removed && beforeStatus === "assigned") {
+    notifications.push({
+      employeeNumber: afterDriver,
+      eventType: "removed",
+      title: "Duty removed",
+      body: "This duty has been removed from your work.",
+      linkToDuty: false
+    });
+    return notifications;
+  }
+
+  if (afterStatus === "cancelled" && beforeStatus !== "cancelled") {
+    notifications.push({
+      employeeNumber: afterDriver,
+      eventType: "cancelled",
+      title: "Duty cancelled",
+      body: dutySummary(after),
+      linkToDuty: true
+    });
+    return notifications;
+  }
+
+  if (afterStatus !== "assigned") {
+    if (beforeStatus === "assigned" && !driverChanged) {
+      notifications.push({
+        employeeNumber: afterDriver,
+        eventType: "withdrawn",
+        title: "Duty returned to pending",
+        body: "This duty is no longer confirmed in your work.",
+        linkToDuty: false
+      });
+    }
+    return notifications;
+  }
+
+  if (!before || beforeStatus !== "assigned" || driverChanged) {
+    notifications.push({
+      employeeNumber: afterDriver,
+      eventType: driverChanged ? "reassigned-to" : "assigned",
+      title: "New duty assigned",
+      body: dutySummary(after),
+      linkToDuty: true
+    });
+    return notifications;
+  }
+
+  if (dutyChanged(before, after)) {
+    notifications.push({
+      employeeNumber: afterDriver,
+      eventType: "updated",
+      title: "Duty updated",
+      body: dutySummary(after),
+      linkToDuty: true
+    });
+  }
+
+  return notifications;
+}
+
+async function sendDutyNotification({ dutySpanId, duty, notification }) {
+  const employeeNumber = String(notification.employeeNumber || "").trim();
+  if (!employeeNumber) return { status: "skipped", reason: "no-employee-number" };
+
+  const employeeRef = db.collection("employees").doc(employeeNumber);
+  const employeeSnapshot = await employeeRef.get();
+  if (!employeeSnapshot.exists) return { status: "skipped", reason: "employee-not-found", employeeNumber };
+
+  const employee = employeeSnapshot.data() || {};
+  if (normalized(employee.status) !== "active") {
+    return { status: "skipped", reason: "employee-inactive", employeeNumber };
+  }
+
+  const token = String(employee.fcmToken || "").trim();
+  if (!token) return { status: "skipped", reason: "no-device", employeeNumber };
+
+  const dutyLink = `https://punchbowl-driver-portal.web.app/?page=dutySheet&dutySpanId=${encodeURIComponent(dutySpanId)}`;
+  const myWorkLink = "https://punchbowl-driver-portal.web.app/?page=myWork";
+  const link = notification.linkToDuty ? dutyLink : myWorkLink;
+
+  try {
+    const messageId = await getMessaging().send({
+      token,
+      data: {
+        type: "driverDuty",
+        eventType: notification.eventType,
+        dutySpanId: String(dutySpanId),
+        serviceDate: String(duty?.serviceDate || duty?.date || ""),
+        link
+      },
+      webpush: {
+        notification: {
+          title: notification.title,
+          body: notification.body,
+          icon: "https://punchbowl-driver-portal.web.app/icons/icon-192.png",
+          badge: "https://punchbowl-driver-portal.web.app/icons/icon-192.png",
+          requireInteraction: notification.eventType === "cancelled",
+          tag: `duty-${dutySpanId}-${notification.eventType}`
+        },
+        fcmOptions: { link }
+      }
+    });
+    return { status: "sent", employeeNumber, messageId };
+  } catch (error) {
+    const errorCode = String(error?.code || "unknown");
+    if (
+      errorCode === "messaging/registration-token-not-registered" ||
+      errorCode === "messaging/invalid-registration-token"
+    ) {
+      await employeeRef.set({
+        fcmToken: FieldValue.delete(),
+        fcmTokenUpdatedAt: FieldValue.serverTimestamp()
+      }, { merge: true });
+    }
+    return { status: "failed", employeeNumber, errorCode };
+  }
+}
+
+exports.notifyDriverOnDutyWritten = onDocumentWritten({
+  document: "dutySpans/{dutySpanId}",
+  region: "australia-southeast1",
+  maxInstances: 10,
+  retry: false
+}, async (event) => {
+  const before = event.data?.before?.exists ? event.data.before.data() || {} : null;
+  const after = event.data?.after?.exists ? event.data.after.data() || {} : null;
+  const duty = after || before;
+  if (!duty) return;
+
+  const notifications = classifyDutyNotifications(before, after);
+  if (!notifications.length) return;
+
+  const results = [];
+  for (const notification of notifications) {
+    results.push(await sendDutyNotification({
+      dutySpanId: event.params.dutySpanId,
+      duty,
+      notification
+    }));
+  }
+
+  await db.collection("dutyNotificationDeliveries").doc(event.id).set({
+    eventId: event.id,
+    dutySpanId: event.params.dutySpanId,
+    serviceDate: String(duty.serviceDate || duty.date || ""),
+    eventTypes: notifications.map((item) => item.eventType),
+    recipientEmployeeNumbers: notifications.map((item) => item.employeeNumber),
+    results,
+    createdAt: FieldValue.serverTimestamp()
+  });
+
+  console.log("Driver duty notification completed", {
+    dutySpanId: event.params.dutySpanId,
+    eventTypes: notifications.map((item) => item.eventType),
+    results
+  });
 });
 
 /* =========================================================
