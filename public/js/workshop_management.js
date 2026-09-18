@@ -97,6 +97,24 @@ function fleetNo(bus) { return bus.fleetNumber || bus.busNumber || bus.number ||
 function currentOdo(bus) { return num(bus.currentOdometer ?? bus.odometer ?? bus.odometerKm); }
 function nextServiceOdo(bus) { return num(bus.nextServiceOdometer ?? bus.nextServiceKm); }
 function nextServiceDate(bus) { return bus.nextServiceDate || ""; }
+function isEv(bus) { return /\b(ev|electric)\b/i.test(String(bus.serviceProgram || bus.fuelType || bus.fuel || "")); }
+function nextServiceType(bus) {
+  const saved = String(bus.nextServiceType || "").trim();
+  if (["Small", "Medium", "Large"].includes(saved)) return saved;
+  const last = String(bus.lastServiceType || "").trim();
+  if (isEv(bus)) return last === "Small" ? "Large" : "Small";
+  if (last === "Small") return "Medium";
+  if (last === "Medium") return "Large";
+  return "Small";
+}
+function serviceProgram(bus) { return isEv(bus) ? "EV" : "Diesel"; }
+function lastServiceSummary(bus) {
+  const parts = [];
+  if (bus.lastServiceType) parts.push(`${bus.lastServiceType} service`);
+  if (bus.lastServiceOdometer !== "" && bus.lastServiceOdometer != null && num(bus.lastServiceOdometer) != null) parts.push(fmtKm(bus.lastServiceOdometer));
+  if (bus.lastServiceDate) parts.push(fmtDate(bus.lastServiceDate));
+  return parts.length ? parts.join(" · ") : "Not recorded";
+}
 
 function maintenanceState(bus) {
   const current = currentOdo(bus);
@@ -132,10 +150,11 @@ function maintenanceState(bus) {
 
 function serviceBadge(bus) {
   const s = maintenanceState(bus);
-  if (s.overdue) return `<span class="badge bad">OVERDUE</span><div class="list-meta">${esc(s.detail)}</div>`;
-  if (s.dueSoon) return `<span class="badge warn">DUE SOON</span><div class="list-meta">${esc(s.detail)}</div>`;
-  if (s.planning) return `<span class="badge warn">PLAN SERVICE</span><div class="list-meta">${esc(s.detail)}</div>`;
-  if (nextServiceOdo(bus) != null || nextServiceDate(bus)) return `<span class="badge good">ON TRACK</span><div class="list-meta">${esc(s.detail)}</div>`;
+  const type = `${nextServiceType(bus)} service`;
+  if (s.overdue) return `<span class="badge bad">OVERDUE</span><div class="list-meta"><strong>${esc(type)}</strong> · ${esc(s.detail)}</div>`;
+  if (s.dueSoon) return `<span class="badge warn">DUE SOON</span><div class="list-meta"><strong>${esc(type)}</strong> · ${esc(s.detail)}</div>`;
+  if (s.planning) return `<span class="badge warn">PLAN SERVICE</span><div class="list-meta"><strong>${esc(type)}</strong> · ${esc(s.detail)}</div>`;
+  if (nextServiceOdo(bus) != null || nextServiceDate(bus)) return `<span class="badge good">ON TRACK</span><div class="list-meta"><strong>${esc(type)}</strong> · ${esc(s.detail)}</div>`;
   return `<span class="badge">NOT SET</span>`;
 }
 
@@ -188,7 +207,18 @@ function renderDashboard() {
     .sort((a,b) => String(a.state.expiryValue).localeCompare(String(b.state.expiryValue)));
   const missingRegoDates = regoStates.filter((state) => state.kind === "missing").length;
   const serviceHtml = dueList.map(({bus,state}) => `
-    <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Service</div><div class="list-meta">Current: ${esc(fmtKm(currentOdo(bus)))} · Next service: ${esc(fmtKm(nextServiceOdo(bus)))}</div></div><span class="badge ${state.overdue ? "bad" : "warn"}">${state.overdue ? "OVERDUE" : state.dueSoon ? "DUE SOON" : "PLAN SERVICE"}</span></div><div class="list-meta">${esc(state.detail)}</div></div>`).join("");
+    <div class="list-item">
+      <div class="list-top">
+        <div>
+          <div class="list-title">${esc(fleetNo(bus))} · ${esc(nextServiceType(bus))} Service</div>
+          <div class="list-meta">${esc(bus.rego || "No registration")} · ${esc(bus.depot || "Depot not set")} · ${esc(serviceProgram(bus))}</div>
+        </div>
+        <span class="badge ${state.overdue ? "bad" : "warn"}">${state.overdue ? "OVERDUE" : state.dueSoon ? "DUE SOON" : "PLAN SERVICE"}</span>
+      </div>
+      <div class="list-meta"><strong>Odometer:</strong> ${esc(fmtKm(currentOdo(bus)))} · <strong>Service due:</strong> ${esc(fmtKm(nextServiceOdo(bus)))}</div>
+      <div class="list-meta"><strong>Status:</strong> ${esc(state.detail)}</div>
+      <div class="list-meta"><strong>Last completed:</strong> ${esc(lastServiceSummary(bus))}</div>
+    </div>`).join("");
   const regoHtml = regoAlerts.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Registration</div><div class="list-meta">${esc(bus.rego || "No registration")} · Next expiry: ${esc(fmtDate(state.expiryValue))} · ${esc(state.detail)}</div></div><span class="badge ${state.kind === "expired" ? "bad" : "warn"}">${esc(state.label)}</span></div></div>`).join("");
   const missingHtml = missingRegoDates ? `<div class="empty">Registration records: ${missingRegoDates} vehicle${missingRegoDates === 1 ? "" : "s"} need a full expiry date including the year.</div>` : "";
