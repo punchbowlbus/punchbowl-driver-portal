@@ -40,6 +40,8 @@ let odometerReadings = [];
 let unsubscribers = [];
 const JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval", "Completed", "Closed", "Cancelled"];
 const ACTIVE_JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval"];
+const SERVICE_PLANNING_KM = 4000;
+const SERVICE_DUE_SOON_KM = 1000;
 let selectedJobStatuses = new Set(ACTIVE_JOB_STATUSES);
 let pendingSourceDefect = null;
 window.workshopManagerAccessGranted = false;
@@ -102,13 +104,15 @@ function maintenanceState(bus) {
   const dueDate = nextServiceDate(bus);
   let overdue = false;
   let dueSoon = false;
+  let planning = false;
   let detail = "No service schedule";
 
   if (current != null && dueKm != null) {
     const remaining = dueKm - current;
     if (remaining < 0) { overdue = true; detail = `Overdue by ${fmtKm(Math.abs(remaining))}`; }
     else if (remaining === 0) { overdue = true; detail = "Service due now"; }
-    else if (remaining <= 1000) { dueSoon = true; detail = `Due in ${fmtKm(remaining)}`; }
+    else if (remaining <= SERVICE_DUE_SOON_KM) { dueSoon = true; detail = `Due in ${fmtKm(remaining)}`; }
+    else if (remaining <= SERVICE_PLANNING_KM) { planning = true; detail = `Plan service — due in ${fmtKm(remaining)}`; }
     else detail = `Due in ${fmtKm(remaining)}`;
   }
 
@@ -123,13 +127,14 @@ function maintenanceState(bus) {
     }
   }
 
-  return { overdue, dueSoon, detail };
+  return { overdue, dueSoon, planning, detail };
 }
 
 function serviceBadge(bus) {
   const s = maintenanceState(bus);
   if (s.overdue) return `<span class="badge bad">OVERDUE</span><div class="list-meta">${esc(s.detail)}</div>`;
   if (s.dueSoon) return `<span class="badge warn">DUE SOON</span><div class="list-meta">${esc(s.detail)}</div>`;
+  if (s.planning) return `<span class="badge warn">PLAN SERVICE</span><div class="list-meta">${esc(s.detail)}</div>`;
   if (nextServiceOdo(bus) != null || nextServiceDate(bus)) return `<span class="badge good">ON TRACK</span><div class="list-meta">${esc(s.detail)}</div>`;
   return `<span class="badge">NOT SET</span>`;
 }
@@ -165,24 +170,25 @@ function renderDashboard() {
   const maint = buses.map((bus) => ({bus, state:maintenanceState(bus)}));
   const overdue = maint.filter((x) => x.state.overdue);
   const dueSoon = maint.filter((x) => !x.state.overdue && x.state.dueSoon);
+  const planning = maint.filter((x) => !x.state.overdue && !x.state.dueSoon && x.state.planning);
   const openJobs = workshopJobs.filter((j) => !["Completed","Closed","Cancelled"].includes(j.status));
   const regoStates = buses.map(regoState);
   els.metricFleet.textContent = buses.length;
   els.metricWorkshop.textContent = buses.filter((b) => /workshop/i.test(b.status || "")).length;
   els.metricOut.textContent = buses.filter((b) => /out of service/i.test(b.status || "")).length;
   els.metricOpenJobs.textContent = openJobs.length;
-  els.metricDueSoon.textContent = dueSoon.length;
+  els.metricDueSoon.textContent = dueSoon.length + planning.length;
   els.metricOverdue.textContent = overdue.length;
   els.metricRegoDue.textContent = regoStates.filter((state) => state.kind === "due").length;
   els.metricRegoExpired.textContent = regoStates.filter((state) => state.kind === "expired").length;
 
-  const dueList = [...overdue, ...dueSoon].slice(0,12);
+  const dueList = [...overdue, ...dueSoon, ...planning].slice(0,12);
   const regoAlerts = buses.map((bus) => ({bus, state:regoState(bus)}))
     .filter(({state}) => state.kind === "expired" || state.kind === "due")
     .sort((a,b) => String(a.state.expiryValue).localeCompare(String(b.state.expiryValue)));
   const missingRegoDates = regoStates.filter((state) => state.kind === "missing").length;
   const serviceHtml = dueList.map(({bus,state}) => `
-    <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Service</div><div class="list-meta">Current: ${esc(fmtKm(currentOdo(bus)))} · Next service: ${esc(fmtKm(nextServiceOdo(bus)))}</div></div><span class="badge ${state.overdue ? "bad" : "warn"}">${state.overdue ? "OVERDUE" : "DUE SOON"}</span></div><div class="list-meta">${esc(state.detail)}</div></div>`).join("");
+    <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Service</div><div class="list-meta">Current: ${esc(fmtKm(currentOdo(bus)))} · Next service: ${esc(fmtKm(nextServiceOdo(bus)))}</div></div><span class="badge ${state.overdue ? "bad" : "warn"}">${state.overdue ? "OVERDUE" : state.dueSoon ? "DUE SOON" : "PLAN SERVICE"}</span></div><div class="list-meta">${esc(state.detail)}</div></div>`).join("");
   const regoHtml = regoAlerts.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Registration</div><div class="list-meta">${esc(bus.rego || "No registration")} · Next expiry: ${esc(fmtDate(state.expiryValue))} · ${esc(state.detail)}</div></div><span class="badge ${state.kind === "expired" ? "bad" : "warn"}">${esc(state.label)}</span></div></div>`).join("");
   const missingHtml = missingRegoDates ? `<div class="empty">Registration records: ${missingRegoDates} vehicle${missingRegoDates === 1 ? "" : "s"} need a full expiry date including the year.</div>` : "";
