@@ -1,4 +1,4 @@
-const CACHE = "pbc-v67"; // Refresh Fleet Register air-conditioning tracking
+const CACHE = "pbc-v68"; // Refresh Fleet Register and dashboard A/C tracking
 
 const ASSETS = [
   "/",
