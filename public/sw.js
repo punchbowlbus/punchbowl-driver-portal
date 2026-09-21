@@ -1,4 +1,4 @@
-const CACHE = "pbc-v70"; // Refresh dashboard after registration reminder cleanup
+const CACHE = "pbc-v71"; // Refresh balanced dashboard panel layout
 
 const ASSETS = [
   "/",
