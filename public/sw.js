@@ -1,4 +1,4 @@
-const CACHE = "pbc-v66"; // Refresh professional service urgency colours
+const CACHE = "pbc-v71"; // Refresh balanced dashboard panel layout
 
 const ASSETS = [
   "/",
