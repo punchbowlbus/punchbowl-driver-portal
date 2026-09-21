@@ -68,15 +68,21 @@ function safetyState(bus) {
   const due = String(bus.next90DaySafetyCheckDate || "").trim();
   const days = daysUntil(due);
   if (days == null) return { kind:"unset", days:null, detail:"90 Day Safety Check date not set" };
-  if (days < 0) return { kind:"overdue", days, detail:`Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"}` };
-  if (days === 0) return { kind:"overdue", days, detail:"Due today" };
-  if (days <= 7) return { kind:"soon", days, detail:`Due in ${days} day${days === 1 ? "" : "s"}` };
+  if (days < 0) return { kind:"overdue", days, cardClass:"service-card-overdue", detail:`Overdue by ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"}` };
+  if (days === 0) return { kind:"overdue", days, cardClass:"service-card-overdue", detail:"Due today" };
+  if (days <= 7) return { kind:"urgent", days, cardClass:"service-card-red", detail:`Due in ${days} day${days === 1 ? "" : "s"}` };
+  if (days <= 14) return { kind:"soon", days, cardClass:"service-card-orange", detail:`Due in ${days} days` };
+  if (days <= 21) return { kind:"book", days, cardClass:"service-card-amber", detail:`Due in ${days} days` };
+  if (days <= 30) return { kind:"plan", days, cardClass:"service-card-blue", detail:`Due in ${days} days` };
   return { kind:"ok", days, detail:`Due in ${days} days` };
 }
 
 function stateBadge(state) {
   if (state.kind === "overdue") return `<span class="badge bad">${state.days === 0 ? "DUE TODAY" : "OVERDUE"}</span>`;
+  if (state.kind === "urgent") return `<span class="badge bad">URGENT</span>`;
   if (state.kind === "soon") return `<span class="badge warn">DUE SOON</span>`;
+  if (state.kind === "book") return `<span class="badge warn">BOOK 90 DAY CHECK</span>`;
+  if (state.kind === "plan") return `<span class="badge info">PLAN 90 DAY CHECK</span>`;
   if (state.kind === "ok") return `<span class="badge good">ON TRACK</span>`;
   return `<span class="badge">NOT SET</span>`;
 }
@@ -96,13 +102,13 @@ function ensureDashboardUi() {
   $("safety90Panel")?.remove();
   const maintenance = $("maintenanceDueList")?.closest(".panel");
   const hint = maintenance?.querySelector(".panel-head .hint");
-  if (hint) hint.textContent = "Service, 90 Day Safety and Registration due";
+  if (hint) hint.textContent = "Service, Annual A/C, 90 Day Safety and Registration due";
 }
 
 function dueSafetyBuses() {
   return buses
     .map((bus) => ({ bus, state:safetyState(bus) }))
-    .filter((x) => x.state.kind === "overdue" || x.state.kind === "soon")
+    .filter((x) => ["overdue", "urgent", "soon", "book", "plan"].includes(x.state.kind))
     .sort((a,b) => String(a.bus.next90DaySafetyCheckDate || "").localeCompare(String(b.bus.next90DaySafetyCheckDate || "")));
 }
 
@@ -127,7 +133,7 @@ function augmentMaintenanceDue() {
 
   due.forEach(({bus,state}) => {
     const item = document.createElement("div");
-    item.className = "list-item";
+    item.className = `list-item ${state.cardClass || ""}`.trim();
     item.dataset.safety90Dashboard = bus.id || fleetNo(bus);
     item.innerHTML = `
       <div class="list-top">
@@ -146,7 +152,7 @@ function renderDashboardSafety() {
   ensureDashboardUi();
   const list = buses.map((bus) => ({ bus, state:safetyState(bus) }));
   const overdue = list.filter((x) => x.state.kind === "overdue");
-  const soon = list.filter((x) => x.state.kind === "soon");
+  const soon = list.filter((x) => ["urgent", "soon", "book", "plan"].includes(x.state.kind));
 
   if ($("metric90DayDueSoon")) $("metric90DayDueSoon").textContent = String(soon.length);
   if ($("metric90DayOverdue")) $("metric90DayOverdue").textContent = String(overdue.length);
