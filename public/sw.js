@@ -1,4 +1,4 @@
-const CACHE = "pbc-v69"; // Refresh A/C and 90-day dashboard urgency tracking
+const CACHE = "pbc-v70"; // Refresh dashboard after registration reminder cleanup
 
 const ASSETS = [
   "/",
