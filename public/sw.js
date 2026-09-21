@@ -1,4 +1,4 @@
-const CACHE = "pbc-v66"; // Refresh professional service urgency colours
+const CACHE = "pbc-v67"; // Refresh Fleet Register air-conditioning tracking
 
 const ASSETS = [
   "/",
