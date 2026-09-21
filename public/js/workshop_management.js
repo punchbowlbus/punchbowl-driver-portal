@@ -89,6 +89,34 @@ function regoBadge(bus) {
   const cls = state.kind === "expired" ? "bad" : state.kind === "due" || state.kind === "missing" ? "warn" : "good";
   return `<span class="badge ${cls}">${esc(state.label)}</span><div class="list-meta">${esc(state.detail)}</div>${state.expiryValue ? `<div class="list-meta">${esc(fmtDate(state.expiryValue))}</div>` : ""}`;
 }
+function addMonthsIso(value, months) {
+  const date = isoDate(value);
+  if (!date) return "";
+  const originalDay = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + months);
+  const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  date.setDate(Math.min(originalDay, lastDay));
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+function airConditioningBadge(bus) {
+  const fitted = String(bus.airConditioned || "").trim().toLowerCase();
+  if (["no", "false", "not fitted", "n/a"].includes(fitted)) {
+    return `<span class="badge">NOT FITTED</span><div class="list-meta">No annual service required</div>`;
+  }
+  const lastDate = bus.lastAirConditioningServiceDate || "";
+  const dueValue = bus.nextAirConditioningServiceDate || addMonthsIso(lastDate, 12);
+  const dueDate = isoDate(dueValue);
+  if (!dueDate) {
+    return `<span class="badge warn">NOT SET</span><div class="list-meta">Add the last A/C service date</div>`;
+  }
+  const days = Math.ceil((dueDate - isoDate(todayStr())) / 86400000);
+  const lastDetail = lastDate ? `<div class="list-meta">Last: ${esc(fmtDate(lastDate))}</div>` : "";
+  if (days < 0) return `<span class="badge bad">OVERDUE</span><div class="list-meta">Due: ${esc(fmtDate(dueValue))}</div>${lastDetail}`;
+  if (days === 0) return `<span class="badge bad">DUE TODAY</span><div class="list-meta">Due: ${esc(fmtDate(dueValue))}</div>${lastDetail}`;
+  if (days <= 30) return `<span class="badge warn">DUE SOON</span><div class="list-meta">Due in ${days} day${days === 1 ? "" : "s"} · ${esc(fmtDate(dueValue))}</div>${lastDetail}`;
+  return `<span class="badge good">ON TRACK</span><div class="list-meta">Due in ${days} days · ${esc(fmtDate(dueValue))}</div>${lastDetail}`;
+}
 function showStatus(message, type="success") { els.status.className = `status ${type}`; els.status.textContent = message; }
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
 
@@ -186,7 +214,7 @@ function renderFleet() {
       <td>${esc(b.depot || "—")}</td>
       <td>${esc(fmtKm(currentOdo(b)))}</td>
       <td>${serviceBadge(b)}</td>
-      <td>${regoBadge(b)}</td>
+      <td>${airConditioningBadge(b)}</td>
       <td><span class="badge ${/out of service/i.test(b.status || "") ? "bad" : /workshop/i.test(b.status || "") ? "warn" : "good"}">${esc(b.status || "Active")}</span></td>
       <td><button class="button secondary" data-odo-bus="${esc(busId(b))}">Update km</button></td>
     </tr>`).join("");
