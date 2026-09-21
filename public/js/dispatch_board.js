@@ -232,19 +232,12 @@ const selectedDriverEmpNos = new Set();
   const OPERATIONAL_START_MIN = 22 * 60;
   let ROW_HEIGHT = 44;
 
-  function timelineMinute(minute, dayShift = 0) {
-    return Number(minute || 0) + (24 * 60) + (Number(dayShift || 0) * 24 * 60);
+  function timelineMinute(minute) {
+    return Number(minute || 0) + (24 * 60);
   }
 
-  function dispatchMinuteToLeft(minute, dayShift = 0) {
-    return ((timelineMinute(minute, dayShift) - OPERATIONAL_START_MIN) / SLOT_MINUTES) * slotWidth;
-  }
-
-  function getDutyTimelineShift(span) {
-    if (Number.isFinite(Number(span?.timelineDayShift))) return Number(span.timelineDayShift);
-    const start = Number(span?.startMin || 0);
-    const end = Number(span?.endMin || 0);
-    return start >= OPERATIONAL_START_MIN && end > 24 * 60 ? -1 : 0;
+  function dispatchMinuteToLeft(minute) {
+    return ((timelineMinute(minute) - OPERATIONAL_START_MIN) / SLOT_MINUTES) * slotWidth;
   }
 
   function minToTimeStr(min) {
@@ -695,7 +688,8 @@ const selectedDriverEmpNos = new Set();
         const isHour = index % 4 === 0;
         const isDayBoundary = clockMinute === 0;
         const dayOffset = Math.floor(operationalMinute / (24 * 60));
-        const label = isHour ? minToTimeStr(clockMinute) : String(clockMinute % 60).padStart(2, "0");
+        const displayMinute = dayOffset >= 2 ? clockMinute + (24 * 60) : clockMinute;
+        const label = isHour ? minToTimeStr(displayMinute) : String(clockMinute % 60).padStart(2, "0");
         const dayName = dayOffset === 0 ? "Previous day" : dayOffset === 1 ? "Selected day" : "Next day";
         return `<div class="dispatch-time-cell ${isHour ? "hour" : "quarter-hour"} ${isDayBoundary ? "day-boundary" : ""}" title="${dayName} ${minToTimeStr(clockMinute)}"><span>${label}</span></div>`;
       }).join("")}
@@ -1441,8 +1435,6 @@ function renderDriverDetail(driver) {
 
       const crossesMidnight = endMin < startMin;
       if (crossesMidnight) endMin += 24 * 60;
-      const timelineDayShift = startMin >= OPERATIONAL_START_MIN && endMin > 24 * 60 ? -1 : 0;
-
       if (!startLocation || !endLocation) {
         showError("Start and end location are required.");
         return;
@@ -1528,7 +1520,6 @@ function renderDriverDetail(driver) {
           routePdfUrl,
           startMin,
           endMin,
-          timelineDayShift,
           startLocation,
           endLocation,
           assignedBus,
@@ -1668,8 +1659,7 @@ function renderDutySpansForDriver(empNo) {
     .map((span, spanIndex) => {
       const startMin = Number(span.startMin || 0);
       const endMin = Number(span.endMin || 0);
-      const dayShift = getDutyTimelineShift(span);
-      const left = dispatchMinuteToLeft(startMin, dayShift);
+      const left = dispatchMinuteToLeft(startMin);
       const width = ((endMin - startMin) / SLOT_MINUTES) * slotWidth;
 
       const breaks = Array.isArray(span.breaks) ? span.breaks : [];
@@ -3466,4 +3456,3 @@ setUnassignedPanelState(localStorage.getItem("dispatch-unassigned-density") || "
 console.log("BOTTOM OF DISPATCH FILE REACHED");
 loadDispatchForDate(today, { openPanel: false });
 }
-
