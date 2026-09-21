@@ -117,6 +117,22 @@ function airConditioningBadge(bus) {
   if (days <= 30) return `<span class="badge warn">DUE SOON</span><div class="list-meta">Due in ${days} day${days === 1 ? "" : "s"} · ${esc(fmtDate(dueValue))}</div>${lastDetail}`;
   return `<span class="badge good">ON TRACK</span><div class="list-meta">Due in ${days} days · ${esc(fmtDate(dueValue))}</div>${lastDetail}`;
 }
+function airConditioningDashboardState(bus) {
+  const fitted = String(bus.airConditioned || "").trim().toLowerCase();
+  if (["no", "false", "not fitted", "n/a"].includes(fitted)) return null;
+  const lastDate = bus.lastAirConditioningServiceDate || "";
+  const dueValue = bus.nextAirConditioningServiceDate || addMonthsIso(lastDate, 12);
+  const dueDate = isoDate(dueValue);
+  if (!dueDate) return null;
+  const days = Math.ceil((dueDate - isoDate(todayStr())) / 86400000);
+  if (days > 30) return null;
+  if (days < 0) return { days, dueValue, overdue:true, cls:"service-card-overdue", badge:"bad", label:"OVERDUE", detail:`${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue` };
+  if (days === 0) return { days, dueValue, overdue:true, cls:"service-card-overdue", badge:"bad", label:"DUE TODAY", detail:"Annual A/C service due today" };
+  if (days <= 7) return { days, dueValue, overdue:false, cls:"service-card-red", badge:"bad", label:"URGENT", detail:`Due in ${days} day${days === 1 ? "" : "s"}` };
+  if (days <= 14) return { days, dueValue, overdue:false, cls:"service-card-orange", badge:"warn", label:"DUE SOON", detail:`Due in ${days} days` };
+  if (days <= 21) return { days, dueValue, overdue:false, cls:"service-card-amber", badge:"warn", label:"BOOK A/C SERVICE", detail:`Due in ${days} days` };
+  return { days, dueValue, overdue:false, cls:"service-card-blue", badge:"info", label:"PLAN A/C SERVICE", detail:`Due in ${days} days` };
+}
 function showStatus(message, type="success") { els.status.className = `status ${type}`; els.status.textContent = message; }
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
 
@@ -228,14 +244,15 @@ function renderDashboard() {
   const overdue = maint.filter((x) => x.state.overdue);
   const dueSoon = maint.filter((x) => !x.state.overdue && x.state.dueSoon);
   const planning = maint.filter((x) => !x.state.overdue && !x.state.dueSoon && x.state.planning);
+  const airconDue = buses.map((bus) => ({bus, state:airConditioningDashboardState(bus)})).filter((item) => item.state);
   const openJobs = workshopJobs.filter((j) => !["Completed","Closed","Cancelled"].includes(j.status));
   const regoStates = buses.map(regoState);
   els.metricFleet.textContent = buses.length;
   els.metricWorkshop.textContent = buses.filter((b) => /workshop/i.test(b.status || "")).length;
   els.metricOut.textContent = buses.filter((b) => /out of service/i.test(b.status || "")).length;
   els.metricOpenJobs.textContent = openJobs.length;
-  els.metricDueSoon.textContent = dueSoon.length + planning.length;
-  els.metricOverdue.textContent = overdue.length;
+  els.metricDueSoon.textContent = dueSoon.length + planning.length + airconDue.filter((item) => !item.state.overdue).length;
+  els.metricOverdue.textContent = overdue.length + airconDue.filter((item) => item.state.overdue).length;
   els.metricRegoDue.textContent = regoStates.filter((state) => state.kind === "due").length;
   els.metricRegoExpired.textContent = regoStates.filter((state) => state.kind === "expired").length;
 
@@ -260,10 +277,24 @@ function renderDashboard() {
       <div class="list-meta"><strong>Last completed:</strong> ${esc(lastServiceSummary(bus))}</div>
     </div>`;
   }).join("");
+  const airconHtml = airconDue
+    .sort((a,b) => a.state.days - b.state.days)
+    .map(({bus,state}) => `
+    <div class="list-item ${state.cls}">
+      <div class="list-top">
+        <div>
+          <div class="list-title">${esc(fleetNo(bus))} · Annual A/C Service</div>
+          <div class="list-meta">${esc(bus.rego || "No registration")} · ${esc(bus.depot || "Depot not set")}</div>
+        </div>
+        <span class="badge ${state.badge}">${esc(state.label)}</span>
+      </div>
+      <div class="list-meta"><strong>Status:</strong> ${esc(state.detail)} · <strong>Due:</strong> ${esc(fmtDate(state.dueValue))}</div>
+      <div class="list-meta"><strong>Last completed:</strong> ${esc(bus.lastAirConditioningServiceDate ? fmtDate(bus.lastAirConditioningServiceDate) : "Not recorded")}</div>
+    </div>`).join("");
   const regoHtml = regoAlerts.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Registration</div><div class="list-meta">${esc(bus.rego || "No registration")} · Next expiry: ${esc(fmtDate(state.expiryValue))} · ${esc(state.detail)}</div></div><span class="badge ${state.kind === "expired" ? "bad" : "warn"}">${esc(state.label)}</span></div></div>`).join("");
   const missingHtml = missingRegoDates ? `<div class="empty">Registration records: ${missingRegoDates} vehicle${missingRegoDates === 1 ? "" : "s"} need a full expiry date including the year.</div>` : "";
-  els.maintenanceDueList.innerHTML = serviceHtml + regoHtml + missingHtml || `<div class="empty">No service, safety or registration items currently due.</div>`;
+  els.maintenanceDueList.innerHTML = serviceHtml + airconHtml + regoHtml + missingHtml || `<div class="empty">No service, A/C, safety or registration items currently due.</div>`;
 
   els.dashboardJobsList.innerHTML = openJobs.length ? openJobs.map(jobCardSummary).join("") : `<div class="empty">No open workshop jobs.</div>`;
 }
