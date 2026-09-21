@@ -1,4 +1,4 @@
-const CACHE = "pbc-v63"; // Refresh cached assets after non-A/C vehicle safeguard
+const CACHE = "pbc-v66"; // Refresh professional service urgency colours
 
 const ASSETS = [
   "/",
