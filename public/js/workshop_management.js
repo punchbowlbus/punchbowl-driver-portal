@@ -260,7 +260,6 @@ function renderDashboard() {
   const regoAlerts = buses.map((bus) => ({bus, state:regoState(bus)}))
     .filter(({state}) => state.kind === "expired" || state.kind === "due")
     .sort((a,b) => String(a.state.expiryValue).localeCompare(String(b.state.expiryValue)));
-  const missingRegoDates = regoStates.filter((state) => state.kind === "missing").length;
   const serviceHtml = dueList.map(({bus,state}) => {
     const urgency = serviceCardUrgency(bus, state);
     return `
@@ -293,8 +292,7 @@ function renderDashboard() {
     </div>`).join("");
   const regoHtml = regoAlerts.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Registration</div><div class="list-meta">${esc(bus.rego || "No registration")} · Next expiry: ${esc(fmtDate(state.expiryValue))} · ${esc(state.detail)}</div></div><span class="badge ${state.kind === "expired" ? "bad" : "warn"}">${esc(state.label)}</span></div></div>`).join("");
-  const missingHtml = missingRegoDates ? `<div class="empty">Registration records: ${missingRegoDates} vehicle${missingRegoDates === 1 ? "" : "s"} need a full expiry date including the year.</div>` : "";
-  els.maintenanceDueList.innerHTML = serviceHtml + airconHtml + regoHtml + missingHtml || `<div class="empty">No service, A/C, safety or registration items currently due.</div>`;
+  els.maintenanceDueList.innerHTML = serviceHtml + airconHtml + regoHtml || `<div class="empty">No service, A/C, safety or registration items currently due.</div>`;
 
   els.dashboardJobsList.innerHTML = openJobs.length ? openJobs.map(jobCardSummary).join("") : `<div class="empty">No open workshop jobs.</div>`;
 }
