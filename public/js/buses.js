@@ -11,7 +11,7 @@ let busesUnsub = null;
 
 const ACCESS_TYPES = ["STEPS", "WHEEL CHAIR", "LOW FLOOR"];
 const FUEL_TYPES = ["Diesel", "EV", "Hybrid"];
-const DEPOTS = ["Hannans", "Bounds", "Olympic Park"];
+const DEPOTS = ["Hannans", "Bounds", "Goulburn"];
 const STATUSES = ["Active", "In Service", "Workshop", "Out of Service", "Inactive"];
 const YES_NO = ["YES", "NO"];
 
