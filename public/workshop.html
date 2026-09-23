@@ -251,7 +251,7 @@
       <div class="dialog-head"><div><h2>Create Workshop Job</h2><p>Choose the job type. Leave mechanic unassigned to send it to the shared Workshop queue.</p></div><button id="closeJobDialog" class="icon-button" type="button">×</button></div>
       <div class="form-grid">
         <label>Bus<select id="jobBus" required><option value="">Select bus</option></select></label>
-        <label>Job type<select id="jobType" required><option value="Defect Repair">Defect Repair</option><option value="Scheduled Service">Scheduled Service</option><option value="Air Conditioning Service">Air Conditioning Service</option><option value="Safety Inspection">Safety Inspection</option><option value="Preventive Maintenance">Preventive Maintenance</option><option value="Breakdown Repair">Breakdown Repair</option><option value="Tyres">Tyres</option><option value="Electrical">Electrical</option><option value="Body Repair">Body Repair</option><option value="Other">Other</option></select></label>
+        <label>Job type<select id="jobType" required><option value="Defect Repair">Defect Repair</option><option value="Scheduled Service">Scheduled Service</option><option value="Air Conditioning Service">Air Conditioning Service</option><option value="Fire Suppression Check">Fire Suppression Check</option><option value="Intercooler / Radiator Wash">Intercooler / Radiator Wash</option><option value="Safety Inspection">Safety Inspection</option><option value="Preventive Maintenance">Preventive Maintenance</option><option value="Breakdown Repair">Breakdown Repair</option><option value="Tyres">Tyres</option><option value="Electrical">Electrical</option><option value="Body Repair">Body Repair</option><option value="Other">Other</option></select></label>
         <label>Priority<select id="jobPriority"><option>Normal</option><option>High</option><option>Urgent</option><option>Safety Critical</option></select></label>
         <label id="jobSafeToDriveWrap">Vehicle safe to drive?<select id="jobSafeToDrive"><option value="">Select</option><option value="Yes">Yes</option><option value="No">No</option></select></label>
         <label>Due date<input id="jobDueDate" type="date" /></label>
@@ -268,16 +268,17 @@
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>
   <script type="module" src="./js/workshop_service_schedule.js?v=20260908-fleet-actions"></script>
-  <script type="module" src="./js/workshop_manager_approval.js?v=20260914-report-review"></script>
+  <script type="module" src="./js/workshop_manager_approval.js?v=20260924-special-services"></script>
   <script type="module" src="./js/workshop_review_status_fix.js"></script>
   <script type="module" src="./js/workshop_checklist_labels.js"></script>
   <script type="module" src="./js/workshop_job_photos_preview.js?v=20260909-pdf-attachments"></script>
   <script type="module" src="./js/workshop_fleet_pro.js?v=20260908-rego-tracking"></script>
   <script type="module" src="./js/workshop_fleet_polish.js?v=20260908-fleet-actions"></script>
   <script type="module" src="./js/workshop_action_messages.js"></script>
-  <script type="module" src="./js/workshop_job_categories.js?v=20260914-job-edit"></script>
+  <script type="module" src="./js/workshop_job_categories.js?v=20260924-special-services"></script>
   <script type="module" src="./js/workshop_90day_tracking.js?v=20260921-dashboard-urgency"></script>
   <script type="module" src="./js/workshop_fleet_registry_controls.js?v=20260924-pro-register-3"></script>
+  <script type="module" src="./js/workshop_special_service_tracking.js?v=20260924-special-services"></script>
   <script type="module" src="./js/workshop_history_filters.js"></script>
   <script type="module" src="./js/workshop_job_remove.js?v=20260914-review-actions"></script>
   <script type="module" src="./js/workshop_job_edit.js?v=20260914-review-actions"></script>

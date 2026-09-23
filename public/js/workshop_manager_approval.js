@@ -44,9 +44,13 @@ function todayStr() {
 
 function addMonths(dateString, months) {
   if (!dateString || !months) return "";
-  const d = new Date(`${dateString}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return "";
+  const parts = String(dateString).split("-").map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part))) return "";
+  const [year, month, day] = parts;
+  const d = new Date(year, month - 1, 1);
   d.setMonth(d.getMonth() + months);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
 }
 
@@ -75,6 +79,14 @@ function is90DayInspection(job) {
 
 function isAirConditioningService(job) {
   return norm(job?.serviceTemplateKey) === "aircon-annual" || norm(job?.jobType) === "air conditioning service";
+}
+
+function specialServiceKind(job) {
+  const key = norm(job?.serviceTemplateKey);
+  const type = norm(job?.jobType);
+  if (key === "fire-suppression-annual" || type === "fire suppression check") return "fire";
+  if (key === "radiator-wash-6month" || type === "intercooler / radiator wash") return "radiator";
+  return "";
 }
 
 function toast(message, type="success") {
@@ -232,6 +244,7 @@ function approvalDisplay(job) {
       <div class="wm-review-box"><div class="wm-review-label">Mechanic completed</div><div class="wm-review-value">${esc(fmtDateTime(job.mechanicCompletedAt || job.updatedAt))}</div></div>
       ${is90DayInspection(job) ? `<div class="wm-review-box"><div class="wm-review-label">Inspection completed date</div><div class="wm-review-value"><strong>${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</strong></div></div><div class="wm-review-box"><div class="wm-review-label">Mechanic sign-off</div><div class="wm-review-value">${esc(job.mechanicInspectionSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.mechanicInspectionSignOff?.employeeNumber ? `(${esc(job.mechanicInspectionSignOff.employeeNumber)})` : ""}</div></div>` : ""}
       ${isAirConditioningService(job) ? `<div class="wm-review-box"><div class="wm-review-label">A/C service completed date</div><div class="wm-review-value"><strong>${esc(job.airConditioningServiceDate || card.airConditioningServiceDate || "—")}</strong></div></div><div class="wm-review-box"><div class="wm-review-label">A/C mechanic sign-off</div><div class="wm-review-value">${esc(job.airConditioningMechanicSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.airConditioningMechanicSignOff?.employeeNumber ? `(${esc(job.airConditioningMechanicSignOff.employeeNumber)})` : ""}</div></div>` : ""}
+      ${specialServiceKind(job) ? `<div class="wm-review-box"><div class="wm-review-label">Service completed date</div><div class="wm-review-value"><strong>${esc(job.specialServiceCompletedDate || card.specialServiceCompletedDate || "—")}</strong></div></div><div class="wm-review-box"><div class="wm-review-label">Mechanic sign-off</div><div class="wm-review-value">${esc(job.specialServiceMechanicSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.specialServiceMechanicSignOff?.employeeNumber ? `(${esc(job.specialServiceMechanicSignOff.employeeNumber)})` : ""}</div></div>` : ""}
       <div class="wm-review-box"><div class="wm-review-label">Odometer</div><div class="wm-review-value">${esc(fmtKm(card.currentOdometer ?? job.odometerStart))}</div></div>
       <div class="wm-review-box wm-full"><div class="wm-review-label">Reported fault / work requested</div><div class="wm-review-value">${esc(job.reportedFault || "—")}</div></div>
       <div class="wm-review-box wm-full"><div class="wm-review-label">Diagnosis / findings</div><div class="wm-review-value">${esc(card.diagnosis || job.diagnosis || "—")}</div></div>
@@ -346,6 +359,8 @@ async function approveAndClose() {
   const inspectionDate = inspection ? $("wmInspectionCompletedDate").value : "";
   const aircon = isAirConditioningService(selectedJob);
   const airconServiceDate = selectedJob.airConditioningServiceDate || selectedJob.jobCard?.airConditioningServiceDate || "";
+  const specialKind = specialServiceKind(selectedJob);
+  const specialServiceDate = selectedJob.specialServiceCompletedDate || selectedJob.jobCard?.specialServiceCompletedDate || "";
 
   if (returnToService === "Yes" && card.safeToReturn === "No") {
     $("wmReviewMessage").className = "status error";
@@ -360,6 +375,11 @@ async function approveAndClose() {
   if (aircon && !airconServiceDate) {
     $("wmReviewMessage").className = "status error";
     $("wmReviewMessage").textContent = "The mechanic must record the actual A/C service completed date before approval.";
+    return;
+  }
+  if (specialKind && !specialServiceDate) {
+    $("wmReviewMessage").className = "status error";
+    $("wmReviewMessage").textContent = "The mechanic must record the actual service completed date before approval.";
     return;
   }
   const recordedInspectionDate = selectedJob.inspectionCompletedDate || selectedJob.jobCard?.inspectionCompletedDate || "";
@@ -444,6 +464,10 @@ async function approveAndClose() {
         jobUpdate.airConditioningServiceDate = airconServiceDate;
         jobUpdate.airConditioningFleetManagerSignOffDate = todayStr();
       }
+      if (specialKind) {
+        jobUpdate.specialServiceCompletedDate = specialServiceDate;
+        jobUpdate.specialServiceFleetManagerSignOffDate = todayStr();
+      }
       tx.update(jobRef, jobUpdate);
 
       if (defectRef && defectSnap?.exists()) {
@@ -517,6 +541,24 @@ async function approveAndClose() {
           busUpdate.airConditioningTrackingUpdatedBy = norm(auth.currentUser?.email);
         }
 
+        if (specialKind === "fire") {
+          busUpdate.lastFireSuppressionCheckDate = specialServiceDate;
+          busUpdate.nextFireSuppressionCheckDate = addMonths(specialServiceDate, 12);
+          busUpdate.lastFireSuppressionCheckJobId = selectedJob.id;
+          busUpdate.lastFireSuppressionCheckJobNumber = selectedJob.jobNumber || "";
+          busUpdate.fireSuppressionTrackingUpdatedAt = serverTimestamp();
+          busUpdate.fireSuppressionTrackingUpdatedBy = norm(auth.currentUser?.email);
+        }
+
+        if (specialKind === "radiator") {
+          busUpdate.lastRadiatorWashDate = specialServiceDate;
+          busUpdate.nextRadiatorWashDate = addMonths(specialServiceDate, 6);
+          busUpdate.lastRadiatorWashJobId = selectedJob.id;
+          busUpdate.lastRadiatorWashJobNumber = selectedJob.jobNumber || "";
+          busUpdate.radiatorWashTrackingUpdatedAt = serverTimestamp();
+          busUpdate.radiatorWashTrackingUpdatedBy = norm(auth.currentUser?.email);
+        }
+
         tx.update(busRef, busUpdate);
       }
     });
@@ -548,6 +590,7 @@ function printJobCard(job) {
       <div class="box"><div class="label">Mechanic</div>${esc(job.mechanicName || job.assignedMechanic || "—")}</div>
       ${is90DayInspection(job) ? `<div class="box"><div class="label">Inspection Completed Date</div>${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div><div class="box"><div class="label">Mechanic Inspection Sign-off</div>${esc(job.mechanicInspectionSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.mechanicInspectionSignOff?.employeeNumber ? `(${esc(job.mechanicInspectionSignOff.employeeNumber)})` : ""}</div>` : ""}
       ${isAirConditioningService(job) ? `<div class="box"><div class="label">A/C Service Completed Date</div>${esc(job.airConditioningServiceDate || card.airConditioningServiceDate || "—")}</div><div class="box"><div class="label">A/C Mechanic Sign-off</div>${esc(job.airConditioningMechanicSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.airConditioningMechanicSignOff?.employeeNumber ? `(${esc(job.airConditioningMechanicSignOff.employeeNumber)})` : ""}</div>` : ""}
+      ${specialServiceKind(job) ? `<div class="box"><div class="label">Service Completed Date</div>${esc(job.specialServiceCompletedDate || card.specialServiceCompletedDate || "—")}</div><div class="box"><div class="label">Mechanic Sign-off</div>${esc(job.specialServiceMechanicSignOff?.name || job.mechanicName || job.assignedMechanic || "—")} ${job.specialServiceMechanicSignOff?.employeeNumber ? `(${esc(job.specialServiceMechanicSignOff.employeeNumber)})` : ""}</div>` : ""}
       <div class="box full"><div class="label">Reported Fault / Requested Work</div>${esc(job.reportedFault || "—")}</div>
       <div class="box full"><div class="label">Diagnosis / Findings</div>${esc(card.diagnosis || "—")}</div>
       <div class="box full"><div class="label">Work Completed</div>${esc(card.workCompleted || "—")}</div>
@@ -561,7 +604,7 @@ function printJobCard(job) {
     <table><thead><tr><th>Part No.</th><th>Description</th><th>Qty</th><th>Supplier / Ref</th></tr></thead><tbody>${parts.length ? parts.map((p)=>`<tr><td>${esc(p.partNumber||"")}</td><td>${esc(p.description||"")}</td><td>${esc(p.quantity??"")}</td><td>${esc(p.supplierRef||"")}</td></tr>`).join("") : `<tr><td colspan="4">No parts recorded</td></tr>`}</tbody></table>
     <h2 style="margin-top:18px">Checklist</h2>
     <table><thead><tr><th>Inspection item</th><th>Action / Description of Work</th><th>Result / Details</th></tr></thead><tbody>${Object.keys(checklist).length ? Object.entries(checklist).map(([k,v])=>{const item=evidence[k]||{};return `<tr><td>${esc(item.item||k)}</td><td><strong>${esc(item.action||"—")}</strong><br>${esc(item.description||"")}</td><td><strong>${esc(v||"—")}</strong>${item.note?`<br>${esc(item.note)}`:""}</td></tr>`;}).join("") : `<tr><td colspan="3">No checklist recorded</td></tr>`}</tbody></table>
-    <div class="approval"><h2>Fleet Manager Approval</h2><div><strong>Status:</strong> ${esc(job.status || "—")}</div><div><strong>Approved by:</strong> ${esc(approval.approvedByName || approval.approvedByEmail || "Not yet approved")}</div><div><strong>Approval date/time:</strong> ${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div>${is90DayInspection(job)?`<div><strong>Inspection date used for next due calculation:</strong> ${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div>`:""}${isAirConditioningService(job)?`<div><strong>A/C service date used for next annual due date:</strong> ${esc(job.airConditioningServiceDate || card.airConditioningServiceDate || "—")}</div>`:""}<div><strong>Return to service:</strong> ${approval.returnToService === true ? "YES" : approval.returnToService === false ? "NO" : "—"}</div><div><strong>Comments:</strong> ${esc(approval.comments || "—")}</div></div>
+    <div class="approval"><h2>Fleet Manager Approval</h2><div><strong>Status:</strong> ${esc(job.status || "—")}</div><div><strong>Approved by:</strong> ${esc(approval.approvedByName || approval.approvedByEmail || "Not yet approved")}</div><div><strong>Approval date/time:</strong> ${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div>${is90DayInspection(job)?`<div><strong>Inspection date used for next due calculation:</strong> ${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div>`:""}${isAirConditioningService(job)?`<div><strong>A/C service date used for next annual due date:</strong> ${esc(job.airConditioningServiceDate || card.airConditioningServiceDate || "—")}</div>`:""}${specialServiceKind(job)?`<div><strong>Service date used for next due calculation:</strong> ${esc(job.specialServiceCompletedDate || card.specialServiceCompletedDate || "—")}</div>`:""}<div><strong>Return to service:</strong> ${approval.returnToService === true ? "YES" : approval.returnToService === false ? "NO" : "—"}</div><div><strong>Comments:</strong> ${esc(approval.comments || "—")}</div></div>
     <script>window.onload=()=>window.print();</script></body></html>`;
   const w = window.open("", "_blank", "noopener,noreferrer");
   if (!w) return toast("Pop-up blocked. Allow pop-ups to print the Job Card.", "error");

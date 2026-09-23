@@ -43,9 +43,24 @@ const AC=[
  ["Readings","High-pressure gas reading","Reading","Record the measured high-pressure gas reading."]
 ];
 const mapAirConditioning=()=>AC.map((r,i)=>({id:`ac-${i+1}`,section:r[0],item:r[1],action:r[2],description:r[3],mandatory:true,requiresReading:r[2]==='Reading'}));
+const FIRE_SUPPRESSION=[
+ ["System","Screen and function","Inspect / Test","Check the fire-suppression screen for damage and test system operation."],
+ ["Tanks","Tank mountings and hinges","Inspect","Check tank mountings, hinges and general condition for wear."],
+ ["Detection","Detection lines","Inspect","Check detection lines for rubbing, wear and damage."],
+ ["Discharge system","Nozzles and steel lines","Inspect","Check all nozzles and steel lines for leakage, damage and rubbing."],
+ ["Tyre system","Tyre system","Inspect","Check the tyre system condition and operation."],
+ ["Mounting","Mounting and operation","Inspect / Test","Check system mounting security and correct operation."],
+ ["Tyre system","Tyre pressure","Check","Check and record that tyre pressure is satisfactory."]
+];
+const RADIATOR_WASH=[
+ ["Cooling system","Intercooler and radiator","Wash / Clean","Thoroughly wash and clean the intercooler and radiator. Inspect for blockage, damage and leaks after cleaning."]
+];
+const mapSpecial=(rows,prefix)=>rows.map((r,i)=>({id:`${prefix}-${i+1}`,section:r[0],item:r[1],action:r[2],description:r[3],mandatory:true}));
 export function getRequirementTemplate(key){
  const k=String(key||'').trim().toLowerCase();
  if(k==='aircon-annual')return {title:'Annual Air Conditioning Service',source:'Punchbowl Bus Air Conditioning Service Sheet',schedule:'Every 12 months from the actual service completion date',items:mapAirConditioning()};
+ if(k==='fire-suppression-annual')return {title:'Annual Fire Suppression Check',source:'Punchbowl Bus Fire Suppression Check Sheet',schedule:'Every 12 months from the actual completion date',items:mapSpecial(FIRE_SUPPRESSION,'fire')};
+ if(k==='radiator-wash-6month')return {title:'Intercooler / Radiator Wash',source:'Punchbowl Bus Intercooler / Radiator Wash Sheet',schedule:'Every 6 months from the actual completion date',items:mapSpecial(RADIATOR_WASH,'radiator')};
  if(k.startsWith('diesel-')&&['small','medium','large'].some(x=>k===`diesel-${x}`)){const t=k.split('-')[1],f=t==='small'?'S':t==='medium'?'M':'L';return {title:`Diesel ${t[0].toUpperCase()+t.slice(1)} Service`,source:'Diesel Service Excel',items:map(D.filter(r=>r[3].includes(f)),'ds')};}
  if(k==='ev-small'||k==='ev-large'){const t=k.split('-')[1],f=t==='small'?'S':'L';return {title:`EV ${t[0].toUpperCase()+t.slice(1)} Service`,source:'EV Service Excel',schedule:t==='small'?'30,000 km or 90 days':'60,000 km or 180 days',items:map(E.filter(r=>r[3].includes(f)),'evs')};}
  if(k==='diesel-90day'||k==='diesel-rms')return {title:k.endsWith('rms')?'Diesel RMS Inspection':'Diesel 90 Day Safety Inspection',source:'Diesel 90 Day/RMS Excel',items:map(DI,'di')};

@@ -8,7 +8,7 @@ const fleetNo = (bus) => String(bus?.fleetNumber || bus?.busNumber || bus?.numbe
 const COLUMN_STORAGE = "pbc.workshop.fleet.columns.v1";
 const DENSITY_STORAGE = "pbc.workshop.fleet.density.v1";
 const OPTIONAL_COLUMNS = [
-  {key:"registration-expiry", label:"Registration Expiry", defaultVisible:true, render:registrationExpiryHtml, sortValue:registrationExpirySortValue},
+  {key:"registration-expiry", label:"Registration Expiry", defaultVisible:false, render:registrationExpiryHtml, sortValue:registrationExpirySortValue},
   {key:"year", label:"Year", value:(bus) => bus.year},
   {key:"make", label:"Make", value:(bus) => bus.make},
   {key:"model", label:"Model", value:(bus) => bus.model},

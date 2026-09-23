@@ -1,4 +1,4 @@
-const CACHE = "pbc-v75"; // Refresh registration-expiry tracking column
+const CACHE = "pbc-v76"; // Refresh professional register and special-service tracking
 
 const ASSETS = [
   "/",
