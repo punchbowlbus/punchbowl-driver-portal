@@ -1131,6 +1131,7 @@ function renderDriverDetail(driver) {
                 <option value="">Select location</option>
                 <option value="Hannans Depot">Hannans Depot</option>
                 <option value="Bounds Depot">Bounds Depot</option>
+                <option value="Goulburn Depot">Goulburn Depot</option>
               </select>
             </div>
             <div>
@@ -1139,6 +1140,7 @@ function renderDriverDetail(driver) {
                 <option value="">Select location</option>
                 <option value="Hannans Depot">Hannans Depot</option>
                 <option value="Bounds Depot">Bounds Depot</option>
+                <option value="Goulburn Depot">Goulburn Depot</option>
               </select>
             </div>
           </div>
