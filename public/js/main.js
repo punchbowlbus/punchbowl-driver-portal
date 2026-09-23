@@ -357,7 +357,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=15");
+    const mod = await import("./dispatch_board.js?v=16");
     mod.renderDispatchBoardPage();
     return;
   }
@@ -385,7 +385,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./admin_v2.js?v=blocks-by-date-modern-1");
+    const mod = await import("./admin_v2.js?v=goulburn-depot-1");
 
     if (pageId === "adminEmployees") {
       mod.renderEmployeesPage();
