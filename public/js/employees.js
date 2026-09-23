@@ -132,7 +132,7 @@ export function renderEmployeesPage() {
             <label class="employees-field"><span>WWCC expiry</span><input id="empWWCCExpiry" type="date" /></label>
             <label class="employees-field"><span>Medical expiry</span><input id="empMedicalExpiry" type="date" /></label>
             <label class="employees-field"><span>Fatigue category</span><select id="empFatigueCategory">${options(["Standard", "BFM", "AFM"], "Select fatigue category")}</select></label>
-            <label class="employees-field employees-full"><span>Home depot</span><select id="empHomeDepot">${options(["Hannans", "Bounds", "Olympic Park"], "Select home depot")}</select></label>
+            <label class="employees-field employees-full"><span>Home depot</span><select id="empHomeDepot">${options(["Hannans", "Bounds", "Goulburn"], "Select home depot")}</select></label>
           </div>
         </div>
 
