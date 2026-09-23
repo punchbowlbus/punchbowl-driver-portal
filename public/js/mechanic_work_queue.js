@@ -19,7 +19,7 @@ import {
 import { auth, db, provider } from "./firebase.js";
 import { ADMIN_EMAILS } from "./config.js";
 import { getEmployeeByEmail } from "./db.js";
-import { getRequirementTemplate } from "./workshop_service_requirements.js?v=20260914-descriptions";
+import { getRequirementTemplate } from "./workshop_service_requirements.js?v=20260924-special-services";
 import { DEFECT_STATUS } from "./workshop_status.js";
 
 const $ = (id) => document.getElementById(id);
@@ -28,7 +28,7 @@ const els = {
   queueView: $("queueView"), jobCardView: $("jobCardView"), mechanicIdentity: $("mechanicIdentity"), refreshBtn: $("refreshBtn"), statusFilter: $("statusFilter"), jobQueue: $("jobQueue"),
   metricAssigned: $("metricAssigned"), metricProgress: $("metricProgress"), metricUrgent: $("metricUrgent"), metricApproval: $("metricApproval"),
   backToQueueBtn: $("backToQueueBtn"), jobCardStatusBadge: $("jobCardStatusBadge"), jobCardTitle: $("jobCardTitle"), jobCardVehicle: $("jobCardVehicle"), jobCardMeta: $("jobCardMeta"), jobWorkingMechanic: $("jobWorkingMechanic"), updateWorkingMechanicBtn: $("updateWorkingMechanicBtn"), readonlyJobDetails: $("readonlyJobDetails"),
-  jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), inspectionSignoffSection: $("inspectionSignoffSection"), inspectionCompletedDate: $("inspectionCompletedDate"), mechanicInspectionDeclaration: $("mechanicInspectionDeclaration"), airconSignoffSection: $("airconSignoffSection"), airconServiceCompletedDate: $("airconServiceCompletedDate"), airconMechanicDeclaration: $("airconMechanicDeclaration"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
+  jobCardForm: $("jobCardForm"), jobPreviousOdometer: $("jobPreviousOdometer"), jobCurrentOdometer: $("jobCurrentOdometer"), diagnosis: $("diagnosis"), workCompleted: $("workCompleted"), furtherWork: $("furtherWork"), furtherWorkRequired: $("furtherWorkRequired"), safeToReturn: $("safeToReturn"), checklistHeading: $("checklistHeading"), jobChecklist: $("jobChecklist"), partsBody: $("partsBody"), addPartBtn: $("addPartBtn"), labourStart: $("labourStart"), labourFinish: $("labourFinish"), mechanicNotes: $("mechanicNotes"), inspectionSignoffSection: $("inspectionSignoffSection"), inspectionCompletedDate: $("inspectionCompletedDate"), mechanicInspectionDeclaration: $("mechanicInspectionDeclaration"), airconSignoffSection: $("airconSignoffSection"), airconServiceCompletedDate: $("airconServiceCompletedDate"), airconMechanicDeclaration: $("airconMechanicDeclaration"), specialServiceSignoffSection: $("specialServiceSignoffSection"), specialServiceSignoffTitle: $("specialServiceSignoffTitle"), specialServiceSignoffHint: $("specialServiceSignoffHint"), specialServiceCompletedDate: $("specialServiceCompletedDate"), specialServiceMechanicDeclaration: $("specialServiceMechanicDeclaration"), startJobBtn: $("startJobBtn"), waitingPartsBtn: $("waitingPartsBtn"), saveProgressBtn: $("saveProgressBtn"), completeJobBtn: $("completeJobBtn")
 };
 
 let currentUser = null;
@@ -280,6 +280,14 @@ function isAirConditioningService(job) {
   return normalize(job?.serviceTemplateKey) === "aircon-annual" || normalize(job?.jobType) === "air conditioning service";
 }
 
+function specialServiceKind(job) {
+  const key = normalize(job?.serviceTemplateKey);
+  const type = normalize(job?.jobType);
+  if (key === "fire-suppression-annual" || type === "fire suppression check") return "fire";
+  if (key === "radiator-wash-6month" || type === "intercooler / radiator wash") return "radiator";
+  return "";
+}
+
 function savedChecklistValue(saved, key, item) {
   return saved[key] ?? saved[item] ?? "";
 }
@@ -379,6 +387,17 @@ function openJob(id) {
   els.airconServiceCompletedDate.value = job.airConditioningServiceDate || job.jobCard?.airConditioningServiceDate || localDateString();
   els.airconServiceCompletedDate.max = localDateString();
   els.airconMechanicDeclaration.checked = job.jobCard?.airconMechanicDeclaration === true;
+  const specialKind = specialServiceKind(job);
+  els.specialServiceSignoffSection.hidden = !specialKind;
+  if (specialKind) {
+    els.specialServiceSignoffTitle.textContent = specialKind === "fire" ? "Fire Suppression Check Completion" : "Intercooler / Radiator Wash Completion";
+    els.specialServiceSignoffHint.textContent = specialKind === "fire"
+      ? "Record the actual completion date. The next check will be due 12 months from this date."
+      : "Record the actual completion date. The next wash will be due 6 months from this date.";
+  }
+  els.specialServiceCompletedDate.value = job.specialServiceCompletedDate || job.jobCard?.specialServiceCompletedDate || localDateString();
+  els.specialServiceCompletedDate.max = localDateString();
+  els.specialServiceMechanicDeclaration.checked = job.jobCard?.specialServiceMechanicDeclaration === true;
   renderParts(job.jobCard?.partsUsed || []);
   const locked = ["Completed","Closed","Waiting Approval"].includes(job.status);
   els.jobCardForm.classList.toggle("jobcard-locked", locked);
@@ -390,6 +409,8 @@ function openJob(id) {
   els.mechanicInspectionDeclaration.disabled = locked;
   els.airconServiceCompletedDate.disabled = locked;
   els.airconMechanicDeclaration.disabled = locked;
+  els.specialServiceCompletedDate.disabled = locked;
+  els.specialServiceMechanicDeclaration.disabled = locked;
   window.scrollTo({top:0,behavior:"smooth"});
 }
 window.openMechanicJobCard = openJob;
@@ -429,7 +450,9 @@ function collectJobCard() {
     inspectionCompletedDate:els.inspectionCompletedDate?.value || "",
     mechanicInspectionDeclaration:els.mechanicInspectionDeclaration?.checked === true,
     airConditioningServiceDate:els.airconServiceCompletedDate?.value || "",
-    airconMechanicDeclaration:els.airconMechanicDeclaration?.checked === true
+    airconMechanicDeclaration:els.airconMechanicDeclaration?.checked === true,
+    specialServiceCompletedDate:els.specialServiceCompletedDate?.value || "",
+    specialServiceMechanicDeclaration:els.specialServiceMechanicDeclaration?.checked === true
   };
 }
 
@@ -454,6 +477,9 @@ async function saveJobCard(status, message) {
     if (isAirConditioningService(selectedJob) && !card.airConditioningServiceDate) return showStatus("Enter the actual A/C service completed date.", "error");
     if (isAirConditioningService(selectedJob) && card.airConditioningServiceDate > localDateString()) return showStatus("The A/C service completed date cannot be in the future.", "error");
     if (isAirConditioningService(selectedJob) && !card.airconMechanicDeclaration) return showStatus("Confirm the MVRIA mechanic declaration before sending the A/C service for approval.", "error");
+    if (specialServiceKind(selectedJob) && !card.specialServiceCompletedDate) return showStatus("Enter the actual service completed date.", "error");
+    if (specialServiceKind(selectedJob) && card.specialServiceCompletedDate > localDateString()) return showStatus("The service completed date cannot be in the future.", "error");
+    if (specialServiceKind(selectedJob) && !card.specialServiceMechanicDeclaration) return showStatus("Confirm the mechanic declaration before sending this service for approval.", "error");
   }
   const payload = { jobCard: card, status, updatedAt: serverTimestamp(), updatedByEmail: normalize(currentUser?.email) };
   if (status === "In Progress" && !selectedJob.startedAt) payload.startedAt = serverTimestamp();
@@ -473,6 +499,15 @@ async function saveJobCard(status, message) {
     if (isAirConditioningService(selectedJob)) {
       payload.airConditioningServiceDate = card.airConditioningServiceDate;
       payload.airConditioningMechanicSignOff = {
+        name:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Mechanic",
+        employeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
+        email:normalize(currentUser?.email),
+        signedAt:serverTimestamp()
+      };
+    }
+    if (specialServiceKind(selectedJob)) {
+      payload.specialServiceCompletedDate = card.specialServiceCompletedDate;
+      payload.specialServiceMechanicSignOff = {
         name:window.currentWorkshopMechanic?.name || currentUser?.displayName || currentUser?.email || "Mechanic",
         employeeNumber:window.currentWorkshopMechanic?.employeeNumber || "",
         email:normalize(currentUser?.email),
