@@ -231,7 +231,7 @@ function editorFields(bus = {}) {
       <label>Fire suppression<select id="wfFireSuppression"><option value=""></option>${opt(bus.fireSuppression,["YES","NO"])}</select></label>
       <label>Luggage bins<select id="wfLuggageBins"><option value=""></option>${opt(bus.luggageBins,["YES","NO"])}</select></label>
       <div class="wf-section-title">Allocation and status</div>
-      <label>Depot<select id="wfDepot"><option value="">Select</option>${opt(bus.depot,["Hannans","Bounds","Olympic Park"])}</select></label>
+      <label>Depot<select id="wfDepot"><option value="">Select</option>${opt(bus.depot,["Hannans","Bounds","Goulburn"])}</select></label>
       <label>Vehicle status<select id="wfStatus">${opt(bus.status || "Active",["Active","In Service","Restricted","Workshop","Out of Service","Inactive"])}</select></label>
       <label class="wf-full">Notes<textarea id="wfNotes">${esc(bus.notes || "")}</textarea></label>
     </div>
