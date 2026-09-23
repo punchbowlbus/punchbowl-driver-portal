@@ -129,6 +129,12 @@ async function refreshCategoryUi() {
   if (bus && type === "Air Conditioning Service" && !$("jobDueDate")?.value && bus.nextAirConditioningServiceDate) {
     $("jobDueDate").value = bus.nextAirConditioningServiceDate;
   }
+  if (bus && type === "Fire Suppression Check" && !$("jobDueDate")?.value && bus.nextFireSuppressionCheckDate) {
+    $("jobDueDate").value = bus.nextFireSuppressionCheckDate;
+  }
+  if (bus && type === "Intercooler / Radiator Wash" && !$("jobDueDate")?.value && bus.nextRadiatorWashDate) {
+    $("jobDueDate").value = bus.nextRadiatorWashDate;
+  }
 
   if (!bus || type !== "Scheduled Service") {
     wrap.hidden = true;
@@ -173,6 +179,8 @@ async function refreshDuePreview(busArg = null) {
 
 function templateKey(bus, jobType, category) {
   if (jobType === "Air Conditioning Service") return "aircon-annual";
+  if (jobType === "Fire Suppression Check") return "fire-suppression-annual";
+  if (jobType === "Intercooler / Radiator Wash") return "radiator-wash-6month";
   const prefix = isEv(bus) ? "ev" : "diesel";
   if (jobType === "Scheduled Service") return `${prefix}-${String(category || "").toLowerCase()}`;
   if (jobType === "90 Day Safety Check") return `${prefix}-90day`;
