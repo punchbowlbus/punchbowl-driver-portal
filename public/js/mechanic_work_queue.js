@@ -71,6 +71,26 @@ function showStatus(message, type="success") { els.status.className = `status ${
 function clearStatus() { els.status.className = "status"; els.status.textContent = ""; }
 function localDateString(date = new Date()) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`; }
 
+function busForJob(job) {
+  if (!job) return null;
+  return buses.find((bus) => bus.id === job.busId)
+    || buses.find((bus) => normalize(bus.fleetNumber || bus.busNumber || bus.number || bus.id) === normalize(job.fleetNumber));
+}
+
+function workshopBusStatusUpdate(busData, job, status) {
+  if (!busData || !["In Progress","Waiting Parts","Waiting Approval"].includes(status)) return null;
+  const existingStatus = String(busData.status || "Active").trim();
+  const nextStatus = normalize(existingStatus) === "out of service" ? "Out of Service" : "Workshop";
+  return {
+    status:nextStatus,
+    workshopStatusJobId:job.id,
+    workshopStatusJobNumber:job.jobNumber || "",
+    workshopStatusReason:status,
+    workshopStatusUpdatedAt:serverTimestamp(),
+    workshopStatusUpdatedBy:normalize(currentUser?.email)
+  };
+}
+
 const CHECKLISTS = {
   "Defect Repair": ["Reported fault confirmed","Root cause identified","Repair completed","Related components checked","Fault cleared / retested","Road test where required"],
   "Preventive Maintenance": ["Visual inspection","Fluid levels","Belts / hoses","Brakes","Tyres","Electrical","Doors","Leaks","Safety equipment","Road test"],
@@ -482,12 +502,18 @@ async function saveJobCard(status, message) {
   }
   try {
     const jobRef = doc(db, "workshopJobs", selectedJob.id);
+    const bus = busForJob(selectedJob);
+    const busRef = bus?.id ? doc(db, "buses", bus.id) : null;
     if (status === "Waiting Approval" && selectedJob.sourceDefectId) {
       const defectRef = doc(db, "defectReports", selectedJob.sourceDefectId);
       await runTransaction(db, async (tx) => {
-        const [jobSnap, defectSnap] = await Promise.all([tx.get(jobRef), tx.get(defectRef)]);
+        const [jobSnap, defectSnap, busSnap] = await Promise.all([tx.get(jobRef), tx.get(defectRef), busRef ? tx.get(busRef) : Promise.resolve(null)]);
         if (!jobSnap.exists()) throw new Error("Workshop job no longer exists.");
         tx.update(jobRef, payload);
+        if (busRef && busSnap?.exists()) {
+          const busUpdate = workshopBusStatusUpdate(busSnap.data(), selectedJob, status);
+          if (busUpdate) tx.update(busRef, busUpdate);
+        }
         if (defectSnap.exists()) {
           tx.set(defectRef, {
             status:DEFECT_STATUS.COMPLETED,
@@ -500,7 +526,15 @@ async function saveJobCard(status, message) {
         }
       });
     } else {
-      await updateDoc(jobRef, payload);
+      await runTransaction(db, async (tx) => {
+        const [jobSnap, busSnap] = await Promise.all([tx.get(jobRef), busRef ? tx.get(busRef) : Promise.resolve(null)]);
+        if (!jobSnap.exists()) throw new Error("Workshop job no longer exists.");
+        tx.update(jobRef, payload);
+        if (busRef && busSnap?.exists()) {
+          const busUpdate = workshopBusStatusUpdate(busSnap.data(), selectedJob, status);
+          if (busUpdate) tx.update(busRef, busUpdate);
+        }
+      });
     }
     showStatus(message);
   }

@@ -19,6 +19,8 @@ let selectedJob = null;
 let selectedBus = null;
 let observer = null;
 
+const ACTIVE_WORKSHOP_JOB_STATUSES = new Set(["New","Assigned","In Progress","Waiting Parts","Waiting Approval"]);
+
 const $ = (id) => document.getElementById(id);
 const norm = (v) => String(v || "").trim().toLowerCase();
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
@@ -197,6 +199,15 @@ function busForJob(job) {
   return buses.find((b) => b.id === job.busId || norm(fleetNo(b)) === norm(job.fleetNumber));
 }
 
+function otherActiveJobsForBus(job, bus) {
+  if (!job || !bus) return [];
+  return jobs.filter((candidate) => {
+    if (candidate.id === job.id || !ACTIVE_WORKSHOP_JOB_STATUSES.has(candidate.status || "New")) return false;
+    return candidate.busId === bus.id
+      || norm(candidate.fleetNumber) === norm(fleetNo(bus));
+  });
+}
+
 function approvalDisplay(job) {
   const card = job.jobCard || {};
   const checklist = card.checklist || {};
@@ -280,6 +291,9 @@ async function returnToMechanic() {
       if (!snap.exists()) throw new Error("Workshop job no longer exists.");
       const latestJob = snap.data();
       if (latestJob.status !== "Waiting Approval") throw new Error("This job is no longer waiting for approval.");
+      const bus = busForJob(selectedJob);
+      const busRef = bus?.id ? doc(db, "buses", bus.id) : null;
+      const busSnap = busRef ? await tx.get(busRef) : null;
       const defectRef = latestJob.sourceDefectId ? doc(db, "defectReports", latestJob.sourceDefectId) : null;
       const defectSnap = defectRef ? await tx.get(defectRef) : null;
       tx.update(ref, {
@@ -290,6 +304,17 @@ async function returnToMechanic() {
         fleetManagerReviewedAt:serverTimestamp(),
         updatedAt:serverTimestamp()
       });
+      if (busRef && busSnap?.exists()) {
+        const currentStatus = String(busSnap.data().status || "Active").trim();
+        tx.update(busRef, {
+          status:norm(currentStatus) === "out of service" ? "Out of Service" : "Workshop",
+          workshopStatusJobId:selectedJob.id,
+          workshopStatusJobNumber:selectedJob.jobNumber || "",
+          workshopStatusReason:"Returned to Mechanic",
+          workshopStatusUpdatedAt:serverTimestamp(),
+          workshopStatusUpdatedBy:norm(auth.currentUser?.email)
+        });
+      }
       if (defectRef && defectSnap?.exists()) {
         tx.set(defectRef, {
           status:DEFECT_STATUS.ASSIGNED,
@@ -361,6 +386,7 @@ async function approveAndClose() {
       if (latestJob.status !== "Waiting Approval") throw new Error("This job is no longer waiting for approval.");
 
       const bus = busForJob(selectedJob);
+      const otherActiveJobs = otherActiveJobsForBus(selectedJob, bus);
       let busData = null;
       let busRef = null;
       if (bus?.id) {
@@ -373,13 +399,18 @@ async function approveAndClose() {
 
       const currentJobOdo = num(latestJob.jobCard?.currentOdometer);
       const oldBusOdo = num(busData?.currentOdometer ?? busData?.odometer ?? busData?.odometerKm);
+      const effectiveVehicleStatus = otherActiveJobs.length
+        ? (vehicleStatus === "Out of Service" || norm(busData?.status) === "out of service" ? "Out of Service" : "Workshop")
+        : vehicleStatus;
       const approval = {
         approved:true,
         approvedByName:auth.currentUser?.displayName || auth.currentUser?.email || "Fleet Manager",
         approvedByEmail:norm(auth.currentUser?.email),
         comments,
         returnToService:returnToService === "Yes",
-        vehicleStatus,
+        vehicleStatus:effectiveVehicleStatus,
+        requestedVehicleStatus:vehicleStatus,
+        heldInWorkshopForOtherActiveJobs:otherActiveJobs.map((job) => job.jobNumber || job.id),
         approvedAt:serverTimestamp()
       };
 
@@ -427,11 +458,14 @@ async function approveAndClose() {
 
       if (busRef && busData) {
         const busUpdate = {
-          status:vehicleStatus,
+          status:effectiveVehicleStatus,
           lastWorkshopJobId:selectedJob.id,
           lastWorkshopJobNumber:selectedJob.jobNumber || "",
           lastWorkshopClosedAt:serverTimestamp(),
-          lastWorkshopClosedBy:norm(auth.currentUser?.email)
+          lastWorkshopClosedBy:norm(auth.currentUser?.email),
+          workshopStatusReason:otherActiveJobs.length ? "Other active workshop jobs remain" : "Fleet Manager closure",
+          workshopStatusUpdatedAt:serverTimestamp(),
+          workshopStatusUpdatedBy:norm(auth.currentUser?.email)
         };
 
         if (currentJobOdo != null && (oldBusOdo == null || currentJobOdo >= oldBusOdo)) {
