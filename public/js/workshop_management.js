@@ -220,7 +220,10 @@ function populateBusSelects() {
 
 function renderFleet() {
   const term = String(els.fleetSearch.value || "").trim().toLowerCase();
-  const list = buses.filter((b) => [fleetNo(b), b.rego, b.make, b.model, b.depot, b.status].some((v) => String(v || "").toLowerCase().includes(term)));
+  const list = buses.filter((b) => [
+    fleetNo(b), b.rego, b.make, b.model, b.depot, b.status,
+    b.fuelType, b.fuel, b.vin, b.accessType, b.bodyBy, b.bodyModel
+  ].some((v) => String(v || "").toLowerCase().includes(term)));
   if (!list.length) { els.fleetTableBody.innerHTML = `<tr><td colspan="9"><div class="empty">No matching vehicles.</div></td></tr>`; return; }
   els.fleetTableBody.innerHTML = list.map((b) => `
     <tr>

@@ -1,4 +1,4 @@
-const CACHE = "pbc-v72"; // Refresh corrected 36-hour dispatch timeline
+const CACHE = "pbc-v75"; // Refresh registration-expiry tracking column
 
 const ASSETS = [
   "/",
