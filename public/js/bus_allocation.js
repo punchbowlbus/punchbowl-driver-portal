@@ -60,10 +60,7 @@ function minutes(value) {
 function formatTime(value) {
   let total = minutes(value);
   while (total < 0) total += 1440;
-  const day = Math.floor(total / 1440);
-  total %= 1440;
-  const label = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-  return day ? `${label} +${day}` : label;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function inputTime(value) {
