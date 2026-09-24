@@ -3,9 +3,36 @@ import { db } from "./firebase.js";
 
 const $ = (id) => document.getElementById(id);
 const norm = (value) => String(value || "").trim().toLowerCase();
+const esc = (value) => String(value ?? "").replace(/[&<>'\"]/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[char]));
 const fleetNo = (bus) => String(bus?.fleetNumber || bus?.busNumber || bus?.number || bus?.id || "").trim();
 const COLUMN_STORAGE = "pbc.workshop.fleet.columns.v1";
 const DENSITY_STORAGE = "pbc.workshop.fleet.density.v1";
+const OPTIONAL_COLUMNS = [
+  {key:"registration-expiry", label:"Registration Expiry", defaultVisible:true, render:registrationExpiryHtml, sortValue:registrationExpirySortValue},
+  {key:"year", label:"Year", value:(bus) => bus.year},
+  {key:"make", label:"Make", value:(bus) => bus.make},
+  {key:"model", label:"Model", value:(bus) => bus.model},
+  {key:"fuel-type", label:"Fuel Type", value:(bus) => bus.fuelType || bus.fuel},
+  {key:"access-type", label:"Access Type", value:(bus) => bus.accessType},
+  {key:"seat-capacity", label:"Seat Capacity", value:(bus) => bus.seatCount},
+  {key:"standing-capacity", label:"Standing Capacity", value:(bus) => bus.standCount},
+  {key:"vin-chassis", label:"VIN / Chassis", value:(bus) => bus.vin || bus.chassisNumber},
+  {key:"body-manufacturer", label:"Body Manufacturer", value:(bus) => bus.bodyBy || bus.bodyManufacturer},
+  {key:"body-model", label:"Body Model", value:(bus) => bus.bodyModel},
+  {key:"colour", label:"Colour", value:(bus) => bus.colour || bus.color},
+  {key:"euro-standard", label:"Euro Standard", value:(bus) => bus.euro || bus.euroStandard},
+  {key:"adblue", label:"AdBlue", value:(bus) => bus.adblue},
+  {key:"air-conditioned", label:"Air Conditioned", value:(bus) => bus.airConditioned},
+  {key:"rear-door", label:"Rear Door", value:(bus) => bus.rearDoor},
+  {key:"cctv", label:"CCTV", value:(bus) => bus.cctvCount},
+  {key:"fire-suppression-fitted", label:"Fire Suppression Fitted", value:(bus) => bus.fireSuppression},
+  {key:"luggage-bins", label:"Luggage Bins", value:(bus) => bus.luggageBins},
+  {key:"tare", label:"Tare", value:(bus) => bus.tare},
+  {key:"gvm", label:"GVM", value:(bus) => bus.gvm}
+];
+const OPTIONAL_COLUMN_KEYS = new Set(OPTIONAL_COLUMNS.map((column) => column.key));
+const OPTIONAL_COLUMN_MAP = new Map(OPTIONAL_COLUMNS.map((column) => [column.key, column]));
+const NUMERIC_COLUMN_KEYS = new Set(["odometer","year","seat-capacity","standing-capacity","cctv","tare","gvm"]);
 
 let buses = [];
 let sortState = {key:"fleet", direction:"asc"};
@@ -23,7 +50,7 @@ function currentHeaders() {
     cell,
     index,
     label:String(cell.textContent || "").trim(),
-    key:columnKey(cell.textContent)
+    key:cell.dataset.columnKey || columnKey(cell.textContent)
   }));
 }
 
@@ -150,6 +177,90 @@ function busForRow(row) {
   return buses.find((bus) => norm(fleetNo(bus)) === norm(number));
 }
 
+function optionalValue(column, bus) {
+  const value = column.value(bus);
+  return value === "" || value == null ? "—" : String(value);
+}
+
+function isoDate(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const date = new Date(`${text}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function registrationExpiryValue(bus) {
+  const saved = String(bus?.regoExpiryDate || "").trim();
+  if (isoDate(saved)) return saved;
+  const legacy = String(bus?.regoExpiry || "").trim();
+  return isoDate(legacy) ? legacy : "";
+}
+
+function registrationExpirySortValue(bus) {
+  return registrationExpiryValue(bus) || "9999-12-31";
+}
+
+function formatDate(value) {
+  const date = isoDate(value);
+  return date ? new Intl.DateTimeFormat("en-AU", {day:"2-digit", month:"short", year:"numeric"}).format(date) : "—";
+}
+
+function registrationExpiryHtml(bus) {
+  const dueValue = registrationExpiryValue(bus);
+  const legacy = String(bus?.regoExpiry || "").trim();
+  if (!dueValue) {
+    return legacy
+      ? `<span class="badge warn">DATE NEEDS YEAR</span><div class="list-meta">${esc(legacy)}</div>`
+      : `<span class="badge">NOT SET</span><div class="list-meta">Add registration expiry</div>`;
+  }
+  const today = isoDate(new Date().toLocaleDateString("en-CA"));
+  const due = isoDate(dueValue);
+  const days = Math.ceil((due - today) / 86400000);
+  if (days < 0) return `<span class="badge bad">EXPIRED</span><div class="list-meta">${esc(formatDate(dueValue))} · ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue</div>`;
+  if (days === 0) return `<span class="badge bad">DUE TODAY</span><div class="list-meta">${esc(formatDate(dueValue))}</div>`;
+  if (days <= 30) return `<span class="badge warn">DUE SOON</span><div class="list-meta">${esc(formatDate(dueValue))} · ${days} day${days === 1 ? "" : "s"}</div>`;
+  if (days <= 90) return `<span class="badge warn">DUE WITHIN 3 MONTHS</span><div class="list-meta">${esc(formatDate(dueValue))} · ${days} days</div>`;
+  return `<span class="badge good">ON TRACK</span><div class="list-meta">${esc(formatDate(dueValue))} · Due in ${days} days</div>`;
+}
+
+function ensureOptionalColumns() {
+  const table = $("fleetView")?.querySelector("table");
+  const headRow = table?.querySelector("thead tr");
+  const body = $("fleetTableBody");
+  if (!headRow || !body) return;
+
+  OPTIONAL_COLUMNS.forEach((column) => {
+    let header = currentHeaders().find((item) => item.key === column.key);
+    if (!header) {
+      const statusHeader = currentHeaders().find((item) => item.key === "status");
+      const th = document.createElement("th");
+      th.dataset.columnKey = column.key;
+      th.dataset.optionalColumn = "true";
+      th.textContent = column.label;
+      if (statusHeader?.cell) statusHeader.cell.insertAdjacentElement("beforebegin", th);
+      else headRow.appendChild(th);
+      header = currentHeaders().find((item) => item.key === column.key);
+    }
+    if (!header) return;
+
+    [...body.rows].forEach((row) => {
+      const bus = busForRow(row);
+      if (!bus) return;
+      let cell = row.querySelector(`[data-optional-cell="${column.key}"]`);
+      if (!cell) {
+        cell = document.createElement("td");
+        cell.dataset.optionalCell = column.key;
+        const insertionPoint = row.cells[header.index];
+        if (insertionPoint) insertionPoint.insertAdjacentElement("beforebegin", cell);
+        else row.appendChild(cell);
+      }
+      if (column.render) cell.innerHTML = column.render(bus);
+      else cell.textContent = optionalValue(column, bus);
+      cell.dataset.sortValue = column.sortValue ? String(column.sortValue(bus) || "") : "";
+    });
+  });
+}
+
 function maintenanceClass(row) {
   const text = norm(row.textContent);
   if (/overdue|urgent|expired/.test(text)) return "critical";
@@ -180,8 +291,11 @@ function applyFilters() {
 }
 
 function cellSortValue(row, header) {
-  const text = String(row.cells?.[header.index]?.textContent || "").trim();
-  if (header.key === "odometer") return Number(text.replace(/[^0-9.-]/g, "")) || 0;
+  const cell = row.cells?.[header.index];
+  const explicit = String(cell?.dataset.sortValue || "").trim();
+  if (explicit) return explicit;
+  const text = String(cell?.textContent || "").trim();
+  if (NUMERIC_COLUMN_KEYS.has(header.key)) return Number(text.replace(/[^0-9.-]/g, "")) || 0;
   if (header.key === "fleet" || header.key === "rego") return text;
   return text.toLowerCase();
 }
@@ -227,7 +341,8 @@ function syncColumnMenu() {
   const saved = savedColumns();
   const headers = currentHeaders().filter((header) => header.key !== "action");
   wrap.innerHTML = headers.map((header) => {
-    const checked = header.key === "fleet" || saved[header.key] !== false;
+    const optional = OPTIONAL_COLUMN_MAP.get(header.key);
+    const checked = header.key === "fleet" || (optional ? (saved[header.key] ?? optional.defaultVisible === true) : saved[header.key] !== false);
     return `<label class="fleet-column-option"><input type="checkbox" data-column-key="${header.key}" ${checked ? "checked" : ""} ${header.key === "fleet" ? "disabled" : ""}> ${header.label}</label>`;
   }).join("");
   wrap.querySelectorAll("[data-column-key]").forEach((input) => input.addEventListener("change", () => {
@@ -243,7 +358,11 @@ function applyColumns() {
   const headers = currentHeaders();
   const rows = [...($("fleetTableBody")?.rows || [])];
   headers.forEach((header) => {
-    const hidden = header.key === "action" || (header.key !== "fleet" && saved[header.key] === false);
+    const optional = OPTIONAL_COLUMN_MAP.get(header.key);
+    const optionalVisible = optional ? (saved[header.key] ?? optional.defaultVisible === true) : true;
+    const optionalHidden = Boolean(optional) && !optionalVisible;
+    const standardHidden = !OPTIONAL_COLUMN_KEYS.has(header.key) && header.key !== "fleet" && saved[header.key] === false;
+    const hidden = header.key === "action" || optionalHidden || standardHidden;
     header.cell.style.display = hidden ? "none" : "";
     rows.forEach((row) => { if (row.cells[header.index]) row.cells[header.index].style.display = hidden ? "none" : ""; });
   });
@@ -259,6 +378,7 @@ function clearFilters() {
 
 function refresh() {
   ensureControls();
+  ensureOptionalColumns();
   wireSorting();
   applyColumns();
   applyFilters();
