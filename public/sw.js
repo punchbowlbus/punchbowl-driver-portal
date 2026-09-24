@@ -1,4 +1,4 @@
-const CACHE = "pbc-v73"; // Refresh professional Fleet Register controls
+const CACHE = "pbc-v75"; // Refresh registration-expiry tracking column
 
 const ASSETS = [
   "/",
