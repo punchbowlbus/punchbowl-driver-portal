@@ -27,6 +27,12 @@ const fleetNo = (bus) => clean(bus?.fleetNumber || bus?.busNumber || bus?.number
 const busStatus = (bus) => clean(bus?.status || "Active");
 const busFuel = (bus) => clean(bus?.fuelType || bus?.fuel || "Diesel");
 
+function depotKey(value) {
+  let key = norm(value).replace(/\bdepot\b/g, "").replace(/[^a-z0-9]+/g, "").trim();
+  if (["hannan", "hannans"].includes(key)) key = "hannans";
+  return key;
+}
+
 function localDate(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -100,7 +106,7 @@ function dutyIsActive(duty) {
 
 function sameDepot(bus, duty) {
   const dutyDepot = clean(duty.depot || duty.startLocation);
-  return !dutyDepot || !bus.depot || norm(bus.depot) === norm(dutyDepot);
+  return !dutyDepot || !bus.depot || depotKey(bus.depot) === depotKey(dutyDepot);
 }
 
 function intervalsOverlap(aStart, aEnd, bStart, bEnd, buffer = 0) {
@@ -136,12 +142,21 @@ function dutyConflicts(duty) {
 }
 
 function allDepots() {
-  return [...new Set([...duties.map((duty) => clean(duty.depot || duty.startLocation)), ...buses.map((bus) => clean(bus.depot))].filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
+  const names = new Map();
+  [...duties.map((duty) => clean(duty.depot || duty.startLocation)), ...buses.map((bus) => clean(bus.depot))].filter(Boolean).forEach((name) => {
+    const key = depotKey(name);
+    const current = names.get(key);
+    if (!current || /\bdepot\b/i.test(name)) names.set(key, name);
+  });
+  return [...names.values()].sort((a, b) => a.localeCompare(b));
 }
 
 function visibleDuties() {
-  return duties.filter(dutyIsActive).filter((duty) => !depotFilter || norm(duty.depot || duty.startLocation) === norm(depotFilter));
+  return duties.filter(dutyIsActive).filter((duty) => !depotFilter || depotKey(duty.depot || duty.startLocation) === depotKey(depotFilter));
+}
+
+function busMatchesSelectedDepot(bus) {
+  return !depotFilter || !bus.depot || depotKey(bus.depot) === depotKey(depotFilter);
 }
 
 function busOptions(duty) {
@@ -216,7 +231,7 @@ function renderMetrics() {
   const conflicts = list.filter((duty) => dutyConflicts(duty).some((message) => !/not allocated/i.test(message))).length;
   const used = busDuties.map((duty) => clean(duty.actualBus || duty.assignedBus)).filter(Boolean);
   const reused = used.length - new Set(used.map(norm)).size;
-  const values = {baMetricDuties:busDuties.length, baMetricPlanned:assigned, baMetricAwaiting:busDuties.length - assigned, baMetricRelief:list.length - busDuties.length, baMetricReuse:Math.max(0, reused), baMetricConflicts:conflicts, baMetricAvailable:buses.filter(availableBus).length};
+  const values = {baMetricDuties:busDuties.length, baMetricPlanned:assigned, baMetricAwaiting:busDuties.length - assigned, baMetricRelief:list.length - busDuties.length, baMetricReuse:Math.max(0, reused), baMetricConflicts:conflicts, baMetricAvailable:buses.filter((bus) => availableBus(bus) && busMatchesSelectedDepot(bus)).length};
   Object.entries(values).forEach(([id, value]) => { const node = document.getElementById(id); if (node) node.textContent = String(value); });
 }
 
@@ -224,7 +239,7 @@ function renderAlerts() {
   const root = document.getElementById("baAlerts");
   if (!root) return;
   const list = visibleDuties();
-  const unavailable = buses.filter((bus) => UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus))));
+  const unavailable = buses.filter((bus) => busMatchesSelectedDepot(bus) && UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus))));
   const alerts = [];
   list.forEach((duty) => dutyConflicts(duty).forEach((message) => alerts.push({tone:/not allocated/i.test(message) ? "warn" : "bad", title:duty.dutyNumber || duty.driverName || "Duty", text:message})));
   unavailable.forEach((bus) => alerts.push({tone:"bad", title:fleetNo(bus), text:`Excluded automatically: ${busStatus(bus)}`}));
