@@ -11,6 +11,8 @@ import { els } from "./ui.js";
 const TURNAROUND_MINUTES = 20;
 const ACTIVE_DUTY_STATUSES = new Set(["assigned", "pending"]);
 const UNAVAILABLE_BUS_STATUSES = new Set(["workshop", "out of service", "inactive", "restricted"]);
+const REQUIRED_DEPOTS = ["Goulburn"];
+const EXCLUDED_DEPOT_KEYS = new Set(["olympicpark"]);
 
 let duties = [];
 let buses = [];
@@ -31,6 +33,19 @@ function depotKey(value) {
   let key = norm(value).replace(/\bdepot\b/g, "").replace(/[^a-z0-9]+/g, "").trim();
   if (["hannan", "hannans"].includes(key)) key = "hannans";
   return key;
+}
+
+function explicitDutyDepot(duty) {
+  return clean(duty?.depot || duty?.depotName || duty?.homeDepot || duty?.startDepot);
+}
+
+function dutyDepot(duty) {
+  const explicit = explicitDutyDepot(duty);
+  if (explicit) return explicit;
+  const start = clean(duty?.startLocation);
+  if (!start) return "";
+  const known = buses.find((bus) => bus.depot && depotKey(bus.depot) === depotKey(start));
+  return known ? clean(known.depot) : "";
 }
 
 function localDate(date = new Date()) {
@@ -105,8 +120,8 @@ function dutyIsActive(duty) {
 }
 
 function sameDepot(bus, duty) {
-  const dutyDepot = clean(duty.depot || duty.startLocation);
-  return !dutyDepot || !bus.depot || depotKey(bus.depot) === depotKey(dutyDepot);
+  const requiredDepot = dutyDepot(duty) || depotFilter;
+  return !requiredDepot || !bus.depot || depotKey(bus.depot) === depotKey(requiredDepot);
 }
 
 function intervalsOverlap(aStart, aEnd, bStart, bEnd, buffer = 0) {
@@ -143,8 +158,9 @@ function dutyConflicts(duty) {
 
 function allDepots() {
   const names = new Map();
-  [...duties.map((duty) => clean(duty.depot || duty.startLocation)), ...buses.map((bus) => clean(bus.depot))].filter(Boolean).forEach((name) => {
+  [...REQUIRED_DEPOTS, ...duties.map(explicitDutyDepot), ...buses.map((bus) => clean(bus.depot))].filter(Boolean).forEach((name) => {
     const key = depotKey(name);
+    if (EXCLUDED_DEPOT_KEYS.has(key)) return;
     const current = names.get(key);
     if (!current || /\bdepot\b/i.test(name)) names.set(key, name);
   });
@@ -152,7 +168,7 @@ function allDepots() {
 }
 
 function visibleDuties() {
-  return duties.filter(dutyIsActive).filter((duty) => !depotFilter || depotKey(duty.depot || duty.startLocation) === depotKey(depotFilter));
+  return duties.filter(dutyIsActive).filter((duty) => !depotFilter || depotKey(dutyDepot(duty)) === depotKey(depotFilter));
 }
 
 function busMatchesSelectedDepot(bus) {
@@ -199,7 +215,7 @@ function rowHtml(duty) {
       <td><input class="ba-input" data-field="changeoverLocation" value="${esc(duty.changeoverLocation || "")}" placeholder="Changeover location"></td>` : `
       <td><select class="ba-bus" data-field="assignedBus">${busOptions(duty)}</select></td>
       <td><input class="ba-input" data-field="actualBus" value="${esc(actual)}" placeholder="Confirm actual"></td>
-      <td><span class="ba-type ${vehicleRequirement(duty) === "EV" ? "ev" : ""}">${esc(vehicleRequirement(duty))}</span><small>${esc(duty.depot || duty.startLocation || "Depot not set")}</small></td>`}
+      <td><span class="ba-type ${vehicleRequirement(duty) === "EV" ? "ev" : ""}">${esc(vehicleRequirement(duty))}</span><small>${esc(dutyDepot(duty) || "Depot not set")}${duty.startLocation ? ` · Start: ${esc(duty.startLocation)}` : ""}</small></td>`}
     <td>${formatTime(endMinute(duty))}</td>
     <td><span class="ba-status ${status.cls}">${status.label}</span>${conflicts.length ? `<small class="ba-alert">${esc(conflicts.join(" · "))}</small>` : ""}</td>
     <td class="ba-screen"><button class="ba-check" type="button" data-confirm-duty="${esc(duty.id)}">✓</button></td>
