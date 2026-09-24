@@ -16,10 +16,12 @@ const EXCLUDED_DEPOT_KEYS = new Set(["olympicpark"]);
 
 let duties = [];
 let buses = [];
+let defects = [];
 let selectedDate = localDate();
 let depotFilter = "";
 let unsubscribeDuties = null;
 let unsubscribeBuses = null;
+let unsubscribeDefects = null;
 let busy = false;
 
 const clean = (value) => String(value ?? "").trim();
@@ -110,6 +112,24 @@ function busMeetsRequirement(bus, requirement) {
 
 function availableBus(bus) {
   return !UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus)));
+}
+
+function defectIsOpen(defect) {
+  if (defect?.deleted === true) return false;
+  const status = norm(defect?.status || "New");
+  return !["completed", "closed", "resolved", "cancelled", "canceled"].includes(status);
+}
+
+function defectFleetNo(defect) {
+  if (defect?.fleetNumber) return clean(defect.fleetNumber);
+  const bus = buses.find((item) => clean(item.id) === clean(defect?.busId));
+  return bus ? fleetNo(bus) : clean(defect?.busId || "Unknown bus");
+}
+
+function defectMatchesSelectedDepot(defect) {
+  if (!depotFilter) return true;
+  const bus = buses.find((item) => clean(item.id) === clean(defect?.busId) || norm(fleetNo(item)) === norm(defect?.fleetNumber));
+  return depotKey(defect?.depot || bus?.depot) === depotKey(depotFilter);
 }
 
 function dutyIsActive(duty) {
@@ -272,9 +292,14 @@ function renderAlerts() {
   const list = visibleDuties();
   const unavailable = buses.filter((bus) => busMatchesSelectedDepot(bus) && UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus))));
   const alerts = [];
-  list.forEach((duty) => dutyConflicts(duty).forEach((message) => alerts.push({tone:/not allocated/i.test(message) ? "warn" : "bad", title:duty.dutyNumber || duty.driverName || "Duty", text:message})));
+  list.forEach((duty) => dutyConflicts(duty).filter((message) => !/not allocated/i.test(message)).forEach((message) => alerts.push({tone:"bad", title:duty.dutyNumber || duty.driverName || "Duty", text:message})));
   unavailable.forEach((bus) => alerts.push({tone:"bad", title:fleetNo(bus), text:`Excluded automatically: ${busStatus(bus)}`}));
-  root.innerHTML = alerts.length ? alerts.slice(0, 12).map((item) => `<div class="ba-notice ${item.tone}"><strong>${esc(item.title)}</strong><span>${esc(item.text)}</span></div>`).join("") : `<div class="ba-notice good"><strong>Plan ready</strong><span>No allocation conflicts found.</span></div>`;
+  defects.filter((defect) => defectIsOpen(defect) && defectMatchesSelectedDepot(defect)).forEach((defect) => {
+    const unsafe = norm(defect.safeToDrive) === "no" || norm(defect.priority) === "critical";
+    const detail = clean(defect.category || defect.description || "Vehicle defect");
+    alerts.push({tone:unsafe ? "bad" : "warn", title:defectFleetNo(defect), text:`Open defect: ${detail} · ${clean(defect.status || "New")}`});
+  });
+  root.innerHTML = alerts.length ? alerts.slice(0, 20).map((item) => `<div class="ba-notice ${item.tone}"><strong>${esc(item.title)}</strong><span>${esc(item.text)}</span></div>`).join("") : `<div class="ba-notice good"><strong>Plan ready</strong><span>No vehicle risks or allocation conflicts found.</span></div>`;
 }
 
 async function saveField(dutyId, field, value) {
@@ -382,9 +407,11 @@ function startListeners() {
   unsubscribeDuties?.();
   unsubscribeDuties = listenDutySpansByDate(selectedDate, (items) => { duties = items || []; renderTable(); }, (error) => toast(error?.message || "Unable to load duties", true));
   if (!unsubscribeBuses) unsubscribeBuses = onSnapshot(collection(db, "buses"), (snapshot) => { buses = snapshot.docs.map((item) => ({id:item.id, ...item.data()})); renderControls(); renderTable(); }, (error) => toast(error?.message || "Unable to load fleet", true));
+  if (!unsubscribeDefects) unsubscribeDefects = onSnapshot(collection(db, "defectReports"), (snapshot) => { defects = snapshot.docs.map((item) => ({id:item.id, ...item.data()})); renderAlerts(); }, (error) => toast(error?.message || "Unable to load defect alerts", true));
   state.unsubscribeBusAllocation = () => {
     unsubscribeDuties?.(); unsubscribeDuties = null;
     unsubscribeBuses?.(); unsubscribeBuses = null;
+    unsubscribeDefects?.(); unsubscribeDefects = null;
   };
 }
 
