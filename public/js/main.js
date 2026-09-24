@@ -70,6 +70,11 @@ function isAdminEmail(email) {
       state.unsubscribeOperationsDashboard = null;
     }
 
+    if (state.unsubscribeBusAllocation) {
+      state.unsubscribeBusAllocation();
+      state.unsubscribeBusAllocation = null;
+    }
+
     if (state.unsubscribeLegsByShiftId) {
     Object.values(state.unsubscribeLegsByShiftId).forEach((fn) => {
       try {
@@ -359,6 +364,14 @@ export async function go(pageId) {
 
     const mod = await import("./dispatch_board.js?v=15");
     mod.renderDispatchBoardPage();
+    return;
+  }
+
+  if (pageId === "adminBusAllocation") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    const mod = await import("./bus_allocation.js?v=20260924-local-1");
+    mod.renderBusAllocationPage();
     return;
   }
 

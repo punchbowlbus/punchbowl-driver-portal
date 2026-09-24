@@ -142,8 +142,9 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     : [];
 
   const planningItems = isAdmin
-    ? [
+      ? [
         { id: "adminDispatchBoard", label: "Dispatch Board", icon: "map" },
+        { id: "adminBusAllocation", label: "Bus Allocation", icon: "bus-front" },
         { id: "adminBookings", label: "Job Groups", icon: "layers" },
         { id: "adminBlocks", label: "Blocks", icon: "grid" },
         { id: "adminPermanentRuns", label: "Permanent Runs", icon: "repeat" },

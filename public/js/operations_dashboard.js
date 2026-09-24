@@ -286,7 +286,7 @@ function renderTypes(root, duties) {
 }
 
 function renderQuick(root, navigate) {
-  const actions = [["adminDispatchBoard", "Dispatch Board", "Assign jobs and buses"], ["driverMonitor", "Driver Monitor", "Driver status and replies"], ["adminAllJobs", "All Jobs", "Review duty sheets"], ["adminBuses", "Fleet", "Vehicle availability"], ["notice", "Notice Board", "Publish driver notices"]];
+  const actions = [["adminDispatchBoard", "Dispatch Board", "Assign jobs and buses"], ["adminBusAllocation", "Bus Allocation", "Plan daily departures and reliefs"], ["driverMonitor", "Driver Monitor", "Driver status and replies"], ["adminAllJobs", "All Jobs", "Review duty sheets"], ["adminBuses", "Fleet", "Vehicle availability"], ["notice", "Notice Board", "Publish driver notices"]];
   root.innerHTML = actions.map(([page, label, note]) => `<button type="button" data-page="${page}"><strong>${label}</strong><span>${note}</span><b>→</b></button>`).join("");
   root.querySelectorAll("[data-page]").forEach((button) => button.addEventListener("click", () => navigate?.(button.dataset.page)));
 }
