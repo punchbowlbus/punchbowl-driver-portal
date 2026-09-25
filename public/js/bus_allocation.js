@@ -10,18 +10,22 @@ import { els } from "./ui.js";
 
 const TURNAROUND_MINUTES = 20;
 const ACTIVE_DUTY_STATUSES = new Set(["assigned", "pending"]);
-const UNAVAILABLE_BUS_STATUSES = new Set(["workshop", "out of service", "inactive", "restricted"]);
+const OPERATIONAL_BLOCK_STATUSES = new Set(["out of service", "inactive", "restricted"]);
+const STARTED_WORKSHOP_STATUSES = new Set(["in progress", "waiting parts", "waiting approval"]);
 const REQUIRED_DEPOTS = ["Goulburn"];
 const EXCLUDED_DEPOT_KEYS = new Set(["olympicpark"]);
 
 let duties = [];
 let buses = [];
 let defects = [];
+let workshopJobs = [];
+let workshopJobsLoaded = false;
 let selectedDate = localDate();
 let depotFilter = "";
 let unsubscribeDuties = null;
 let unsubscribeBuses = null;
 let unsubscribeDefects = null;
+let unsubscribeWorkshopJobs = null;
 let busy = false;
 
 const clean = (value) => String(value ?? "").trim();
@@ -110,16 +114,50 @@ function busMeetsRequirement(bus, requirement) {
   return true;
 }
 
+function jobFleetNo(job) {
+  return clean(job?.fleetNumber || job?.busNumber);
+}
+
+function jobMatchesBus(job, bus) {
+  return (clean(job?.busId) && clean(job.busId) === clean(bus?.id)) ||
+    (jobFleetNo(job) && norm(jobFleetNo(job)) === norm(fleetNo(bus)));
+}
+
+function activeWorkshopJobForBus(bus) {
+  return workshopJobs.find((job) => job?.deleted !== true && STARTED_WORKSHOP_STATUSES.has(norm(job?.status)) && jobMatchesBus(job, bus));
+}
+
+function defectMatchesBus(defect, bus) {
+  return (clean(defect?.busId) && clean(defect.busId) === clean(bus?.id)) ||
+    (clean(defect?.fleetNumber) && norm(defect.fleetNumber) === norm(fleetNo(bus)));
+}
+
+function defectIsUnsafe(defect) {
+  return norm(defect?.safeToDrive) === "no" || norm(defect?.priority) === "critical";
+}
+
+function unsafeOpenDefectForBus(bus) {
+  return defects.find((defect) => defectIsOpen(defect) && defectIsUnsafe(defect) && defectMatchesBus(defect, bus));
+}
+
 function availableBus(bus) {
-  return !UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus)));
+  const status = norm(busStatus(bus));
+  if (OPERATIONAL_BLOCK_STATUSES.has(status)) return false;
+  if (status === "workshop" && !workshopJobsLoaded) return false;
+  if (activeWorkshopJobForBus(bus)) return false;
+  if (unsafeOpenDefectForBus(bus)) return false;
+  return true;
 }
 
 function unavailableStatusLabel(bus) {
   const status = norm(busStatus(bus));
-  if (status === "workshop") return "In Workshop";
   if (status === "out of service") return "Out of Service";
   if (status === "restricted") return "Restricted";
   if (status === "inactive") return "Inactive";
+  const job = activeWorkshopJobForBus(bus);
+  if (job) return `Workshop job started${clean(job.jobNumber) ? ` — ${clean(job.jobNumber)}` : ""}`;
+  const defect = unsafeOpenDefectForBus(bus);
+  if (defect) return `Unsafe open defect — ${clean(defect.category || defect.description || "Vehicle defect")}`;
   return busStatus(bus);
 }
 
@@ -337,14 +375,16 @@ function renderAlerts() {
   const root = document.getElementById("baAlerts");
   if (!root) return;
   const list = visibleDuties();
-  const unavailable = buses.filter((bus) => busMatchesSelectedDepot(bus) && UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus))));
+  const unavailable = buses.filter((bus) => busMatchesSelectedDepot(bus) && !availableBus(bus));
   const alerts = [];
   list.forEach((duty) => dutyConflicts(duty).filter((message) => !/not allocated/i.test(message)).forEach((message) => alerts.push({tone:"bad", title:duty.dutyNumber || duty.driverName || "Duty", text:message})));
   unavailable.forEach((bus) => alerts.push({tone:"bad", title:fleetNo(bus), text:`Unavailable — ${unavailableStatusLabel(bus)}`}));
-  defects.filter((defect) => defectIsOpen(defect) && defectMatchesSelectedDepot(defect)).forEach((defect) => {
-    const unsafe = norm(defect.safeToDrive) === "no" || norm(defect.priority) === "critical";
-    const detail = clean(defect.category || defect.description || "Vehicle defect");
-    alerts.push({tone:unsafe ? "bad" : "warn", title:defectFleetNo(defect), text:`Open defect: ${detail} · ${clean(defect.status || "New")}`});
+  defects.filter((defect) => defectIsOpen(defect) && defectIsUnsafe(defect) && defectMatchesSelectedDepot(defect)).forEach((defect) => {
+    const busAlreadyListed = unavailable.some((bus) => defectMatchesBus(defect, bus));
+    if (!busAlreadyListed) {
+      const detail = clean(defect.category || defect.description || "Vehicle defect");
+      alerts.push({tone:"bad", title:defectFleetNo(defect), text:`Unsafe open defect — ${detail} · ${clean(defect.status || "New")}`});
+    }
   });
   root.innerHTML = alerts.length ? alerts.slice(0, 20).map((item) => `<div class="ba-notice ${item.tone}"><strong>${esc(item.title)}</strong><span>${esc(item.text)}</span></div>`).join("") : `<div class="ba-notice good"><strong>Plan ready</strong><span>No vehicle risks or allocation conflicts found.</span></div>`;
 }
@@ -454,11 +494,18 @@ function startListeners() {
   unsubscribeDuties?.();
   unsubscribeDuties = listenDutySpansByDate(selectedDate, (items) => { duties = items || []; renderTable(); }, (error) => toast(error?.message || "Unable to load duties", true));
   if (!unsubscribeBuses) unsubscribeBuses = onSnapshot(collection(db, "buses"), (snapshot) => { buses = snapshot.docs.map((item) => ({id:item.id, ...item.data()})); renderControls(); renderTable(); }, (error) => toast(error?.message || "Unable to load fleet", true));
-  if (!unsubscribeDefects) unsubscribeDefects = onSnapshot(collection(db, "defectReports"), (snapshot) => { defects = snapshot.docs.map((item) => ({id:item.id, ...item.data()})); renderAlerts(); }, (error) => toast(error?.message || "Unable to load defect alerts", true));
+  if (!unsubscribeDefects) unsubscribeDefects = onSnapshot(collection(db, "defectReports"), (snapshot) => { defects = snapshot.docs.map((item) => ({id:item.id, ...item.data()})); renderTable(); }, (error) => toast(error?.message || "Unable to load defect alerts", true));
+  if (!unsubscribeWorkshopJobs) unsubscribeWorkshopJobs = onSnapshot(collection(db, "workshopJobs"), (snapshot) => {
+    workshopJobs = snapshot.docs.map((item) => ({id:item.id, ...item.data()}));
+    workshopJobsLoaded = true;
+    renderTable();
+  }, (error) => toast(error?.message || "Unable to load workshop job status", true));
   state.unsubscribeBusAllocation = () => {
     unsubscribeDuties?.(); unsubscribeDuties = null;
     unsubscribeBuses?.(); unsubscribeBuses = null;
     unsubscribeDefects?.(); unsubscribeDefects = null;
+    unsubscribeWorkshopJobs?.(); unsubscribeWorkshopJobs = null;
+    workshopJobsLoaded = false;
   };
 }
 
