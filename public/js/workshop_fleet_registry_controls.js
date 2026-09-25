@@ -35,6 +35,8 @@ const OPTIONAL_COLUMN_MAP = new Map(OPTIONAL_COLUMNS.map((column) => [column.key
 const NUMERIC_COLUMN_KEYS = new Set(["odometer","year","seat-capacity","standing-capacity","cctv","tare","gvm"]);
 
 let buses = [];
+let workshopJobs = [];
+let workshopJobsLoaded = false;
 let sortState = {key:"fleet", direction:"asc"};
 let refreshTimer = null;
 let tableObserver = null;
@@ -95,8 +97,23 @@ function injectStyles() {
 }
 
 function optionValues(field) {
-  return [...new Set(buses.map((bus) => String(bus?.[field] || "").trim()).filter(Boolean))]
+  return [...new Set(buses.map((bus) => String(field === "status" ? effectiveBusStatus(bus) : bus?.[field] || "").trim()).filter(Boolean))]
     .sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
+}
+
+const STARTED_WORKSHOP_JOB_STATUSES = new Set(["in progress", "waiting parts", "waiting approval"]);
+
+function jobMatchesBus(job, bus) {
+  return (String(job?.busId || "").trim() && String(job.busId).trim() === String(bus?.id || "").trim()) ||
+    (String(job?.fleetNumber || job?.busNumber || "").trim().toLowerCase() === norm(fleetNo(bus)));
+}
+
+function effectiveBusStatus(bus) {
+  const stored = String(bus?.status || "Active").trim();
+  if (!workshopJobsLoaded) return stored;
+  const hasStartedJob = workshopJobs.some((job) => job?.deleted !== true && STARTED_WORKSHOP_JOB_STATUSES.has(norm(job?.status)) && jobMatchesBus(job, bus));
+  if (hasStartedJob) return norm(stored) === "out of service" ? "Out of Service" : "Workshop";
+  return norm(stored) === "workshop" ? "Active" : stored;
 }
 
 function fillSelect(select, values, placeholder) {
@@ -280,7 +297,7 @@ function applyFilters() {
     const bus = busForRow(row);
     if (!bus) return;
     const matches = (!depot || String(bus.depot || "") === depot)
-      && (!status || String(bus.status || "") === status)
+      && (!status || effectiveBusStatus(bus) === status)
       && (!fuel || String(bus.fuelType || bus.fuel || "") === fuel)
       && (!maintenance || maintenanceClass(row) === maintenance);
     row.dataset.fleetFiltered = matches ? "false" : "true";
@@ -399,6 +416,12 @@ function observeTable() {
 
 onSnapshot(collection(db, "buses"), (snapshot) => {
   buses = snapshot.docs.map((item) => ({id:item.id, ...item.data()}));
+  scheduleRefresh();
+});
+
+onSnapshot(collection(db, "workshopJobs"), (snapshot) => {
+  workshopJobs = snapshot.docs.map((item) => ({id:item.id, ...item.data()}));
+  workshopJobsLoaded = true;
   scheduleRefresh();
 });
 

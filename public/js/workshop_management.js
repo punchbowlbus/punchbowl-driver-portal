@@ -36,6 +36,7 @@ const els = {
 let currentUser = null;
 let buses = [];
 let workshopJobs = [];
+let workshopJobsLoaded = false;
 let odometerReadings = [];
 let unsubscribers = [];
 const JOB_STATUSES = ["New", "Assigned", "In Progress", "Waiting Parts", "Waiting Approval", "Completed", "Closed", "Cancelled"];
@@ -218,14 +219,31 @@ function populateBusSelects() {
   els.jobBus.innerHTML = `<option value="">Select bus</option>${options}`;
 }
 
+const STARTED_WORKSHOP_JOB_STATUSES = new Set(["in progress", "waiting parts", "waiting approval"]);
+
+function jobMatchesBus(job, bus) {
+  return (String(job?.busId || "").trim() && String(job.busId).trim() === String(bus?.id || "").trim()) ||
+    (String(job?.fleetNumber || job?.busNumber || "").trim().toLowerCase() === String(fleetNo(bus)).trim().toLowerCase());
+}
+
+function effectiveBusStatus(bus) {
+  const stored = String(bus?.status || "Active").trim();
+  if (!workshopJobsLoaded) return stored;
+  const hasStartedJob = workshopJobs.some((job) => job?.deleted !== true && STARTED_WORKSHOP_JOB_STATUSES.has(String(job?.status || "").trim().toLowerCase()) && jobMatchesBus(job, bus));
+  if (hasStartedJob) return /^out of service$/i.test(stored) ? "Out of Service" : "Workshop";
+  return /^workshop$/i.test(stored) ? "Active" : stored;
+}
+
 function renderFleet() {
   const term = String(els.fleetSearch.value || "").trim().toLowerCase();
   const list = buses.filter((b) => [
-    fleetNo(b), b.rego, b.make, b.model, b.depot, b.status,
+    fleetNo(b), b.rego, b.make, b.model, b.depot, effectiveBusStatus(b),
     b.fuelType, b.fuel, b.vin, b.accessType, b.bodyBy, b.bodyModel
   ].some((v) => String(v || "").toLowerCase().includes(term)));
   if (!list.length) { els.fleetTableBody.innerHTML = `<tr><td colspan="9"><div class="empty">No matching vehicles.</div></td></tr>`; return; }
-  els.fleetTableBody.innerHTML = list.map((b) => `
+  els.fleetTableBody.innerHTML = list.map((b) => {
+    const status = effectiveBusStatus(b);
+    return `
     <tr>
       <td><strong>${esc(fleetNo(b))}</strong></td>
       <td>${esc(b.rego || "—")}</td>
@@ -234,9 +252,10 @@ function renderFleet() {
       <td>${esc(fmtKm(currentOdo(b)))}</td>
       <td>${serviceBadge(b)}</td>
       <td>${airConditioningBadge(b)}</td>
-      <td><span class="badge ${/out of service/i.test(b.status || "") ? "bad" : /workshop/i.test(b.status || "") ? "warn" : "good"}">${esc(b.status || "Active")}</span></td>
+      <td><span class="badge ${/out of service/i.test(status) ? "bad" : /workshop/i.test(status) ? "warn" : "good"}">${esc(status)}</span></td>
       <td><button class="button secondary" data-odo-bus="${esc(busId(b))}">Update km</button></td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
   els.fleetTableBody.querySelectorAll("[data-odo-bus]").forEach((btn) => btn.addEventListener("click", () => {
     switchView("odometer"); els.odometerBus.value = btn.dataset.odoBus; syncPreviousOdometer();
   }));
@@ -251,7 +270,7 @@ function renderDashboard() {
   const openJobs = workshopJobs.filter((j) => !["Completed","Closed","Cancelled"].includes(j.status));
   const regoStates = buses.map(regoState);
   els.metricFleet.textContent = buses.length;
-  els.metricWorkshop.textContent = buses.filter((b) => /workshop/i.test(b.status || "")).length;
+  els.metricWorkshop.textContent = buses.filter((b) => /^workshop$/i.test(effectiveBusStatus(b))).length;
   els.metricOut.textContent = buses.filter((b) => /out of service/i.test(b.status || "")).length;
   els.metricOpenJobs.textContent = openJobs.length;
   els.metricDueSoon.textContent = dueSoon.length + planning.length + airconDue.filter((item) => !item.state.overdue).length;
@@ -442,9 +461,9 @@ function startListeners() {
   }, (err) => showStatus(err?.message || "Unable to load fleet.", "error")));
 
   unsubscribers.push(onSnapshot(query(collection(db,"workshopJobs"), orderBy("createdAt","desc"), limit(200)), (snap) => {
-    workshopJobs = snap.docs.map((d) => ({id:d.id,...d.data()})); renderJobs(); renderDashboard();
+    workshopJobs = snap.docs.map((d) => ({id:d.id,...d.data()})); workshopJobsLoaded = true; renderJobs(); renderFleet(); renderDashboard();
   }, (err) => {
-    console.error(err); workshopJobs = []; renderJobs(); renderDashboard(); showStatus("Workshop jobs could not be loaded. Check Firestore permissions for workshopJobs.", "error");
+    console.error(err); workshopJobs = []; workshopJobsLoaded = false; renderJobs(); renderFleet(); renderDashboard(); showStatus("Workshop jobs could not be loaded. Check Firestore permissions for workshopJobs.", "error");
   }));
 
   unsubscribers.push(onSnapshot(query(collection(db,"odometerReadings"), orderBy("createdAt","desc"), limit(100)), (snap) => {
