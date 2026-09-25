@@ -114,6 +114,15 @@ function availableBus(bus) {
   return !UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus)));
 }
 
+function unavailableStatusLabel(bus) {
+  const status = norm(busStatus(bus));
+  if (status === "workshop") return "In Workshop";
+  if (status === "out of service") return "Out of Service";
+  if (status === "restricted") return "Restricted";
+  if (status === "inactive") return "Inactive";
+  return busStatus(bus);
+}
+
 function defectIsOpen(defect) {
   if (defect?.deleted === true) return false;
   const status = norm(defect?.status || "New");
@@ -293,7 +302,7 @@ function renderAlerts() {
   const unavailable = buses.filter((bus) => busMatchesSelectedDepot(bus) && UNAVAILABLE_BUS_STATUSES.has(norm(busStatus(bus))));
   const alerts = [];
   list.forEach((duty) => dutyConflicts(duty).filter((message) => !/not allocated/i.test(message)).forEach((message) => alerts.push({tone:"bad", title:duty.dutyNumber || duty.driverName || "Duty", text:message})));
-  unavailable.forEach((bus) => alerts.push({tone:"bad", title:fleetNo(bus), text:`Excluded automatically: ${busStatus(bus)}`}));
+  unavailable.forEach((bus) => alerts.push({tone:"bad", title:fleetNo(bus), text:`Unavailable — ${unavailableStatusLabel(bus)}`}));
   defects.filter((defect) => defectIsOpen(defect) && defectMatchesSelectedDepot(defect)).forEach((defect) => {
     const unsafe = norm(defect.safeToDrive) === "no" || norm(defect.priority) === "critical";
     const detail = clean(defect.category || defect.description || "Vehicle defect");
