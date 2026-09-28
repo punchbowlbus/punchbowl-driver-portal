@@ -114,6 +114,18 @@ function normalizeDate(value) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+function shiftServiceDate(value, days) {
+  const [year, month, day] = String(value || "").split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  date.setDate(date.getDate() + days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function durationText(minutes) {
+  const safe = Math.max(0, Math.round(minutes));
+  return `${Math.floor(safe / 60)}h ${String(safe % 60).padStart(2, "0")}m`;
+}
+
 function timeToMin(value) {
   const input = String(value || "").trim();
   if (!/^\d{1,2}:\d{2}$/.test(input)) return NaN;
@@ -529,8 +541,9 @@ export async function renderBulkDutySpansPage() {
       });
 
       const validDates = [...new Set(processedRows.map((row) => row.serviceDate).filter(Boolean))];
+      const lookupDates = [...new Set(validDates.flatMap((date) => [date, shiftServiceDate(date, -1)]))];
       const existingSpans = [];
-      for (const dateChunk of chunk(validDates, 10)) {
+      for (const dateChunk of chunk(lookupDates, 10)) {
         const snapshot = await getDocs(query(collection(db, "dutySpans"), where("serviceDate", "in", dateChunk)));
         snapshot.docs.forEach((item) => existingSpans.push({id: item.id, ...item.data()}));
       }
@@ -566,6 +579,24 @@ export async function renderBulkDutySpansPage() {
             row.errors.push("Duty span overlaps another shift for this driver on this date.");
           }
         }
+      });
+
+      const activeExisting = existingSpans.filter((span) => !span.deleted && !["cancelled", "canceled"].includes(String(span.dispatchStatus || "").toLowerCase()));
+      const rosterRows = [...activeExisting, ...processedRows.filter((row) => !row.errors.length && !row.duplicate)];
+      processedRows.filter((row) => !row.errors.length && !row.duplicate).forEach((row) => {
+        const sameDayRows = rosterRows.filter((item) => String(item.driverEmployeeNumber || "").trim() === row.driverEmployeeNumber && item.serviceDate === row.serviceDate);
+        const firstStart = Math.min(...sameDayRows.map((item) => Number(item.startMin || 0)));
+        if (Number(row.startMin) !== firstStart) return;
+        const previousDate = shiftServiceDate(row.serviceDate, -1);
+        const previousRows = rosterRows.filter((item) => String(item.driverEmployeeNumber || "").trim() === row.driverEmployeeNumber && item.serviceDate === previousDate);
+        if (!previousRows.length) return;
+        const previousFinal = previousRows.reduce((latest, item) => !latest || Number(item.endMin || 0) > Number(latest.endMin || 0) ? item : latest, null);
+        const restMinutes = 1440 + Number(row.startMin || 0) - Number(previousFinal.endMin || 0);
+        if (restMinutes >= 480) return;
+        const warning = `Company 8-hour turnaround breach: previous duty ${previousFinal.dutyNumber || previousFinal.dutyType || "Duty"} finishes ${minToTime(previousFinal.endMin)} on ${previousDate}; next duty starts ${minToTime(row.startMin)}. Rest ${durationText(restMinutes)}, shortfall ${durationText(480 - restMinutes)}.`;
+        row.warnings.push(warning);
+        row.fatigueStatus = "BREACH";
+        row.fatigueWarning = [row.fatigueWarning, warning].filter(Boolean).join(" ");
       });
 
       renderPreview();
