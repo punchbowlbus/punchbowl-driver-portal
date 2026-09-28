@@ -3,6 +3,7 @@ import {
   listenBuses,
   listenBlocksByDate,
   listenDutySpansByDate,
+  getDutySpansByDriverAndDate,
   listenJobGroups,
   addDutySpan,
   updateDutySpan,
@@ -352,6 +353,16 @@ const selectedDriverEmpNos = new Set();
 
   function getSelectedDate() {
     return String(dispatchDateEl?.value || "").trim();
+  }
+
+  function shiftServiceDate(value, days) {
+    const [year, month, day] = String(value || "").split("-").map(Number);
+    const date = new Date(year, month - 1, day, 12);
+    date.setDate(date.getDate() + days);
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
   }
 
   function getActiveDrivers() {
@@ -1497,6 +1508,33 @@ function renderDriverDetail(driver) {
         endMin,
         breaks
       });
+      let turnaroundWarning = "";
+      try {
+        const serviceDate = getSelectedDate();
+        const previousDate = shiftServiceDate(serviceDate, -1);
+        const previousDuties = await getDutySpansByDriverAndDate(empNo, previousDate);
+        const previousFinalDuty = previousDuties.reduce((latest, duty) =>
+          !latest || Number(duty.endMin || 0) > Number(latest.endMin || 0) ? duty : latest, null);
+        if (previousFinalDuty) {
+          const restMinutes = 1440 + startMin - Number(previousFinalDuty.endMin || 0);
+          if (restMinutes < 8 * 60) {
+            const safeRest = Math.max(0, restMinutes);
+            const shortfall = 8 * 60 - restMinutes;
+            const formatDuration = (minutes) => `${Math.floor(Math.max(0, minutes) / 60)}h ${String(Math.max(0, minutes) % 60).padStart(2, "0")}m`;
+            turnaroundWarning = `Company 8-hour turnaround breach. Previous duty ${previousFinalDuty.dutyNumber || previousFinalDuty.dutyType || "Duty"} finished at ${minToTimeStr(previousFinalDuty.endMin)} on ${previousDate}. Next duty starts at ${minToTimeStr(startMin)}. Rest available: ${formatDuration(safeRest)}. Shortfall: ${formatDuration(shortfall)}.`;
+            const proceed = await confirmDispatchAction({
+              title: "8-hour turnaround breach",
+              message: `<p>This driver does not have the required company turnaround before the next duty.</p><div class="dispatch-confirm-warning">${escapeHtml(turnaroundWarning)}</div><p>Choose <strong>Save for Review</strong> only if a manager will review this roster.</p>`,
+              confirmLabel: "Save for Review",
+              tone: "danger"
+            });
+            if (!proceed) return;
+          }
+        }
+      } catch (error) {
+        showError(error?.message || "Unable to check the previous-day turnaround. Duty was not saved.");
+        return;
+      }
       if (fatigue.fatigueStatus === "BREACH") {
         const proceed = await confirmDispatchAction({
           title: "Fatigue breach detected",
@@ -1529,8 +1567,8 @@ function renderDriverDetail(driver) {
           totalSpanMinutes: fatigue.totalSpanMinutes,
           unpaidMinutes: fatigue.unpaidMinutes,
           paidMinutes: fatigue.paidMinutes,
-          fatigueStatus: fatigue.fatigueStatus,
-          fatigueWarning: fatigue.fatigueWarning
+          fatigueStatus: turnaroundWarning ? "BREACH" : fatigue.fatigueStatus,
+          fatigueWarning: [fatigue.fatigueWarning, turnaroundWarning].filter(Boolean).join(" ")
         };
 
         if (editingSpanId) {
