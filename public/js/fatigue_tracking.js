@@ -64,6 +64,62 @@ function dutyStatus(value) {
   return String(value || "Pending").trim().toLowerCase();
 }
 
+function scheduledWorkMinutes(duty) {
+  const span = Math.max(0, Number(duty.endMin || 0) - Number(duty.startMin || 0));
+  const rest = (Array.isArray(duty.breaks) ? duty.breaks : []).reduce((sum, item) =>
+    sum + Math.max(0, Number(item.endMin || 0) - Number(item.startMin || 0)), 0);
+  return Math.max(0, span - rest);
+}
+
+function dateDistance(first, second) {
+  const [fy, fm, fd] = String(first).split("-").map(Number);
+  const [sy, sm, sd] = String(second).split("-").map(Number);
+  return Math.round((Date.UTC(sy, sm - 1, sd) - Date.UTC(fy, fm - 1, fd)) / 86400000);
+}
+
+export function calculateStandardHoursAlerts(duties, range) {
+  const active = (duties || []).filter((duty) => duty.deleted !== true && !["cancelled", "canceled"].includes(dutyStatus(duty.dispatchStatus)));
+  const byDriver = new Map();
+  active.forEach((duty) => {
+    const employeeNumber = String(duty.driverEmployeeNumber || "").trim();
+    if (!employeeNumber) return;
+    if (!byDriver.has(employeeNumber)) byDriver.set(employeeNumber, []);
+    byDriver.get(employeeNumber).push(duty);
+  });
+  const alerts = [];
+  byDriver.forEach((driverDuties, employeeNumber) => {
+    const name = String(driverDuties[0]?.driverName || employeeNumber).trim();
+    const days = [...new Set(driverDuties.map((duty) => String(duty.serviceDate || "")))].sort();
+    const workByDate = new Map();
+    driverDuties.forEach((duty) => workByDate.set(duty.serviceDate, (workByDate.get(duty.serviceDate) || 0) + scheduledWorkMinutes(duty)));
+    let runStart = 0;
+    for (let index = 1; index <= days.length; index += 1) {
+      if (index < days.length && dateDistance(days[index - 1], days[index]) === 1) continue;
+      const run = days.slice(runStart, index);
+      const reviewDate = run[run.length - 1];
+      const dailyEdges = run.map((date) => {
+        const dayDuties = driverDuties.filter((duty) => duty.serviceDate === date);
+        return {
+          first: Math.min(...dayDuties.map((duty) => absoluteMinute(duty, "start"))),
+          last: Math.max(...dayDuties.map((duty) => absoluteMinute(duty, "end")))
+        };
+      });
+      const has24HourRest = dailyEdges.some((day, edgeIndex) => edgeIndex > 0 && day.first - dailyEdges[edgeIndex - 1].last >= 24 * 60);
+      if (run.length >= 7 && !has24HourRest && reviewDate >= range.start && reviewDate <= range.end) alerts.push({ employeeNumber, driverName: name, date: reviewDate, rule: "24-hour rest in 7 days", detail: `${run.length} consecutive scheduled working days with no 24-hour continuous rest between duties.` });
+      runStart = index;
+    }
+    days.filter((date) => date >= range.start && date <= range.end).forEach((date) => {
+      const work7 = days.filter((item) => dateDistance(item, date) >= 0 && dateDistance(item, date) < 7).reduce((sum, item) => sum + (workByDate.get(item) || 0), 0);
+      const work14 = days.filter((item) => dateDistance(item, date) >= 0 && dateDistance(item, date) < 14).reduce((sum, item) => sum + (workByDate.get(item) || 0), 0);
+      if (work7 > 72 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "72-hour limit in 7 days", detail: `${durationLabel(work7)} scheduled work in the preceding 7 days.` });
+      if (work14 > 144 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "144-hour limit in 14 days", detail: `${durationLabel(work14)} scheduled work in the preceding 14 days.` });
+    });
+  });
+  const unique = new Map();
+  alerts.forEach((item) => unique.set(`${item.employeeNumber}|${item.rule}`, item));
+  return [...unique.values()].sort((a, b) => b.date.localeCompare(a.date));
+}
+
 export function calculateTurnarounds(duties) {
   const active = (duties || []).filter((duty) =>
     duty.deleted !== true && !["cancelled", "canceled"].includes(dutyStatus(duty.dispatchStatus))
@@ -138,7 +194,7 @@ export function calculateTurnarounds(duties) {
   return results.sort((a, b) => absoluteMinute(a.next, "start") - absoluteMinute(b.next, "start"));
 }
 
-function renderPage(results, range, search = "", filter = "all") {
+function renderPage(results, standardAlerts, range, search = "", filter = "all") {
   const normalizedSearch = search.trim().toLowerCase();
   const visible = results.filter((item) => {
     if (item.next.serviceDate < range.start || item.next.serviceDate > range.end) return false;
@@ -188,6 +244,12 @@ function renderPage(results, range, search = "", filter = "all") {
       <td><strong>${escapeHtml(message)}</strong><small>Company rule: minimum 8h</small></td>
     </tr>`;
   }).join("");
+
+  const standardBody = document.getElementById("ftStandardRows");
+  if (standardBody) {
+    const matching = standardAlerts.filter((item) => !normalizedSearch || [item.driverName, item.employeeNumber, item.rule].join(" ").toLowerCase().includes(normalizedSearch));
+    standardBody.innerHTML = matching.length ? matching.map((item) => `<tr><td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(item.rule)}</strong><small>General Standard Hours</small></td><td>${dateLabel(item.date)}</td><td><span class="ft-status breach">REVIEW</span></td><td><strong>${escapeHtml(item.detail)}</strong></td></tr>`).join("") : `<tr><td colspan="5"><div class="ft-empty ft-empty-small"><strong>No General Standard Hours alerts</strong></div></td></tr>`;
+  }
 }
 
 export function renderFatigueTrackingPage() {
@@ -195,6 +257,7 @@ export function renderFatigueTrackingPage() {
   const root = els.contentArea;
   const range = { start: localDate(0), end: localDate(14) };
   let results = [];
+  let standardAlerts = [];
 
   root.innerHTML = `<section class="ft-page">
     <header class="ft-head"><div><span>SAFETY & COMPLIANCE</span><h1>Fatigue Tracking</h1><p>Review planned work, consecutive-duty rest and company turnaround compliance.</p></div><div class="ft-rule"><small>COMPANY TURNAROUND</small><strong>Minimum 8 hours</strong></div></header>
@@ -206,7 +269,8 @@ export function renderFatigueTrackingPage() {
       <button id="ftRefresh" type="button">Refresh</button>
     </section>
     <section id="ftMetrics" class="ft-metrics"></section>
-    <div class="ft-note"><strong>Planning control:</strong> this page assesses scheduled duty spans. It does not replace an approved work diary or a driver fitness-for-duty assessment.</div>
+    <div class="ft-note"><strong>Rule profile:</strong> General Standard Hours — Solo Driver, plus the company 8-hour turnaround rule. This planning view uses scheduled duties and does not replace a work diary.</div>
+    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>General Standard Hours alerts</h2><span>Consecutive workdays and rolling 7-day and 14-day scheduled work.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
     <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Compares each working day's final finish with the driver's next working-day start. Same-day overlaps appear as conflicts.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
       <div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Previous duty</th><th>Finished</th><th>Rest available</th><th>Next start</th><th>Next duty</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftRows"><tr><td colspan="8"><div class="ft-empty">Loading fatigue records…</div></td></tr></tbody></table></div>
     </section>
@@ -217,7 +281,7 @@ export function renderFatigueTrackingPage() {
   const searchInput = document.getElementById("ftSearch");
   const filterInput = document.getElementById("ftFilter");
 
-  const redraw = () => renderPage(results, range, searchInput.value, filterInput.value);
+  const redraw = () => renderPage(results, standardAlerts, range, searchInput.value, filterInput.value);
   const subscribe = () => {
     if (state.unsubscribeFatigueTracking) state.unsubscribeFatigueTracking();
     range.start = startInput.value;
@@ -227,8 +291,8 @@ export function renderFatigueTrackingPage() {
       return;
     }
     state.unsubscribeFatigueTracking = listenDutySpansByDateRange(
-      shiftDate(range.start, -1), range.end,
-      (duties) => { results = calculateTurnarounds(duties); redraw(); },
+      shiftDate(range.start, -14), range.end,
+      (duties) => { results = calculateTurnarounds(duties); standardAlerts = calculateStandardHoursAlerts(duties, range); redraw(); },
       (error) => { document.getElementById("ftRows").innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>Unable to load fatigue data</strong><span>${escapeHtml(error?.message || "Please try again.")}</span></div></td></tr>`; }
     );
   };
