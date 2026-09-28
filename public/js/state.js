@@ -15,5 +15,6 @@ export const state = {
 
   // realtime unsubscribers
   unsubscribeShifts: null,
-  unsubscribeLegsByShiftId: {}
+  unsubscribeLegsByShiftId: {},
+  unsubscribeFatigueTracking: null
 };
