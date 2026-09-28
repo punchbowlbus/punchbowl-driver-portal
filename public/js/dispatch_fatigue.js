@@ -22,7 +22,7 @@ export function calculateFatigue(dutySpan) {
 
   const restBreaks = normalizedBreaks;
 
-  const LIMIT_5H15 = 5 * 60 + 15; // 315
+  const LIMIT_5H30 = 5 * 60 + 30; // 330
   const LIMIT_8H = 8 * 60;        // 480
   const LIMIT_11H = 11 * 60;      // 660
   const LIMIT_12H = 12 * 60;      // 720
@@ -32,7 +32,7 @@ export function calculateFatigue(dutySpan) {
   function restMinutesWithinMinutes(windowMinutes) {
     const windowEnd = start + windowMinutes;
 
-    return restBreaks.reduce((sum, b) => {
+    return restBreaks.filter((b) => b.endMin - b.startMin >= 15).reduce((sum, b) => {
       const overlapStart = Math.max(start, b.startMin);
       const overlapEnd = Math.min(windowEnd, b.endMin);
       return sum + Math.max(0, overlapEnd - overlapStart);
@@ -60,12 +60,12 @@ export function calculateFatigue(dutySpan) {
   );
 
   // Rule results
-  const has15MinWithin5h15m = hasContinuousRestWithinMinutes(LIMIT_5H15, 15);
+  const has15MinWithin5h15m = hasContinuousRestWithinMinutes(LIMIT_5H30, 15);
   const has30MinWithin8h = restMinutesWithinMinutes(LIMIT_8H) >= 30;
   const has60MinWithin11h = restMinutesWithinMinutes(LIMIT_11H) >= 60;
 
   // Threshold flags
-  const reaches5h15 = totalSpanMinutes >= LIMIT_5H15;
+  const reaches5h15 = totalSpanMinutes >= LIMIT_5H30;
   const reaches8h = totalSpanMinutes >= LIMIT_8H;
   const reaches11h = totalSpanMinutes >= LIMIT_11H;
   const reaches12h = totalSpanMinutes >= LIMIT_12H;
@@ -78,7 +78,7 @@ export function calculateFatigue(dutySpan) {
   // Company rule
   const firstBreakOffset = firstBreakStartOffset();
   const hasBreakBy5h15 =
-    firstBreakOffset !== null && firstBreakOffset <= LIMIT_5H15;
+    firstBreakOffset !== null && firstBreakOffset <= LIMIT_5H30;
 
   const requires1HourBreakFor12hShift = reaches12h;
   const has1HourBreakFor12hShift =
@@ -87,10 +87,10 @@ export function calculateFatigue(dutySpan) {
   let fatigueStatus = "OK";
   const warnings = [];
 
-  // LEGAL: 15 min within first 5h 15m
+  // Bus and coach Standard Hours: 15 continuous minutes within 5.5 hours.
   if (reaches5h15 && !has15MinWithin5h15m) {
     fatigueStatus = "BREACH";
-    warnings.push("Need at least 15 min rest within first 5h 15m.");
+    warnings.push("Need at least 15 continuous minutes rest within 5½ hours.");
   }
 
   // LEGAL: 30 min total within first 8h
@@ -116,7 +116,7 @@ export function calculateFatigue(dutySpan) {
     warnings.push("Need at least 7 continuous hours rest in 24 hours.");
   }
 
-  // PRE-WARNING: close to 5h 15m, not yet a breach
+  // PRE-WARNING at 5h 15m, before the 5½-hour legal window closes.
   if (
     !reaches5h15 &&
     totalSpanMinutes >= WARNING_FROM_5H15 &&
@@ -126,7 +126,7 @@ export function calculateFatigue(dutySpan) {
       fatigueStatus = "WARNING";
     }
     warnings.push(
-      "Close to 5h 15m fatigue limit without a 15 min break. If delayed, driver may enter fatigue breach."
+      "Approaching 5½ hours without a 15-minute continuous rest break."
     );
   }
 
@@ -139,7 +139,7 @@ export function calculateFatigue(dutySpan) {
     if (fatigueStatus === "OK") {
       fatigueStatus = "WARNING";
     }
-    warnings.push("Company rule: break required by 5h 15m.");
+    warnings.push("Plan a qualifying rest break before 5½ hours.");
   }
 
   // COMPANY WARNING: 12+ hour shift needs 60 min break
