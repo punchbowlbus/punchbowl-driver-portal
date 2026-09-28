@@ -9,6 +9,7 @@ import {
   updateDoc,
   setDoc,
   getDoc,
+  getDocs,
   writeBatch,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
@@ -416,6 +417,18 @@ export function listenDutySpansByDriverAndDate(driverEmployeeNumber, date, onDat
     },
     onErr
   );
+}
+
+export async function getDutySpansByDriverAndDate(driverEmployeeNumber, date) {
+  if (!driverEmployeeNumber || !date) return [];
+  const qy = query(
+    collection(db, "dutySpans"),
+    where("driverEmployeeNumber", "==", String(driverEmployeeNumber).trim()),
+    where("serviceDate", "==", String(date).trim()),
+    orderBy("startMin", "asc")
+  );
+  const snap = await getDocs(qy);
+  return snap.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.deleted !== true && !["cancelled", "canceled"].includes(String(item.dispatchStatus || "").toLowerCase()));
 }
 
 export function listenDutySpansByDriverAndDateRange(driverEmployeeNumber, startDate, endDate, onData, onErr) {
