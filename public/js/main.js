@@ -367,7 +367,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=15");
+    const mod = await import("./dispatch_board.js?v=16");
     mod.renderDispatchBoardPage();
     return;
   }
