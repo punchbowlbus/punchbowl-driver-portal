@@ -436,7 +436,7 @@ export async function go(pageId) {
     }
 
     if (pageId === "adminBulkDutySpans") {
-      const bulkModule = await import("./bulk_duty_spans.js?v=1");
+      const bulkModule = await import("./bulk_duty_spans.js?v=2");
       await bulkModule.renderBulkDutySpansPage();
       return;
     }
