@@ -363,6 +363,35 @@ export function listenDutySpansByDate(date, onData, onErr) {
   );
 }
 
+export function listenDutySpansByDateRange(startDate, endDate, onData, onErr) {
+  if (!startDate || !endDate) {
+    onData([]);
+    return () => {};
+  }
+
+  const qy = query(
+    collection(db, "dutySpans"),
+    where("serviceDate", ">=", String(startDate)),
+    where("serviceDate", "<=", String(endDate)),
+    orderBy("serviceDate", "asc")
+  );
+
+  return onSnapshot(
+    qy,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true)
+        .sort((a, b) => {
+          const dateCompare = String(a.serviceDate || "").localeCompare(String(b.serviceDate || ""));
+          return dateCompare || Number(a.startMin || 0) - Number(b.startMin || 0);
+        });
+      onData(list);
+    },
+    onErr
+  );
+}
+
 export function listenDutySpansByDriverAndDate(driverEmployeeNumber, date, onData, onErr) {
   if (!driverEmployeeNumber || !date) {
     onData([]);
