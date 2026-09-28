@@ -80,9 +80,48 @@ export function calculateTurnarounds(duties) {
   const results = [];
   byDriver.forEach((driverDuties, employeeNumber) => {
     driverDuties.sort((a, b) => absoluteMinute(a, "start") - absoluteMinute(b, "start"));
-    for (let index = 1; index < driverDuties.length; index += 1) {
-      const previous = driverDuties[index - 1];
-      const next = driverDuties[index];
+
+    const dutiesByDay = new Map();
+    driverDuties.forEach((duty) => {
+      const serviceDate = String(duty.serviceDate || "");
+      if (!dutiesByDay.has(serviceDate)) dutiesByDay.set(serviceDate, []);
+      dutiesByDay.get(serviceDate).push(duty);
+    });
+
+    const workDays = [...dutiesByDay.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([serviceDate, dayDuties]) => {
+        dayDuties.sort((a, b) => absoluteMinute(a, "start") - absoluteMinute(b, "start"));
+
+        for (let index = 1; index < dayDuties.length; index += 1) {
+          const previous = dayDuties[index - 1];
+          const next = dayDuties[index];
+          const overlapMinutes = absoluteMinute(previous, "end") - absoluteMinute(next, "start");
+          if (overlapMinutes > 0) {
+            results.push({
+              employeeNumber,
+              driverName: String(next.driverName || previous.driverName || employeeNumber).trim(),
+              previous,
+              next,
+              restMinutes: -overlapMinutes,
+              status: "overlap",
+              shortfallMinutes: COMPANY_MIN_REST_MINUTES + overlapMinutes
+            });
+          }
+        }
+
+        const firstDuty = dayDuties.reduce((first, duty) =>
+          absoluteMinute(duty, "start") < absoluteMinute(first, "start") ? duty : first
+        );
+        const lastDuty = dayDuties.reduce((last, duty) =>
+          absoluteMinute(duty, "end") > absoluteMinute(last, "end") ? duty : last
+        );
+        return { serviceDate, firstDuty, lastDuty };
+      });
+
+    for (let index = 1; index < workDays.length; index += 1) {
+      const previous = workDays[index - 1].lastDuty;
+      const next = workDays[index].firstDuty;
       const restMinutes = absoluteMinute(next, "start") - absoluteMinute(previous, "end");
       const status = restMinutes < 0 ? "overlap" : restMinutes < COMPANY_MIN_REST_MINUTES ? "breach" : "compliant";
       results.push({
@@ -128,7 +167,7 @@ function renderPage(results, range, search = "", filter = "all") {
   const body = document.getElementById("ftRows");
   if (!body) return;
   if (!visible.length) {
-    body.innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>No matching turnaround records</strong><span>Turnaround checks appear when a driver has two consecutive duties.</span></div></td></tr>`;
+    body.innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>No matching turnaround records</strong><span>Turnaround checks appear when a driver has work on consecutive working days.</span></div></td></tr>`;
     return;
   }
 
@@ -168,7 +207,7 @@ export function renderFatigueTrackingPage() {
     </section>
     <section id="ftMetrics" class="ft-metrics"></section>
     <div class="ft-note"><strong>Planning control:</strong> this page assesses scheduled duty spans. It does not replace an approved work diary or a driver fitness-for-duty assessment.</div>
-    <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Each row compares one duty finish with the driver's next duty start.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
+    <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Compares each working day's final finish with the driver's next working-day start. Same-day overlaps appear as conflicts.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
       <div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Previous duty</th><th>Finished</th><th>Rest available</th><th>Next start</th><th>Next duty</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftRows"><tr><td colspan="8"><div class="ft-empty">Loading fatigue records…</div></td></tr></tbody></table></div>
     </section>
   </section>`;
