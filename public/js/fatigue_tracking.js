@@ -71,6 +71,17 @@ function scheduledWorkMinutes(duty) {
   return Math.max(0, span - rest);
 }
 
+function qualifyingRestWithin(duty, windowMinutes) {
+  const start = Number(duty.startMin || 0);
+  const windowEnd = start + windowMinutes;
+  return (Array.isArray(duty.breaks) ? duty.breaks : []).reduce((sum, item) => {
+    const breakStart = Number(item.startMin || 0);
+    const breakEnd = Number(item.endMin || 0);
+    if (breakEnd - breakStart < 15) return sum;
+    return sum + Math.max(0, Math.min(windowEnd, breakEnd) - Math.max(start, breakStart));
+  }, 0);
+}
+
 function dateDistance(first, second) {
   const [fy, fm, fd] = String(first).split("-").map(Number);
   const [sy, sm, sd] = String(second).split("-").map(Number);
@@ -92,27 +103,53 @@ export function calculateStandardHoursAlerts(duties, range) {
     const days = [...new Set(driverDuties.map((duty) => String(duty.serviceDate || "")))].sort();
     const workByDate = new Map();
     driverDuties.forEach((duty) => workByDate.set(duty.serviceDate, (workByDate.get(duty.serviceDate) || 0) + scheduledWorkMinutes(duty)));
-    let runStart = 0;
-    for (let index = 1; index <= days.length; index += 1) {
-      if (index < days.length && dateDistance(days[index - 1], days[index]) === 1) continue;
-      const run = days.slice(runStart, index);
-      const reviewDate = run[run.length - 1];
-      const dailyEdges = run.map((date) => {
-        const dayDuties = driverDuties.filter((duty) => duty.serviceDate === date);
-        return {
-          first: Math.min(...dayDuties.map((duty) => absoluteMinute(duty, "start"))),
-          last: Math.max(...dayDuties.map((duty) => absoluteMinute(duty, "end")))
-        };
+    const edges = days.map((date) => {
+      const dayDuties = driverDuties.filter((duty) => duty.serviceDate === date);
+      return { date, first: Math.min(...dayDuties.map((duty) => absoluteMinute(duty, "start"))), last: Math.max(...dayDuties.map((duty) => absoluteMinute(duty, "end"))) };
+    });
+    driverDuties.filter((duty) => duty.serviceDate >= range.start && duty.serviceDate <= range.end).forEach((duty) => {
+      const span = Number(duty.endMin || 0) - Number(duty.startMin || 0);
+      const dutyName = String(duty.dutyNumber || duty.dutyType || "Duty");
+      const checks = [
+        { window: 330, needed: 15, rule: "15-minute rest within 5½ hours" },
+        { window: 480, needed: 30, rule: "30-minute rest within 8 hours" },
+        { window: 660, needed: 60, rule: "60-minute rest within 11 hours" }
+      ];
+      checks.forEach((check) => {
+        if (span < check.window) return;
+        const rest = qualifyingRestWithin(duty, check.window);
+        if (rest < check.needed) alerts.push({ employeeNumber, driverName: name, date: duty.serviceDate, rule: check.rule, detail: `${dutyName}: ${rest} qualifying rest minutes recorded; ${check.needed} required.` });
       });
-      const has24HourRest = dailyEdges.some((day, edgeIndex) => edgeIndex > 0 && day.first - dailyEdges[edgeIndex - 1].last >= 24 * 60);
-      if (run.length >= 7 && !has24HourRest && reviewDate >= range.start && reviewDate <= range.end) alerts.push({ employeeNumber, driverName: name, date: reviewDate, rule: "24-hour rest in 7 days", detail: `${run.length} consecutive scheduled working days with no 24-hour continuous rest between duties.` });
-      runStart = index;
-    }
+    });
     days.filter((date) => date >= range.start && date <= range.end).forEach((date) => {
-      const work7 = days.filter((item) => dateDistance(item, date) >= 0 && dateDistance(item, date) < 7).reduce((sum, item) => sum + (workByDate.get(item) || 0), 0);
-      const work14 = days.filter((item) => dateDistance(item, date) >= 0 && dateDistance(item, date) < 14).reduce((sum, item) => sum + (workByDate.get(item) || 0), 0);
-      if (work7 > 72 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "72-hour limit in 7 days", detail: `${durationLabel(work7)} scheduled work in the preceding 7 days.` });
-      if (work14 > 144 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "144-hour limit in 14 days", detail: `${durationLabel(work14)} scheduled work in the preceding 14 days.` });
+      const dayIndex = edges.findIndex((item) => item.date === date);
+      const work24 = workByDate.get(date) || 0;
+      const period7 = edges.filter((item) => dateDistance(item.date, date) >= 0 && dateDistance(item.date, date) < 7);
+      const period28 = edges.filter((item) => dateDistance(item.date, date) >= 0 && dateDistance(item.date, date) < 28);
+      const work28 = period28.reduce((sum, item) => sum + (workByDate.get(item.date) || 0), 0);
+      if (work24 > 12 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "12-hour work limit in 24 hours", detail: `${durationLabel(work24)} scheduled work on this operating day.` });
+      if (dayIndex > 0) {
+        const rest = edges[dayIndex].first - edges[dayIndex - 1].last;
+        if (rest < 7 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "7-hour continuous stationary rest", detail: `Only ${durationLabel(rest)} scheduled rest before this working day.` });
+      }
+      let nightRests = 0;
+      for (let offset = 6; offset >= 0; offset -= 1) {
+        const nightDate = shiftDate(date, -offset);
+        const nightStart = absoluteMinute({ serviceDate: nightDate, startMin: 22 * 60 }, "start");
+        const nightEnd = absoluteMinute({ serviceDate: shiftDate(nightDate, 1), startMin: 8 * 60 }, "start");
+        const work = driverDuties.map((duty) => ({ start: absoluteMinute(duty, "start"), end: absoluteMinute(duty, "end") }))
+          .filter((item) => item.end > nightStart && item.start < nightEnd).sort((a, b) => a.start - b.start);
+        let cursor = nightStart;
+        let longestRest = 0;
+        work.forEach((item) => { longestRest = Math.max(longestRest, Math.max(0, item.start - cursor)); cursor = Math.max(cursor, item.end); });
+        longestRest = Math.max(longestRest, nightEnd - cursor);
+        if (longestRest >= 7 * 60) nightRests += 1;
+      }
+      if (nightRests < 6) alerts.push({ employeeNumber, driverName: name, date, rule: "6 night rests in 7 days", detail: `${nightRests} qualifying scheduled night rest${nightRests === 1 ? "" : "s"} identified.` });
+      if (work28 > 288 * 60) alerts.push({ employeeNumber, driverName: name, date, rule: "288-hour work limit in 28 days", detail: `${durationLabel(work28)} scheduled work in the preceding 28 days.` });
+      let rest24Count = 0;
+      for (let index = 1; index < period28.length; index += 1) rest24Count += Math.floor(Math.max(0, period28[index].first - period28[index - 1].last) / 1440);
+      if (period28.length && rest24Count < 4) alerts.push({ employeeNumber, driverName: name, date, rule: "4 × 24-hour rests in 28 days", detail: `${rest24Count} qualifying 24-hour continuous rest period${rest24Count === 1 ? "" : "s"} identified.` });
     });
   });
   const unique = new Map();
@@ -248,7 +285,7 @@ function renderPage(results, standardAlerts, range, search = "", filter = "all")
   const standardBody = document.getElementById("ftStandardRows");
   if (standardBody) {
     const matching = standardAlerts.filter((item) => !normalizedSearch || [item.driverName, item.employeeNumber, item.rule].join(" ").toLowerCase().includes(normalizedSearch));
-    standardBody.innerHTML = matching.length ? matching.map((item) => `<tr><td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(item.rule)}</strong><small>General Standard Hours</small></td><td>${dateLabel(item.date)}</td><td><span class="ft-status breach">REVIEW</span></td><td><strong>${escapeHtml(item.detail)}</strong></td></tr>`).join("") : `<tr><td colspan="5"><div class="ft-empty ft-empty-small"><strong>No General Standard Hours alerts</strong></div></td></tr>`;
+    standardBody.innerHTML = matching.length ? matching.map((item) => `<tr><td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(item.rule)}</strong><small>Bus and coach Standard Hours</small></td><td>${dateLabel(item.date)}</td><td><span class="ft-status breach">REVIEW</span></td><td><strong>${escapeHtml(item.detail)}</strong></td></tr>`).join("") : `<tr><td colspan="5"><div class="ft-empty ft-empty-small"><strong>No bus and coach Standard Hours alerts</strong></div></td></tr>`;
   }
 }
 
@@ -269,8 +306,8 @@ export function renderFatigueTrackingPage() {
       <button id="ftRefresh" type="button">Refresh</button>
     </section>
     <section id="ftMetrics" class="ft-metrics"></section>
-    <div class="ft-note"><strong>Rule profile:</strong> General Standard Hours — Solo Driver, plus the company 8-hour turnaround rule. This planning view uses scheduled duties and does not replace a work diary.</div>
-    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>General Standard Hours alerts</h2><span>Consecutive workdays and rolling 7-day and 14-day scheduled work.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
+    <div class="ft-note"><strong>Rule profile:</strong> Standard Hours — Solo Driver in the Bus and Coach Sector, plus the company 8-hour turnaround rule. This planning view uses scheduled duties and does not replace a work diary.</div>
+    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>Bus and coach Standard Hours alerts</h2><span>24-hour, 7-day and 28-day scheduled work-and-rest indicators.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
     <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Compares each working day's final finish with the driver's next working-day start. Same-day overlaps appear as conflicts.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
       <div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Previous duty</th><th>Finished</th><th>Rest available</th><th>Next start</th><th>Next duty</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftRows"><tr><td colspan="8"><div class="ft-empty">Loading fatigue records…</div></td></tr></tbody></table></div>
     </section>
@@ -291,7 +328,7 @@ export function renderFatigueTrackingPage() {
       return;
     }
     state.unsubscribeFatigueTracking = listenDutySpansByDateRange(
-      shiftDate(range.start, -14), range.end,
+      shiftDate(range.start, -28), range.end,
       (duties) => { results = calculateTurnarounds(duties); standardAlerts = calculateStandardHoursAlerts(duties, range); redraw(); },
       (error) => { document.getElementById("ftRows").innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>Unable to load fatigue data</strong><span>${escapeHtml(error?.message || "Please try again.")}</span></div></td></tr>`; }
     );
