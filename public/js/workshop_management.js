@@ -219,7 +219,16 @@ function populateBusSelects() {
   els.jobBus.innerHTML = `<option value="">Select bus</option>${options}`;
 }
 
-const STARTED_WORKSHOP_JOB_STATUSES = new Set(["in progress", "waiting parts", "waiting approval"]);
+const STARTED_WORKSHOP_JOB_STATUSES = new Set(["in progress", "waiting approval"]);
+
+function workshopJobBlocksBus(job) {
+  if (job?.deleted === true) return false;
+  const status = String(job?.status || "").trim().toLowerCase();
+  if (STARTED_WORKSHOP_JOB_STATUSES.has(status)) return true;
+  if (status !== "waiting parts") return false;
+  const safeToReturn = String(job?.jobCard?.safeToReturn || job?.safeToReturn || "").trim().toLowerCase();
+  return safeToReturn !== "yes";
+}
 
 function jobMatchesBus(job, bus) {
   return (String(job?.busId || "").trim() && String(job.busId).trim() === String(bus?.id || "").trim()) ||
@@ -229,7 +238,7 @@ function jobMatchesBus(job, bus) {
 function effectiveBusStatus(bus) {
   const stored = String(bus?.status || "Active").trim();
   if (!workshopJobsLoaded) return stored;
-  const hasStartedJob = workshopJobs.some((job) => job?.deleted !== true && STARTED_WORKSHOP_JOB_STATUSES.has(String(job?.status || "").trim().toLowerCase()) && jobMatchesBus(job, bus));
+  const hasStartedJob = workshopJobs.some((job) => workshopJobBlocksBus(job) && jobMatchesBus(job, bus));
   if (hasStartedJob) return /^out of service$/i.test(stored) ? "Out of Service" : "Workshop";
   return /^workshop$/i.test(stored) ? "Active" : stored;
 }
