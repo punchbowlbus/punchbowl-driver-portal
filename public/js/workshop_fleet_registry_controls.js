@@ -101,7 +101,15 @@ function optionValues(field) {
     .sort((a,b) => a.localeCompare(b, undefined, {numeric:true}));
 }
 
-const STARTED_WORKSHOP_JOB_STATUSES = new Set(["in progress", "waiting parts", "waiting approval"]);
+const STARTED_WORKSHOP_JOB_STATUSES = new Set(["in progress", "waiting approval"]);
+
+function workshopJobBlocksBus(job) {
+  if (job?.deleted === true) return false;
+  const status = norm(job?.status);
+  if (STARTED_WORKSHOP_JOB_STATUSES.has(status)) return true;
+  if (status !== "waiting parts") return false;
+  return norm(job?.jobCard?.safeToReturn || job?.safeToReturn) !== "yes";
+}
 
 function jobMatchesBus(job, bus) {
   return (String(job?.busId || "").trim() && String(job.busId).trim() === String(bus?.id || "").trim()) ||
@@ -111,7 +119,7 @@ function jobMatchesBus(job, bus) {
 function effectiveBusStatus(bus) {
   const stored = String(bus?.status || "Active").trim();
   if (!workshopJobsLoaded) return stored;
-  const hasStartedJob = workshopJobs.some((job) => job?.deleted !== true && STARTED_WORKSHOP_JOB_STATUSES.has(norm(job?.status)) && jobMatchesBus(job, bus));
+  const hasStartedJob = workshopJobs.some((job) => workshopJobBlocksBus(job) && jobMatchesBus(job, bus));
   if (hasStartedJob) return norm(stored) === "out of service" ? "Out of Service" : "Workshop";
   return norm(stored) === "workshop" ? "Active" : stored;
 }
