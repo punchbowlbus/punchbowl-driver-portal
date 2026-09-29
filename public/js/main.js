@@ -75,6 +75,11 @@ function isAdminEmail(email) {
       state.unsubscribeBusAllocation = null;
     }
 
+    if (state.unsubscribeFatigueTracking) {
+      state.unsubscribeFatigueTracking();
+      state.unsubscribeFatigueTracking = null;
+    }
+
     if (state.unsubscribeLegsByShiftId) {
     Object.values(state.unsubscribeLegsByShiftId).forEach((fn) => {
       try {
@@ -362,7 +367,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=15");
+    const mod = await import("./dispatch_board.js?v=16");
     mod.renderDispatchBoardPage();
     return;
   }
@@ -431,7 +436,7 @@ export async function go(pageId) {
     }
 
     if (pageId === "adminBulkDutySpans") {
-      const bulkModule = await import("./bulk_duty_spans.js?v=1");
+      const bulkModule = await import("./bulk_duty_spans.js?v=2");
       await bulkModule.renderBulkDutySpansPage();
       return;
     }
@@ -604,6 +609,14 @@ if (pageId === "adminAllJobs") {
     stopAllListeners();
     const mod = await import("./driver_monitor.js?v=1");
     mod.renderDriverMonitorPage();
+    return;
+  }
+
+  if (pageId === "fatigueTracking") {
+    if (!state.isAdmin) return showError("No admin access");
+    stopAllListeners();
+    const mod = await import("./fatigue_tracking.js?v=1");
+    mod.renderFatigueTrackingPage();
     return;
   }
 

@@ -9,6 +9,7 @@ import {
   updateDoc,
   setDoc,
   getDoc,
+  getDocs,
   writeBatch,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
@@ -363,6 +364,35 @@ export function listenDutySpansByDate(date, onData, onErr) {
   );
 }
 
+export function listenDutySpansByDateRange(startDate, endDate, onData, onErr) {
+  if (!startDate || !endDate) {
+    onData([]);
+    return () => {};
+  }
+
+  const qy = query(
+    collection(db, "dutySpans"),
+    where("serviceDate", ">=", String(startDate)),
+    where("serviceDate", "<=", String(endDate)),
+    orderBy("serviceDate", "asc")
+  );
+
+  return onSnapshot(
+    qy,
+    (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((item) => item.deleted !== true)
+        .sort((a, b) => {
+          const dateCompare = String(a.serviceDate || "").localeCompare(String(b.serviceDate || ""));
+          return dateCompare || Number(a.startMin || 0) - Number(b.startMin || 0);
+        });
+      onData(list);
+    },
+    onErr
+  );
+}
+
 export function listenDutySpansByDriverAndDate(driverEmployeeNumber, date, onData, onErr) {
   if (!driverEmployeeNumber || !date) {
     onData([]);
@@ -387,6 +417,18 @@ export function listenDutySpansByDriverAndDate(driverEmployeeNumber, date, onDat
     },
     onErr
   );
+}
+
+export async function getDutySpansByDriverAndDate(driverEmployeeNumber, date) {
+  if (!driverEmployeeNumber || !date) return [];
+  const qy = query(
+    collection(db, "dutySpans"),
+    where("driverEmployeeNumber", "==", String(driverEmployeeNumber).trim()),
+    where("serviceDate", "==", String(date).trim()),
+    orderBy("startMin", "asc")
+  );
+  const snap = await getDocs(qy);
+  return snap.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.deleted !== true && !["cancelled", "canceled"].includes(String(item.dispatchStatus || "").toLowerCase()));
 }
 
 export function listenDutySpansByDriverAndDateRange(driverEmployeeNumber, startDate, endDate, onData, onErr) {

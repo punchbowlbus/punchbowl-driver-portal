@@ -126,6 +126,7 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     ? [
         { id: "adminAllJobs", label: "All Jobs", icon: "list" },
         { id: "driverMonitor", label: "Driver Monitor", icon: "users" },
+        { id: "fatigueTracking", label: "Fatigue Tracking", icon: "clock-3" },
         { id: "operationsDashboard", label: "Operations Dashboard", icon: "bar-chart-3" },
         { id: "notice", label: "Notice Board", icon: "megaphone" },
         { id: "defectReport", label: "Defect Report", icon: "wrench" },

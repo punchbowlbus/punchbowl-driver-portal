@@ -11,7 +11,7 @@ import { els } from "./ui.js";
 const TURNAROUND_MINUTES = 20;
 const ACTIVE_DUTY_STATUSES = new Set(["assigned", "pending"]);
 const OPERATIONAL_BLOCK_STATUSES = new Set(["out of service", "inactive", "restricted"]);
-const STARTED_WORKSHOP_STATUSES = new Set(["in progress", "waiting parts", "waiting approval"]);
+const STARTED_WORKSHOP_STATUSES = new Set(["in progress", "waiting approval"]);
 const REQUIRED_DEPOTS = ["Goulburn"];
 const EXCLUDED_DEPOT_KEYS = new Set(["olympicpark"]);
 
@@ -124,8 +124,17 @@ function jobMatchesBus(job, bus) {
     (jobFleetNo(job) && norm(jobFleetNo(job)) === norm(fleetNo(bus)));
 }
 
+function workshopJobBlocksBus(job) {
+  if (job?.deleted === true) return false;
+  const status = norm(job?.status);
+  if (STARTED_WORKSHOP_STATUSES.has(status)) return true;
+  if (status !== "waiting parts") return false;
+  const safeToReturn = norm(job?.jobCard?.safeToReturn || job?.safeToReturn);
+  return safeToReturn !== "yes";
+}
+
 function activeWorkshopJobForBus(bus) {
-  return workshopJobs.find((job) => job?.deleted !== true && STARTED_WORKSHOP_STATUSES.has(norm(job?.status)) && jobMatchesBus(job, bus));
+  return workshopJobs.find((job) => workshopJobBlocksBus(job) && jobMatchesBus(job, bus));
 }
 
 function defectMatchesBus(defect, bus) {
