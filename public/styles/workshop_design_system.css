@@ -46,20 +46,43 @@
 .status.success {background:#ecfdf3;border-color:#abefc6;color:var(--wds-green-700)}
 .status.error {background:#fef3f2;border-color:#fecdca;color:#b42318}
 
-/* Reports workspace */
-#reportsView {color:var(--wds-navy-950)}
-#reportsView>.page-head {
-  min-height:88px;
-  margin-bottom:18px;
-  padding:20px 22px;
+/* Slim page heading used throughout Workshop. The red top bar remains the
+   primary brand element, so page content does not need a second heavy banner. */
+.main-content .page-head {
+  position:relative;
+  min-height:72px;
+  margin:0 0 16px;
+  padding:16px 18px 16px 22px;
   border:1px solid var(--wds-slate-200);
-  border-left:5px solid var(--wds-red-600);
-  border-radius:var(--wds-radius-lg);
+  border-radius:var(--wds-radius-md);
   background:#fff;
   color:var(--wds-navy-950);
   box-shadow:var(--wds-shadow-sm);
 }
-#reportsView>.page-head h1 {color:var(--wds-navy-950);font-size:27px}
+.main-content .page-head::before {
+  content:"";
+  position:absolute;
+  left:-1px;
+  top:14px;
+  bottom:14px;
+  width:4px;
+  border-radius:0 4px 4px 0;
+  background:var(--wds-red-600);
+}
+.main-content .page-head h1 {color:var(--wds-navy-950);font-size:25px;letter-spacing:-.02em}
+.main-content .page-head p {margin-top:4px;color:var(--wds-slate-500);font-size:12px}
+.main-content .page-head .button.primary {background:var(--wds-navy-900);border-color:var(--wds-navy-900);color:#fff;box-shadow:0 3px 9px rgba(16,47,76,.15)}
+.main-content .page-head .button.primary:hover {background:var(--wds-navy-950);border-color:var(--wds-navy-950)}
+.main-content .page-head .button.secondary {background:#fff;border-color:var(--wds-slate-300);color:var(--wds-slate-700);box-shadow:var(--wds-shadow-sm)}
+.main-content .page-head .button.secondary:hover {background:var(--wds-slate-50);color:var(--wds-navy-950)}
+
+/* Reports workspace */
+#reportsView {color:var(--wds-navy-950)}
+#reportsView>.page-head {
+  min-height:72px;
+  margin-bottom:16px;
+}
+#reportsView>.page-head h1 {color:var(--wds-navy-950);font-size:25px}
 #reportsView>.page-head p {color:var(--wds-slate-500);font-size:13px}
 #reportsView>.page-head .button.secondary {background:#fff;border-color:var(--wds-slate-300);color:var(--wds-slate-700)}
 #reportsView>.page-head .button.secondary:hover {background:var(--wds-slate-50);color:var(--wds-navy-950)}
@@ -198,7 +221,7 @@
   #complianceReportDialog .compliance-detail-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:600px) {
-  #reportsView>.page-head {min-height:auto;padding:17px;flex-direction:column}
+  .main-content .page-head,#reportsView>.page-head {min-height:auto;padding:15px 16px 15px 20px;flex-direction:column}
   #reportsView .report-tabs {display:flex;width:100%}
   #reportsView .report-tabs button {flex:0 0 auto}
   #complianceReportDialog>.dialog-head {padding:16px}
