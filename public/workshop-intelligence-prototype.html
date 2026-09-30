@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Workshop Intelligence Prototype</title>
+  <link rel="stylesheet" href="./styles/workshop_intelligence_prototype.css" />
+</head>
+<body>
+  <div class="wi-shell">
+    <aside class="wi-sidebar">
+      <div class="wi-brand">
+        <div class="wi-brand-mark" aria-hidden="true">PB</div>
+        <div><strong>Punchbowl Bus</strong><span>Fleet Manager</span></div>
+      </div>
+      <nav class="wi-nav" aria-label="Workshop navigation">
+        <a href="#"><span class="wi-nav-icon">⌂</span>Dashboard</a>
+        <a href="#"><span class="wi-nav-icon">▤</span>Fleet Register</a>
+        <a href="#"><span class="wi-nav-icon">◇</span>Workshop Jobs</a>
+        <a href="#"><span class="wi-nav-icon">!</span>Driver Defects</a>
+        <a class="active" href="#"><span class="wi-nav-icon">▥</span>Reports</a>
+        <a href="#"><span class="wi-nav-icon">✓</span>Compliance</a>
+      </nav>
+      <div class="wi-sidebar-footer">
+        <div class="wi-user-avatar">NR</div>
+        <div><strong>Nalin Rajapaksha</strong><span>Fleet Manager</span></div>
+      </div>
+    </aside>
+
+    <main class="wi-main">
+      <header class="wi-topbar">
+        <button class="wi-icon-button wi-mobile-menu" type="button" aria-label="Open navigation">☰</button>
+        <div><strong>Fleet Management</strong><span>Workshop reporting and operational control</span></div>
+        <div class="wi-topbar-status"><i></i> Live prototype</div>
+      </header>
+
+      <div class="wi-content">
+        <div class="wi-breadcrumbs"><span>Workshop</span><b>›</b><strong>Intelligence</strong></div>
+
+        <section class="wi-page-head">
+          <div>
+            <div class="wi-eyebrow">Management reporting</div>
+            <h1>Workshop Intelligence</h1>
+            <p>Fleet availability, workshop performance and maintenance compliance in one operational view.</p>
+          </div>
+          <div class="wi-page-actions">
+            <button id="wiRefresh" class="wi-button secondary" type="button"><span>↻</span> Refresh</button>
+            <button id="wiPrint" class="wi-button secondary" type="button"><span>⎙</span> Print</button>
+            <button id="wiExport" class="wi-button primary" type="button"><span>⇩</span> Export report</button>
+          </div>
+        </section>
+
+        <div class="wi-prototype-note"><strong>Design prototype</strong><span>Sample workshop data only — no live records are changed.</span></div>
+
+        <section class="wi-report-nav" aria-label="Report sections">
+          <div class="wi-tabs" role="tablist">
+            <button class="active" data-report="operations" role="tab" aria-selected="true">Operations</button>
+            <button data-report="downtime" role="tab" aria-selected="false">Vehicle Downtime</button>
+            <button data-report="compliance" role="tab" aria-selected="false">Maintenance Compliance</button>
+            <button data-report="defects" role="tab" aria-selected="false">Defects & Reliability</button>
+            <button data-report="performance" role="tab" aria-selected="false">Performance</button>
+          </div>
+          <label class="wi-search"><span>⌕</span><input id="wiSearch" type="search" placeholder="Search bus, job, mechanic or issue" /></label>
+        </section>
+
+        <section class="wi-filterbar" aria-label="Report filters">
+          <label><span>Period</span><select id="wiPeriod"><option value="today">Today</option><option value="week" selected>This week</option><option value="month">This month</option><option value="90">Last 90 days</option></select></label>
+          <label><span>Depot</span><select id="wiDepot"><option value="">All depots</option><option>Hannans</option><option>Goulburn</option><option>Central</option><option>Rhodes</option></select></label>
+          <label><span>Mechanic</span><select id="wiMechanic"><option value="">All mechanics</option><option>William Louis</option><option>Ryan Scott</option><option>Kyl Emery</option><option>Peter Noah</option></select></label>
+          <label><span>Status</span><select id="wiStatus"><option value="">All statuses</option><option>In Progress</option><option>Waiting Parts</option><option>Waiting Approval</option><option>Overdue</option><option>Compliant</option></select></label>
+          <button id="wiClear" class="wi-clear" type="button">Clear filters</button>
+        </section>
+
+        <section id="wiMetrics" class="wi-metrics" aria-label="Key performance indicators"></section>
+
+        <section class="wi-grid">
+          <article class="wi-card wi-action-card">
+            <header class="wi-card-head">
+              <div><h2>Action required</h2><p>Items requiring management attention now</p></div>
+              <span id="wiActionCount" class="wi-count">0</span>
+            </header>
+            <div id="wiActionList" class="wi-action-list"></div>
+          </article>
+
+          <article class="wi-card wi-summary-card">
+            <header class="wi-card-head">
+              <div><h2 id="wiSummaryTitle">Workshop flow</h2><p id="wiSummaryText">Current jobs by operational stage</p></div>
+              <button class="wi-icon-button" type="button" title="More report options">•••</button>
+            </header>
+            <div id="wiStageChart" class="wi-stage-chart"></div>
+            <div id="wiSummaryFoot" class="wi-summary-foot"></div>
+          </article>
+        </section>
+
+        <section class="wi-card wi-table-card">
+          <header class="wi-card-head wi-table-head">
+            <div><h2 id="wiTableTitle">Active workshop jobs</h2><p id="wiTableSubtitle">Operational status and current responsibility</p></div>
+            <div class="wi-table-actions">
+              <span id="wiResultCount">0 records</span>
+              <button class="wi-button compact secondary" type="button">Columns</button>
+            </div>
+          </header>
+          <div class="wi-table-wrap">
+            <table>
+              <thead id="wiTableHeaders"></thead>
+              <tbody id="wiTableBody"></tbody>
+            </table>
+          </div>
+          <footer class="wi-table-footer"><span>Showing filtered prototype records</span><div><button disabled>Previous</button><b>1</b><button disabled>Next</button></div></footer>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <aside id="wiDrawer" class="wi-drawer" aria-hidden="true">
+    <div class="wi-drawer-backdrop" data-close-drawer></div>
+    <section>
+      <header><div><span>Workshop record</span><h2 id="wiDrawerTitle">Record details</h2></div><button data-close-drawer aria-label="Close">×</button></header>
+      <div id="wiDrawerBody"></div>
+      <footer><button class="wi-button secondary" data-close-drawer type="button">Close</button><button class="wi-button primary" type="button">Open full record</button></footer>
+    </section>
+  </aside>
+
+  <div id="wiToast" class="wi-toast" role="status"></div>
+  <script type="module" src="./js/workshop_intelligence_prototype.js"></script>
+</body>
+</html>
