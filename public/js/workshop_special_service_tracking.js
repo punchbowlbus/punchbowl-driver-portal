@@ -70,7 +70,21 @@ function daysUntil(value) {
   return Math.round((new Date(`${value}T00:00:00`) - new Date(`${todayString()}T00:00:00`)) / 86400000);
 }
 
+function isNotFitted(value) {
+  return ["no", "false", "not fitted", "n/a"].includes(norm(value));
+}
+
+function isElectricBus(bus) {
+  return /\b(ev|electric)\b/i.test(String(bus?.serviceProgram || bus?.fuelType || bus?.fuel || ""));
+}
+
 function programState(bus, program) {
+  if (program.key === "fire" && isNotFitted(bus?.fireSuppression)) {
+    return {kind:"notfitted", days:null, dueDate:"", detail:"Fire suppression not fitted"};
+  }
+  if (program.key === "radiator" && isElectricBus(bus)) {
+    return {kind:"notfitted", days:null, dueDate:"", detail:"Not required for electric bus"};
+  }
   const lastDate = String(bus?.[program.lastField] || "").trim();
   const dueDate = String(bus?.[program.nextField] || addMonths(lastDate, program.months)).trim();
   const days = daysUntil(dueDate);
@@ -85,6 +99,7 @@ function programState(bus, program) {
 }
 
 function badge(state, title) {
+  if (state.kind === "notfitted") return `<span class="badge">NOT FITTED</span>`;
   if (state.kind === "overdue") return `<span class="badge bad">${state.days === 0 ? "DUE TODAY" : "OVERDUE"}</span>`;
   if (state.kind === "urgent") return `<span class="badge bad">URGENT</span>`;
   if (state.kind === "soon") return `<span class="badge warn">DUE SOON</span>`;
