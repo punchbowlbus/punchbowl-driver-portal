@@ -1,0 +1,234 @@
+/* Punchbowl Workshop design system — staged rollout
+   Stage 1: shared controls, Workshop Reports and 90-Day Compliance report. */
+:root {
+  --wds-navy-950:#0b1f33;
+  --wds-navy-900:#102f4c;
+  --wds-navy-800:#173f63;
+  --wds-slate-700:#344054;
+  --wds-slate-600:#475467;
+  --wds-slate-500:#667085;
+  --wds-slate-300:#d0d5dd;
+  --wds-slate-200:#e4e7ec;
+  --wds-slate-100:#f2f4f7;
+  --wds-slate-50:#f8fafc;
+  --wds-red-700:#a91d24;
+  --wds-red-600:#c4232a;
+  --wds-green-700:#067647;
+  --wds-amber-700:#b54708;
+  --wds-blue-700:#175cd3;
+  --wds-radius-sm:8px;
+  --wds-radius-md:12px;
+  --wds-radius-lg:18px;
+  --wds-shadow-sm:0 1px 2px rgba(16,24,40,.05);
+  --wds-shadow-md:0 8px 24px rgba(16,24,40,.08);
+  --wds-shadow-lg:0 28px 80px rgba(15,23,42,.30);
+}
+
+/* Shared action language. Existing classes retain their public API. */
+.button {
+  gap:7px;
+  border-radius:var(--wds-radius-sm);
+  min-height:40px;
+  padding:9px 14px;
+  font-size:13px;
+  font-weight:800;
+  letter-spacing:.005em;
+  box-shadow:var(--wds-shadow-sm);
+}
+.button.primary {background:var(--wds-navy-900);border-color:var(--wds-navy-900);color:#fff;box-shadow:0 4px 12px rgba(16,47,76,.18)}
+.button.primary:hover {background:var(--wds-navy-950);border-color:var(--wds-navy-950);box-shadow:0 7px 18px rgba(16,47,76,.22)}
+.button.secondary {background:#fff;border-color:var(--wds-slate-300);color:var(--wds-slate-700)}
+.button.secondary:hover {background:var(--wds-slate-50);border-color:#98a2b3;color:var(--wds-navy-950)}
+.button:focus-visible,.icon-button:focus-visible {outline:3px solid rgba(23,92,211,.22);outline-offset:2px}
+.icon-button {display:grid;place-items:center;border-color:var(--wds-slate-200);color:var(--wds-slate-600);box-shadow:var(--wds-shadow-sm)}
+.icon-button:hover {background:var(--wds-slate-50);border-color:var(--wds-slate-300);color:var(--wds-navy-950)}
+.status {border-radius:var(--wds-radius-sm);font-weight:700;line-height:1.45}
+.status.success {background:#ecfdf3;border-color:#abefc6;color:var(--wds-green-700)}
+.status.error {background:#fef3f2;border-color:#fecdca;color:#b42318}
+
+/* Slim page heading used throughout Workshop. The red top bar remains the
+   primary brand element, so page content does not need a second heavy banner. */
+.main-content .page-head {
+  position:relative;
+  min-height:72px;
+  margin:0 0 16px;
+  padding:16px 18px 16px 22px;
+  border:1px solid var(--wds-slate-200);
+  border-radius:var(--wds-radius-md);
+  background:#fff;
+  color:var(--wds-navy-950);
+  box-shadow:var(--wds-shadow-sm);
+}
+.main-content .page-head::before {
+  content:"";
+  position:absolute;
+  left:-1px;
+  top:14px;
+  bottom:14px;
+  width:4px;
+  border-radius:0 4px 4px 0;
+  background:var(--wds-red-600);
+}
+.main-content .page-head h1 {color:var(--wds-navy-950);font-size:25px;letter-spacing:-.02em}
+.main-content .page-head p {margin-top:4px;color:var(--wds-slate-500);font-size:12px}
+.main-content .page-head .button.primary {background:var(--wds-navy-900);border-color:var(--wds-navy-900);color:#fff;box-shadow:0 3px 9px rgba(16,47,76,.15)}
+.main-content .page-head .button.primary:hover {background:var(--wds-navy-950);border-color:var(--wds-navy-950)}
+.main-content .page-head .button.secondary {background:#fff;border-color:var(--wds-slate-300);color:var(--wds-slate-700);box-shadow:var(--wds-shadow-sm)}
+.main-content .page-head .button.secondary:hover {background:var(--wds-slate-50);color:var(--wds-navy-950)}
+
+/* Reports workspace */
+#reportsView {color:var(--wds-navy-950)}
+#reportsView>.page-head {
+  min-height:72px;
+  margin-bottom:16px;
+}
+#reportsView>.page-head h1 {color:var(--wds-navy-950);font-size:25px}
+#reportsView>.page-head p {color:var(--wds-slate-500);font-size:13px}
+#reportsView>.page-head .button.secondary {background:#fff;border-color:var(--wds-slate-300);color:var(--wds-slate-700)}
+#reportsView>.page-head .button.secondary:hover {background:var(--wds-slate-50);color:var(--wds-navy-950)}
+#reportsView .report-tabs {
+  display:inline-flex;
+  width:auto;
+  max-width:100%;
+  gap:4px;
+  margin:0 0 18px;
+  padding:5px;
+  overflow-x:auto;
+  border:1px solid var(--wds-slate-200);
+  border-radius:var(--wds-radius-md);
+  background:#fff;
+  box-shadow:var(--wds-shadow-sm);
+}
+#reportsView .report-tabs button {
+  min-height:38px;
+  padding:8px 14px;
+  border:0;
+  border-radius:8px;
+  color:var(--wds-slate-600);
+  white-space:nowrap;
+  transition:background .15s ease,color .15s ease,box-shadow .15s ease;
+}
+#reportsView .report-tabs button:hover {background:var(--wds-slate-50);color:var(--wds-navy-950)}
+#reportsView .report-tabs button.active {background:var(--wds-navy-900);color:#fff;box-shadow:0 3px 9px rgba(16,47,76,.18)}
+#reportsView .metrics-grid {grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-bottom:16px}
+#reportsView .metric {min-height:104px;padding:17px;border-color:var(--wds-slate-200);border-radius:var(--wds-radius-md);box-shadow:var(--wds-shadow-sm)}
+#reportsView .metric span {color:var(--wds-slate-500);font-size:10px;letter-spacing:.055em}
+#reportsView .metric strong {margin-top:10px;color:var(--wds-navy-950);font-size:30px;line-height:1}
+#reportsView .panel {margin-bottom:16px;border-color:var(--wds-slate-200);border-radius:var(--wds-radius-md);box-shadow:var(--wds-shadow-sm)}
+#reportsView .panel-head {padding:18px 20px;border-bottom:1px solid var(--wds-slate-200)}
+#reportsView .panel-head h2 {margin-bottom:4px;font-size:17px}
+#reportsView .report-filter-grid {gap:12px;padding:18px 20px;border-bottom:1px solid var(--wds-slate-200);background:var(--wds-slate-50)}
+#reportsView .report-filter-grid label {gap:6px;color:var(--wds-slate-600);font-size:11px;letter-spacing:.015em}
+#reportsView .report-filter-grid input,
+#reportsView .report-filter-grid select {width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--wds-slate-300);border-radius:var(--wds-radius-sm);background:#fff;color:var(--wds-navy-950)}
+#reportsView .report-filter-grid input:focus,
+#reportsView .report-filter-grid select:focus {outline:0;border-color:var(--wds-blue-700);box-shadow:0 0 0 3px rgba(23,92,211,.12)}
+#reportsView .report-export-row {padding:14px 20px;border-bottom:1px solid var(--wds-slate-200);background:#fff}
+#reportsView table th {height:42px;padding:11px 14px;background:var(--wds-slate-50);color:var(--wds-slate-600);font-size:10px}
+#reportsView table td {padding:13px 14px;color:var(--wds-slate-700);line-height:1.45}
+#reportsView tbody tr:hover {background:#f9fbfd}
+#reportsView .badge {padding:4px 8px;font-size:9px;letter-spacing:.025em}
+
+/* 90-Day Compliance modal */
+#complianceReportDialog {
+  width:min(1180px,calc(100vw - 48px));
+  max-height:calc(100dvh - 48px);
+  padding:0;
+  overflow:hidden;
+  border:1px solid rgba(148,163,184,.35);
+  border-radius:var(--wds-radius-lg);
+  background:var(--wds-slate-50);
+  box-shadow:var(--wds-shadow-lg);
+}
+#complianceReportDialog::backdrop {background:rgba(11,31,51,.68);backdrop-filter:blur(5px)}
+#complianceReportDialog>.dialog-head {
+  position:relative;
+  top:auto;
+  z-index:2;
+  margin:0;
+  padding:20px 24px;
+  align-items:center;
+  border-bottom:1px solid var(--wds-slate-200);
+  background:#fff;
+}
+#complianceReportDialog>.dialog-head h2 {margin:2px 0 0;color:var(--wds-navy-950);font-size:22px}
+#complianceReportDialog>.dialog-head p {margin-top:4px;color:var(--wds-slate-500)}
+#complianceReportDialog .eyebrow {color:var(--wds-red-700);font-size:10px;font-weight:900;letter-spacing:.085em;text-transform:uppercase}
+#complianceReportDialog .compliance-report-body {max-height:calc(100dvh - 210px);padding:22px 24px;overflow:auto}
+#complianceReportDialog .compliance-report-shell {display:grid;gap:18px}
+#complianceReportDialog .compliance-report-head {
+  margin:0;
+  padding:18px 20px;
+  align-items:center;
+  border:1px solid var(--wds-slate-200);
+  border-left:4px solid var(--wds-red-600);
+  border-radius:var(--wds-radius-md);
+  background:#fff;
+  box-shadow:var(--wds-shadow-sm);
+}
+#complianceReportDialog .compliance-report-head h2 {margin:3px 0 0;color:var(--wds-navy-950);font-size:24px;letter-spacing:-.02em}
+#complianceReportDialog .compliance-detail-grid {grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0}
+#complianceReportDialog .wm-review-box {
+  min-height:82px;
+  padding:14px 15px;
+  border:1px solid var(--wds-slate-200);
+  border-radius:var(--wds-radius-md);
+  background:#fff;
+  color:var(--wds-slate-700);
+  line-height:1.45;
+  box-shadow:var(--wds-shadow-sm);
+}
+#complianceReportDialog .wm-review-label {margin-bottom:7px;color:var(--wds-slate-500);font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
+#complianceReportDialog .wm-review-box strong {color:var(--wds-navy-950);font-size:14px}
+#complianceReportDialog .wm-review-box.wm-full {grid-column:1/-1;min-height:auto}
+#complianceReportDialog .missing-inspection-date {
+  display:grid;
+  grid-template-columns:38px minmax(0,1fr);
+  gap:13px;
+  margin:0;
+  padding:16px;
+  border:1px solid #fedf89;
+  border-radius:var(--wds-radius-md);
+  background:#fffaeb;
+  box-shadow:none;
+}
+#complianceReportDialog .compliance-message-icon {display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:#fef0c7;color:var(--wds-amber-700);font-weight:900}
+#complianceReportDialog .missing-inspection-date h3 {margin:0 0 4px;color:#7a2e0e;font-size:15px}
+#complianceReportDialog .missing-inspection-date p {margin:0 0 13px;color:#7a4a1d;font-size:12px}
+#complianceReportDialog .report-date-correction input {min-height:40px;padding:8px 10px;border:1px solid #d6bb8b;border-radius:var(--wds-radius-sm);background:#fff}
+#complianceReportDialog .compliance-checklist-section {overflow:hidden;border:1px solid var(--wds-slate-200);border-radius:var(--wds-radius-md);background:#fff;box-shadow:var(--wds-shadow-sm)}
+#complianceReportDialog .compliance-section-head {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 18px;border-bottom:1px solid var(--wds-slate-200)}
+#complianceReportDialog .compliance-section-head h3 {margin:3px 0 0;color:var(--wds-navy-950);font-size:17px}
+#complianceReportDialog .compliance-item-count {color:var(--wds-slate-500);font-size:11px;font-weight:800}
+#complianceReportDialog .compliance-checklist {min-width:880px}
+#complianceReportDialog .compliance-checklist th {padding:11px 13px;background:var(--wds-slate-50);color:var(--wds-slate-600)}
+#complianceReportDialog .compliance-checklist td {padding:12px 13px;color:var(--wds-slate-700);line-height:1.45}
+#complianceReportDialog>.dialog-actions {
+  position:relative;
+  bottom:auto;
+  z-index:2;
+  margin:0;
+  padding:15px 24px;
+  border-top:1px solid var(--wds-slate-200);
+  background:#fff;
+  box-shadow:0 -8px 20px rgba(16,24,40,.04);
+}
+
+@media (max-width:900px) {
+  #reportsView>.page-head {align-items:flex-start}
+  #complianceReportDialog {width:calc(100vw - 24px);max-height:calc(100dvh - 24px)}
+  #complianceReportDialog .compliance-report-body {max-height:calc(100dvh - 186px);padding:16px}
+  #complianceReportDialog .compliance-detail-grid {grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:600px) {
+  .main-content .page-head,#reportsView>.page-head {min-height:auto;padding:15px 16px 15px 20px;flex-direction:column}
+  #reportsView .report-tabs {display:flex;width:100%}
+  #reportsView .report-tabs button {flex:0 0 auto}
+  #complianceReportDialog>.dialog-head {padding:16px}
+  #complianceReportDialog .compliance-detail-grid {grid-template-columns:1fr}
+  #complianceReportDialog .wm-review-box.wm-full {grid-column:auto}
+  #complianceReportDialog .missing-inspection-date {grid-template-columns:1fr}
+  #complianceReportDialog .compliance-message-icon {display:none}
+  #complianceReportDialog .compliance-section-head {align-items:flex-start;flex-direction:column}
+  #complianceReportDialog>.dialog-actions {padding:13px 16px}
+}
