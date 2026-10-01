@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="./styles/workshop_driver_defects.css?v=2" />
   <link rel="stylesheet" href="./styles/workshop_ui_polish.css" />
   <link rel="stylesheet" href="./styles/workshop_design_system.css?v=20260930-stage1b" />
+  <link rel="stylesheet" href="./styles/yard.css?v=1" />
 </head>
 <body>
   <header class="topbar">
@@ -40,12 +41,13 @@
       <div class="side-divider"></div>
       <button class="nav-item" data-view="defects" type="button">Driver Defects</button>
       <a class="nav-item" href="./mechanic.html?from=workshop">Mechanic Work Queue</a>
-      <button class="nav-item disabled" type="button" disabled>Safety Checks <span>Next</span></button>
+      <button class="nav-item" data-view="yard" type="button">Yard Work Queue</button>
       <button class="nav-item" data-view="reports" type="button">Reports</button>
     </aside>
 
     <main class="main-content">
       <div id="status" class="status"></div>
+      <section id="yardView" class="view"><div id="yardRoot" data-mode="manager"></div></section>
 
       <section id="dashboardView" class="view active">
         <div class="page-head">
@@ -265,6 +267,7 @@
   </dialog>
 
   <script type="module" src="./js/workshop_display_stability.js"></script>
+  <script type="module" src="./js/yard.js?v=1"></script>
   <script type="module" src="./js/workshop_management.js?v=20260924-pro-register"></script>
   <script type="module" src="./js/workshop_mechanic_selector.js"></script>
   <script type="module" src="./js/workshop_pre_rms_option.js"></script>

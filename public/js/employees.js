@@ -9,10 +9,10 @@ import { escapeHtml } from "./utils.js";
 
 let employeesUnsub = null;
 
-const DEPARTMENTS = ["Operations", "Administration", "Workshop", "Accounts", "Management"];
-const ROLES = ["Driver", "Admin", "Mechanic", "Dispatcher", "Accounts", "Manager"];
+const DEPARTMENTS = ["Operations", "Administration", "Workshop", "Yard", "Accounts", "Management"];
+const ROLES = ["Driver", "Admin", "Mechanic", "Yard Man", "Dispatcher", "Accounts", "Manager"];
 const EMPLOYMENT_TYPES = ["Full Time", "Part Time", "Casual", "Contract"];
-const ACCESS_LEVELS = ["Driver", "Admin", "Super Admin"];
+const ACCESS_LEVELS = ["Driver", "Yard Man", "Admin", "Super Admin"];
 const STATUSES = ["Active", "Inactive", "On Leave"];
 const DRIVER_LICENCE_CLASSES = ["C", "LR", "MR", "HR", "HC", "MC"];
 

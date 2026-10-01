@@ -1451,6 +1451,13 @@ renderAuth(
 
 if (!u) return;
 
+// Yard staff enter their dedicated tablet page; existing admin/driver routes stay intact.
+if (!state.isAdmin && String(state.employee?.status || "").toLowerCase() === "active" &&
+    [state.employee?.role, state.employee?.accessLevel].some((value) => String(value || "").trim().toLowerCase() === "yard man")) {
+  window.location.replace("./yard.html");
+  return;
+}
+
 // ✅ ADD THIS (you are missing it)
 state.isDriver =
   !!u &&
