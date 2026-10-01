@@ -1,4 +1,5 @@
 const {TYPES,CHECKLISTS,fail,text,today,dateValue,busSnapshot,validateChecks}=require("./domain");
+const recordTime=(value)=>value?.toMillis?.() || Date.parse(value) || 0;
 function createService({db,stamp,now=()=>new Date(),savePhotos=async()=>[],removePhotos=async()=>{}}) {
   const actor=(person)=>({uid:person.uid,name:person.name,email:person.email,employeeNumber:person.employeeNumber});
   const activity=(person,action,busId,details={})=>({busId,action,actor:actor(person),createdAt:stamp(),...details});
@@ -6,12 +7,12 @@ function createService({db,stamp,now=()=>new Date(),savePhotos=async()=>[],remov
     const [fleet,summaries,recent,pending]=await Promise.all([db.collection("buses").get(),db.collection("yardFleet").get(),db.collection("yardRecords").orderBy("createdAt","desc").limit(150).get(),db.collection("yardRecords").where("status","in",["Waiting Approval","Needs Review"]).get()]);
     const summaryMap=new Map(summaries.docs.map((row)=>[row.id,row.data()]));
     const records=new Map([...recent.docs,...pending.docs].map((row)=>[row.id,{id:row.id,...row.data()}]));
-    return {person,today:today(now()),checklists:CHECKLISTS,fleet:fleet.docs.filter((row)=>row.data().deleted!==true&&String(row.data().status || "").toLowerCase()!=="inactive").map((row)=>({...busSnapshot(row.data(),row.id),yard:summaryMap.get(row.id)||{}})),records:[...records.values()].sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0)),historyLimited:recent.size===150};
+    return {person,today:today(now()),checklists:CHECKLISTS,fleet:fleet.docs.filter((row)=>row.data().deleted!==true&&String(row.data().status || "").toLowerCase()!=="inactive").map((row)=>({...busSnapshot(row.data(),row.id),yard:summaryMap.get(row.id)||{}})),records:[...records.values()].sort((a,b)=>recordTime(b.createdAt)-recordTime(a.createdAt)),historyLimited:recent.size===150};
   }
   async function history(person,busId){
     if(!busId||typeof busId!=="string"||busId.includes("/"))fail("Select a valid bus.","invalid-argument");
     const records=await db.collection("yardRecords").where("busId","==",busId).get();
-    return {records:records.docs.map((row)=>({id:row.id,...row.data()})).sort((a,b)=>(b.createdAt?.toMillis?.()||0)-(a.createdAt?.toMillis?.()||0))};
+    return {records:records.docs.map((row)=>({id:row.id,...row.data()})).sort((a,b)=>recordTime(b.createdAt)-recordTime(a.createdAt))};
   }
   async function update(person,input){
     const {busId,type,action}=input;

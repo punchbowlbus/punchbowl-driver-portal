@@ -29,6 +29,25 @@ New data: `yardFleet/{busId}` for summaries, `yardRecords/{recordId}` for audit/
 
 The new functions are separate from charter and notifications. `firebase.yard.json` selects only the `yard` codebase; the existing configurations are untouched. Deploying these backend functions eventually requires an authorised Firebase account and user confirmation. Do not run a hosting or whole-project deployment during local review.
 
+## Local test without Java or administrator access
+
+Run from your project folder:
+
+```powershell
+node tools/yard-local.cjs
+```
+
+No additional packages or Firebase login are required. Leave the terminal open and visit:
+
+- Yard: `http://127.0.0.1:5050/yard.html`
+- Manager: `http://127.0.0.1:5050/yard.html?managerView=1`
+
+Click **Sign in**, enter **1** for Yard Employee A, **2** for Yard Employee B, or **3** for Fleet Manager. Use separate browser profiles/private windows to test employees working at the same time. Sign out to switch employees; open the Manager view when signed in as the manager. Only the manager can approve cleaning.
+
+This server uses the actual Yard UI and task service with sample buses and local sessions. It loads no Firebase SDK and makes no requests to the real project. Only Yard page assets are served; other portal pages are excluded. It listens on your own PC at port 5050. Updates and photo evidence persist in `tools/yard-local-data.json` (excluded from Git). Stop the server with Ctrl+C. To reset sample data, stop the server and delete that file, then restart.
+
+This is for workflow and layout testing. It does not test real Google sign-in, Firestore transactions/rules or Firebase Storage. Those integrations still require emulator or staging tests before live deployment.
+
 ## Isolated local test
 
 1. `npm --prefix functions-yard ci`
@@ -40,6 +59,8 @@ The new functions are separate from charter and notifications. `firebase.yard.js
 The `yardEmulator=1` mode uses a named Firebase app connected only to the **demo-pbc-yard** Auth/Functions emulators. The backend emulator automatically uses that demo project’s Firestore/Storage emulators. No real Firebase credentials or live fleet writes are needed. Without this parameter, the normal portal Firebase connection is used; the new backend must be available for the feature to load.
 
 ## Validation
+
+`node --test tests/yard-local.test.cjs` checks local sessions, task ownership, review permissions and data persistence across restarts. `node tests/yard-local.browser.cjs` (with Playwright installed) tests real local sign-in, completion with photo evidence, reload, manager approval, tablet layout and absence of external requests. Neither command needs Java or Firebase.
 
 `node --test tests/yard.test.cjs` checks permissions, competing claims, ownership, approval/return, actual-date tracking, EV/diesel input validation, backdated check handling and Sydney dates using an in-memory transaction fixture.
 
