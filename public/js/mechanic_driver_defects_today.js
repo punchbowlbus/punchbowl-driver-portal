@@ -1,3 +1,4 @@
+import { installStableInnerHtml } from "./workshop_display_stability.js";
 import { collection, doc, onSnapshot, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { db } from "./firebase.js";
 import { DEFECT_STATUS, isDefectCompleted, normalizeDefectStatus } from "./workshop_status.js";
@@ -133,6 +134,7 @@ function dayLabel(dateValue, today, yesterday) {
 }
 
 function render(reports) {
+  installStableInnerHtml("mechanicTodayDefects");
   const wrap = document.getElementById("mechanicTodayDefects");
   const count = document.getElementById("mechanicTodayDefectCount");
   if (!wrap) return;
@@ -180,19 +182,20 @@ function render(reports) {
     </article>`;
   }).join("");
 
-  wrap.querySelectorAll("[data-create-defect-job]").forEach((button) => button.addEventListener("click", () => {
+  wrap.querySelectorAll("[data-create-defect-job]").forEach((button) => { button.onclick = () => {
     const report = list.find((item) => item.id === button.dataset.createDefectJob);
     if (report) openJobCreation(report);
-  }));
-  wrap.querySelectorAll("[data-linked-job]").forEach((button) => button.addEventListener("click", () => {
+  }; });
+  wrap.querySelectorAll("[data-linked-job]").forEach((button) => { button.onclick = () => {
     if (button.dataset.linkedJob && typeof window.openMechanicJobCard === "function") window.openMechanicJobCard(button.dataset.linkedJob);
-  }));
+  }; });
 }
 
 onSnapshot(collection(db, "defectReports"), (snap) => {
   render(snap.docs.map((d) => ({ id:d.id, ...d.data() })));
 }, (error) => {
   console.error("Unable to load recent driver defects", error);
+  installStableInnerHtml("mechanicTodayDefects");
   const wrap = document.getElementById("mechanicTodayDefects");
   if (wrap) wrap.innerHTML = `<div class="empty">Unable to load recent driver defect reports.</div>`;
 });

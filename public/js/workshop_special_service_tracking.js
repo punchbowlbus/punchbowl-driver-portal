@@ -1,3 +1,4 @@
+import { setTextIfChanged } from "./workshop_display_stability.js";
 import { syncMaintenanceEmpty } from "./workshop_maintenance_display.js";
 import {
   collection,
@@ -161,8 +162,8 @@ function augmentMaintenanceDue() {
   syncMaintenanceEmpty(wrap);
 
   const all = buses.flatMap((bus) => PROGRAMS.map((program) => programState(bus, program)));
-  if ($("metricSpecialServiceDueSoon")) $("metricSpecialServiceDueSoon").textContent = String(all.filter((state) => ["urgent","soon","book","plan"].includes(state.kind)).length);
-  if ($("metricSpecialServiceOverdue")) $("metricSpecialServiceOverdue").textContent = String(all.filter((state) => state.kind === "overdue").length);
+  setTextIfChanged($("metricSpecialServiceDueSoon"), String(all.filter((state) => ["urgent","soon","book","plan"].includes(state.kind)).length));
+  setTextIfChanged($("metricSpecialServiceOverdue"), String(all.filter((state) => state.kind === "overdue").length));
 }
 
 function findBusForFleetRow(row) {

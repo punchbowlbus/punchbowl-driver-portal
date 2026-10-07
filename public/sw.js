@@ -1,4 +1,4 @@
-const CACHE = "pbc-v80"; // Refresh Workshop maintenance display
+const CACHE = "pbc-v81"; // Refresh Workshop and mechanic display stability
 
 const ASSETS = [
   "/",

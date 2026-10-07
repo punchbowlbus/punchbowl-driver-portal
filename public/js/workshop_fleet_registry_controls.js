@@ -1,3 +1,4 @@
+import { setHtmlIfChanged, setTextIfChanged } from "./workshop_display_stability.js";
 import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { db } from "./firebase.js";
 
@@ -127,7 +128,7 @@ function effectiveBusStatus(bus) {
 function fillSelect(select, values, placeholder) {
   if (!select) return;
   const selected = select.value;
-  select.innerHTML = `<option value="">${placeholder}</option>${values.map((value) => `<option value="${value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/\"/g,"&quot;")}">${value.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</option>`).join("")}`;
+  setHtmlIfChanged(select, `<option value="">${placeholder}</option>${values.map((value) => `<option value="${value.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/\"/g,"&quot;")}">${value.replace(/&/g,"&amp;").replace(/</g,"&lt;")}</option>`).join("")}`);
   if ([...select.options].some((option) => option.value === selected)) select.value = selected;
 }
 
@@ -279,8 +280,8 @@ function ensureOptionalColumns() {
         if (insertionPoint) insertionPoint.insertAdjacentElement("beforebegin", cell);
         else row.appendChild(cell);
       }
-      if (column.render) cell.innerHTML = column.render(bus);
-      else cell.textContent = optionalValue(column, bus);
+      if (column.render) setHtmlIfChanged(cell, column.render(bus));
+      else setTextIfChanged(cell, optionalValue(column, bus));
       cell.dataset.sortValue = column.sortValue ? String(column.sortValue(bus) || "") : "";
     });
   });
@@ -312,7 +313,7 @@ function applyFilters() {
     if (matches) visible++;
   });
   const total = rows.filter(busForRow).length;
-  if ($("fleetRegisterResultCount")) $("fleetRegisterResultCount").innerHTML = `<strong>${visible}</strong> of ${total} vehicles shown`;
+  setHtmlIfChanged($("fleetRegisterResultCount"), `<strong>${visible}</strong> of ${total} vehicles shown`);
 }
 
 function cellSortValue(row, header) {

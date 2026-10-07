@@ -692,7 +692,7 @@ function enhanceHistory() {
     const row = document.createElement("div"); row.className = "wm-action-row";
     row.innerHTML = `<button type="button" class="button secondary" data-view>View Job Card</button><button type="button" class="button secondary" data-print>Print Job Card</button>`;
     row.querySelector("[data-view]").onclick = () => openReview(job.id);
-    row.querySelector("[data-print]").onclick = () => printJobCard(job);
+    row.querySelector("[data-print]").onclick = () => printJobCard(jobs.find(current => current.id === job.id) || job);
     item.appendChild(row);
   });
 }

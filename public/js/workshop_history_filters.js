@@ -1,3 +1,4 @@
+import { setHtmlIfChanged, setTextIfChanged } from "./workshop_display_stability.js";
 import {
   collection,
   onSnapshot
@@ -93,8 +94,8 @@ function refreshOptions() {
   const types = uniqueSorted(history.map((j) => j.jobType));
   const mechanics = uniqueSorted(history.map(mechanicName));
 
-  typeSelect.innerHTML = `<option value="">All job types</option>${types.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
-  mechanicSelect.innerHTML = `<option value="">All mechanics</option>${mechanics.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`;
+  setHtmlIfChanged(typeSelect, `<option value="">All job types</option>${types.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`);
+  setHtmlIfChanged(mechanicSelect, `<option value="">All mechanics</option>${mechanics.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("")}`);
   if (types.includes(currentType)) typeSelect.value = currentType;
   if (mechanics.includes(currentMechanic)) mechanicSelect.value = currentMechanic;
 }
@@ -152,7 +153,7 @@ function applyFilters() {
   empty.hidden = shown !== 0 || items.length === 0;
 
   const result = $("historyFilterResult");
-  if (result) result.textContent = `${shown} Job Card${shown === 1 ? "" : "s"} shown.`;
+  setTextIfChanged(result, `${shown} Job Card${shown === 1 ? "" : "s"} shown.`);
 }
 
 function watchHistoryList() {

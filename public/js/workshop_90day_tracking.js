@@ -1,3 +1,4 @@
+import { setTextIfChanged } from "./workshop_display_stability.js";
 import { syncMaintenanceEmpty } from "./workshop_maintenance_display.js";
 import {
   collection,
@@ -153,8 +154,8 @@ function renderDashboardSafety() {
   const overdue = list.filter((x) => x.state.kind === "overdue");
   const soon = list.filter((x) => ["urgent", "soon", "book", "plan"].includes(x.state.kind));
 
-  if ($("metric90DayDueSoon")) $("metric90DayDueSoon").textContent = String(soon.length);
-  if ($("metric90DayOverdue")) $("metric90DayOverdue").textContent = String(overdue.length);
+  setTextIfChanged($("metric90DayDueSoon"), String(soon.length));
+  setTextIfChanged($("metric90DayOverdue"), String(overdue.length));
   augmentMaintenanceDue();
 }
 

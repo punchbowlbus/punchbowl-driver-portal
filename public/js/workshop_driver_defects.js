@@ -1,3 +1,4 @@
+import { installStableInnerHtml } from "./workshop_display_stability.js";
 import { collection, doc, getDocs, serverTimestamp, setDoc } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
 import { DEFECT_STATUSES, isDefectCompleted, normalizeDefectStatus } from "./workshop_status.js";
@@ -61,6 +62,7 @@ function filtered() {
 }
 
 function renderList() {
+  installStableInnerHtml("workshopDefectList");
   const el = document.getElementById("workshopDefectList");
   if (!el) return;
   const list = filtered();
@@ -75,7 +77,7 @@ function renderList() {
     return `<article class="defect-card ${unsafe ? "unsafe" : ""}"><div class="defect-head"><div><div class="defect-number">${esc(r.reportNumber || r.id)}</div><div class="defect-sub">${esc(r.defectDate || "Date not recorded")} · ${esc(fmtDate(r.createdAt || r.reportedAtIso))}</div></div><div class="defect-badges"><span class="defect-badge ${unsafe ? "unsafe" : "safe"}">${unsafe ? "Unsafe to drive" : "Safe to drive"}</span><span class="defect-badge">${esc(status)}</span></div></div><div class="defect-grid"><div><span>Bus</span><strong>${esc(busLabel(r))}</strong></div><div><span>Category</span><strong>${esc(r.category || "Other")}</strong></div><div><span>Driver</span><strong>${esc(r.reportedByName || "Unknown")}</strong><small>${esc(r.reportedByEmployeeNumber || "")}</small></div></div><div class="defect-desc">${esc(r.description || "")}</div>${photos.length ? `<div class="defect-photos">${photos.map((p) => `<a href="${esc(p.url || "")}" target="_blank" rel="noopener"><img src="${esc(p.url || "")}" alt="Defect photo"></a>`).join("")}</div>` : ""}<div class="defect-actions"><label>Status<select data-defect-status="${esc(r.id)}">${STATUSES.map((s) => `<option value="${s}" ${s === status ? "selected" : ""}>${s}</option>`).join("")}</select></label><label>Operations / workshop notes<input data-defect-notes="${esc(r.id)}" value="${esc(r.adminNotes || "")}" placeholder="Add an internal note"></label>${jobAction}<button class="button primary" type="button" data-defect-save="${esc(r.id)}">Save update</button></div><div class="defect-save-msg" data-defect-msg="${esc(r.id)}"></div></article>`;
   }).join("");
 
-  el.querySelectorAll("[data-defect-create-job]").forEach((btn) => btn.addEventListener("click", async () => {
+  el.querySelectorAll("[data-defect-create-job]").forEach((btn) => { btn.onclick = async () => {
     const report = reports.find((item) => item.id === btn.dataset.defectCreateJob);
     if (!report) return;
     const msg = el.querySelector(`[data-defect-msg="${CSS.escape(report.id)}"]`);
@@ -84,9 +86,9 @@ function renderList() {
       return;
     }
     window.openWorkshopJobDialog(report);
-  }));
+  }; });
 
-  el.querySelectorAll("[data-defect-save]").forEach((btn) => btn.addEventListener("click", async () => {
+  el.querySelectorAll("[data-defect-save]").forEach((btn) => { btn.onclick = async () => {
     const id = btn.dataset.defectSave;
     const status = el.querySelector(`[data-defect-status="${CSS.escape(id)}"]`)?.value || "New";
     const notes = el.querySelector(`[data-defect-notes="${CSS.escape(id)}"]`)?.value.trim() || "";
@@ -98,7 +100,7 @@ function renderList() {
       summary(); if (msg) msg.textContent = "Update saved.";
     } catch (e) { if (msg) msg.textContent = e?.message || "Update failed."; }
     finally { btn.disabled = false; btn.textContent = "Save update"; }
-  }));
+  }; });
 }
 
 async function refresh() {
@@ -107,7 +109,7 @@ async function refresh() {
     if (el) el.innerHTML = `<div class="defect-empty">Fleet Manager or Admin access is required.</div>`;
     return;
   }
-  if (el) el.innerHTML = `<div class="defect-empty">Loading defect reports...</div>`;
+  if (el && !reports.length) el.innerHTML = `<div class="defect-empty">Loading defect reports...</div>`;
   try { await loadReports(); categories(); summary(); renderList(); }
   catch { if (el) el.innerHTML = `<div class="defect-empty">Unable to load defect reports.</div>`; }
 }
