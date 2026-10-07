@@ -70,10 +70,26 @@ export function calculateFatigue(dutySpan) {
   const reaches11h = totalSpanMinutes >= LIMIT_11H;
   const reaches12h = totalSpanMinutes >= LIMIT_12H;
 
-  // 24h planner assumptions
-  const restIn24hMinutes = Math.max(0, 24 * 60 - totalSpanMinutes);
-  const has12hRestIn24h = restIn24hMinutes >= 12 * 60;
-  const has7hContinuousStationaryRest = restIn24hMinutes >= 7 * 60;
+  // Fatigue work time is separate from payroll and elapsed duty span.
+  // Credit only recorded rest blocks of at least 15 minutes, within this duty.
+  // Merge overlapping rest so malformed legacy data cannot double-count it.
+  const qualifyingRest = normalizedBreaks
+    .map((b) => ({startMin: Math.max(start, b.startMin), endMin: Math.min(end, b.endMin)}))
+    .filter((b) => b.endMin - b.startMin >= 15);
+  const mergedRest = [];
+  for (const rest of qualifyingRest) {
+    const last = mergedRest[mergedRest.length - 1];
+    if (last && rest.startMin <= last.endMin) last.endMin = Math.max(last.endMin, rest.endMin);
+    else mergedRest.push({...rest});
+  }
+  const qualifyingRestMinutes = mergedRest.reduce((sum, b) => sum + b.endMin - b.startMin, 0);
+  const workMinutes = Math.max(0, totalSpanMinutes - qualifyingRestMinutes);
+  const restIn24hMinutes = Math.max(0, 24 * 60 - workMinutes);
+  const has12hRestIn24h = workMinutes <= LIMIT_12H;
+  // Keep continuous off-duty rest separate: meal breaks cannot be added to it.
+  // This remains a single-duty planning assumption, not verified roster rest.
+  const offDutyMinutes = Math.max(0, 24 * 60 - totalSpanMinutes);
+  const has7hContinuousStationaryRest = offDutyMinutes >= 7 * 60;
 
   // Company rule
   const firstBreakOffset = firstBreakStartOffset();
@@ -108,7 +124,7 @@ export function calculateFatigue(dutySpan) {
   // These are only meaningful once duty becomes long enough to matter operationally.
   if (reaches12h && !has12hRestIn24h) {
     fatigueStatus = "BREACH";
-    warnings.push("Need at least 12 hours rest in 24 hours.");
+    warnings.push("Recorded fatigue work exceeds 12 hours in this duty (excluding qualifying rest).");
   }
 
   if (reaches12h && !has7hContinuousStationaryRest) {
@@ -154,6 +170,8 @@ export function calculateFatigue(dutySpan) {
 
   return {
     totalSpanMinutes,
+    workMinutes,
+    qualifyingRestMinutes,
     unpaidMinutes,
     paidMinutes,
     fatigueStatus,
@@ -175,4 +193,20 @@ export function calculateFatigue(dutySpan) {
     totalRestMinutes,
     restIn24hMinutes
   };
+}
+
+// Refresh this specific obsolete saved warning on the board without changing
+// Firestore records or suppressing independent warnings such as turnaround.
+export function refreshLegacyRestBreach(span) {
+  const obsolete = "Need at least 12 hours rest in 24 hours.";
+  const savedWarning = String(span.fatigueWarning || "");
+  if (!savedWarning.includes(obsolete)) return span;
+  const remaining = savedWarning.replaceAll(obsolete, "").trim();
+  const current = calculateFatigue(span);
+  const warnings = [...new Set([current.fatigueWarning, remaining].filter(Boolean))];
+  const severity = {OK: 0, WARNING: 1, BREACH: 2};
+  const savedStatus = remaining ? String(span.fatigueStatus || "OK") : "OK";
+  const fatigueStatus = (severity[savedStatus] || 0) > severity[current.fatigueStatus]
+    ? savedStatus : current.fatigueStatus;
+  return {...span, fatigueStatus, fatigueWarning: warnings.join(" ")};
 }

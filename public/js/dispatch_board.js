@@ -15,7 +15,7 @@ import {
 
 import { els, showError } from "./ui.js";
 import { state } from "./state.js";
-import { calculateFatigue } from "./dispatch_fatigue.js";
+import { calculateFatigue, refreshLegacyRestBreach } from "./dispatch_fatigue.js";
 import { assignBlockToDriver } from "./dispatch_assignments.js";
 import { unassignBlockFromDriver } from "./dispatch_assignments.js";
 
@@ -3041,7 +3041,7 @@ function startDutySpanListener(selectedDate) {
   unsubscribeDutySpans = listenDutySpansByDate(
     selectedDate,
     (items) => {
-      dutySpansCache = items || [];
+      dutySpansCache = (items || []).map(refreshLegacyRestBreach);
       renderDrivers();
 
       if (selectedDriverEmpNo) {
