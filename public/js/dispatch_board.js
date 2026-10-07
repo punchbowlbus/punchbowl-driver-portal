@@ -3,6 +3,7 @@ import {
   listenBuses,
   listenBlocksByDate,
   listenDutySpansByDate,
+  listenDutySpansByDateRange,
   getDutySpansByDriverAndDate,
   listenJobGroups,
   addDutySpan,
@@ -15,7 +16,8 @@ import {
 
 import { els, showError } from "./ui.js";
 import { state } from "./state.js";
-import { calculateFatigue, refreshLegacyRestBreach } from "./dispatch_fatigue.js";
+import { calculateFatigue, fatigueStatusLabel } from "./dispatch_fatigue.js";
+import { refreshRosterFatigue } from "./fatigue_schedule.js";
 import { assignBlockToDriver } from "./dispatch_assignments.js";
 import { unassignBlockFromDriver } from "./dispatch_assignments.js";
 
@@ -41,7 +43,7 @@ els.contentArea.innerHTML = `
       <div>
         <div class="dispatch-pro-kicker">PBC OPERATIONS CONTROL</div>
         <h2>Dispatch Board</h2>
-        <p>Allocate work, monitor duties and resolve operational exceptions.</p>
+        <p>Allocate work, monitor duties and resolve operational exceptions. Fatigue colours show scheduled risks only; actual rest, the hours option and fitness to drive require verification.</p>
       </div>
       <div class="dispatch-pro-header-actions">
         <button id="refreshDispatchBtn" type="button" class="dispatch-quiet-btn">↻ Refresh</button>
@@ -215,6 +217,7 @@ const modalConfirmBtn = document.getElementById("dispatchModalConfirm");
 let employeesCache = [];
 let busesCache = [];
 let dutySpansCache = [];
+let fatigueRosterCache = [];
 let jobGroupsCache = [];
 let selectedDriverEmpNo = "";
 let slotWidth = 10;
@@ -1001,9 +1004,9 @@ function renderDriverDetail(driver) {
                         </div>
 
                         <div style="font-size:12px; margin-top:4px;">
-                          Fatigue:
+                          Scheduled fatigue:
                           <span style="font-weight:700; color:${fatigueColor};">
-                            ${escapeHtml(span.fatigueStatus || "OK")}
+                            ${escapeHtml(fatigueStatusLabel(span.fatigueStatus))}
                           </span>
                         </div>
 
@@ -1506,39 +1509,23 @@ function renderDriverDetail(driver) {
       const fatigue = calculateFatigue({
         startMin,
         endMin,
-        breaks
+        breaks, fatigueCategory: driver.fatigueCategory || "Unknown"
       });
-      let turnaroundWarning = "";
       try {
         const serviceDate = getSelectedDate();
-        const previousDate = shiftServiceDate(serviceDate, -1);
-        const previousDuties = await getDutySpansByDriverAndDate(empNo, previousDate);
-        const previousFinalDuty = previousDuties.reduce((latest, duty) =>
-          !latest || Number(duty.endMin || 0) > Number(latest.endMin || 0) ? duty : latest, null);
-        if (previousFinalDuty) {
-          const restMinutes = 1440 + startMin - Number(previousFinalDuty.endMin || 0);
-          if (restMinutes < 8 * 60) {
-            const safeRest = Math.max(0, restMinutes);
-            const shortfall = 8 * 60 - restMinutes;
-            const formatDuration = (minutes) => `${Math.floor(Math.max(0, minutes) / 60)}h ${String(Math.max(0, minutes) % 60).padStart(2, "0")}m`;
-            turnaroundWarning = `Company 8-hour turnaround breach. Previous duty ${previousFinalDuty.dutyNumber || previousFinalDuty.dutyType || "Duty"} finished at ${minToTimeStr(previousFinalDuty.endMin)} on ${previousDate}. Next duty starts at ${minToTimeStr(startMin)}. Rest available: ${formatDuration(safeRest)}. Shortfall: ${formatDuration(shortfall)}.`;
-            const proceed = await confirmDispatchAction({
-              title: "8-hour turnaround breach",
-              message: `<p>This driver does not have the required company turnaround before the next duty.</p><div class="dispatch-confirm-warning">${escapeHtml(turnaroundWarning)}</div><p>Choose <strong>Save for Review</strong> only if a manager will review this roster.</p>`,
-              confirmLabel: "Save for Review",
-              tone: "danger"
-            });
-            if (!proceed) return;
-          }
-        }
+        const adjacent = (await Promise.all([-3,-2,-1,0,1,2,3].map(offset => getDutySpansByDriverAndDate(empNo, shiftServiceDate(serviceDate, offset))))).flat().filter(d=>d.id!==editingSpanId);
+        const candidate = {id: editingSpanId || "fatigue-candidate",serviceDate,driverEmployeeNumber:empNo,startMin,endMin,breaks,dutyNumber};
+        const reviewed = refreshRosterFatigue([...adjacent,candidate],employeesCache).find(d=>d.id===candidate.id);
+        fatigue.fatigueStatus = reviewed.fatigueStatus;
+        fatigue.fatigueWarning = reviewed.fatigueWarning;
       } catch (error) {
-        showError(error?.message || "Unable to check the previous-day turnaround. Duty was not saved.");
+        showError(error?.message || "Unable to check the surrounding roster. Duty was not saved.");
         return;
       }
-      if (fatigue.fatigueStatus === "BREACH") {
+      if (fatigue.fatigueStatus !== "OK") {
         const proceed = await confirmDispatchAction({
-          title: "Fatigue breach detected",
-          message: `<p>This duty does not currently meet the fatigue rules.</p><div class="dispatch-confirm-warning">${escapeHtml(fatigue.fatigueWarning || "Review the duty length and breaks before allocation.")}</div><p>You may save it for operational review, but it will remain clearly marked as a breach.</p>`,
+          title: "Scheduled fatigue risk detected",
+          message: `<p>The scheduled duty or surrounding roster needs review. This calculation is not a confirmed legal breach.</p><div class="dispatch-confirm-warning">${escapeHtml(fatigue.fatigueWarning || "Review the duty length and breaks before allocation.")}</div><p>You may save it for operational review, but it will remain clearly marked as a planning alert.</p>`,
           confirmLabel: "Save for Review",
           tone: "danger"
         });
@@ -1567,8 +1554,8 @@ function renderDriverDetail(driver) {
           totalSpanMinutes: fatigue.totalSpanMinutes,
           unpaidMinutes: fatigue.unpaidMinutes,
           paidMinutes: fatigue.paidMinutes,
-          fatigueStatus: turnaroundWarning ? "BREACH" : fatigue.fatigueStatus,
-          fatigueWarning: [fatigue.fatigueWarning, turnaroundWarning].filter(Boolean).join(" ")
+          fatigueStatus: fatigue.fatigueStatus,
+          fatigueWarning: fatigue.fatigueWarning
         };
 
         if (editingSpanId) {
@@ -3038,10 +3025,11 @@ function startDutySpanListener(selectedDate) {
     return;
   }
 
-  unsubscribeDutySpans = listenDutySpansByDate(
-    selectedDate,
+  unsubscribeDutySpans = listenDutySpansByDateRange(
+    shiftServiceDate(selectedDate,-3), shiftServiceDate(selectedDate,3),
     (items) => {
-      dutySpansCache = (items || []).map(refreshLegacyRestBreach);
+      fatigueRosterCache = items || [];
+      dutySpansCache = refreshRosterFatigue(fatigueRosterCache, employeesCache).filter(d=>d.serviceDate===selectedDate);
       renderDrivers();
 
       if (selectedDriverEmpNo) {
@@ -3205,6 +3193,11 @@ async function transferDutySpanToDriver(spanId, targetEmpNo) {
     String(other.id) !== String(span.id) && String(other.assignedBus || "").trim() === bus &&
     spansOverlap(Number(span.startMin || 0), Number(span.endMin || 0), Number(other.startMin || 0), Number(other.endMin || 0))
   );
+  let transferFatigue;
+  try {
+    const adjacent = (await Promise.all([-3,-2,-1,0,1,2,3].map(offset => getDutySpansByDriverAndDate(targetEmpNo,shiftServiceDate(span.serviceDate,offset))))).flat().filter(d=>d.id!==span.id);
+    transferFatigue = refreshRosterFatigue([...adjacent,{...span,driverEmployeeNumber:targetEmpNo,driverName:targetName,fatigueWarning:"",fatigueStatus:"OK"}],employeesCache).find(d=>d.id===span.id);
+  } catch (error) {return showPageMessage(error?.message || "Unable to check target driver roster. Transfer not completed.","error",6500);}
   const warning = busConflict
     ? `<div class="dispatch-confirm-warning">Warning: bus ${escapeHtml(bus)} has an overlapping allocation.</div>`
     : "";
@@ -3212,7 +3205,7 @@ async function transferDutySpanToDriver(spanId, targetEmpNo) {
     title: "Transfer complete duty",
     message: `<p>Transfer <strong>${escapeHtml(span.dutyNumber || "this duty")}</strong> and <strong>${movedBlocks.length} assigned job${movedBlocks.length === 1 ? "" : "s"}</strong>?</p>
       <div class="dispatch-confirm-grid"><span>From</span><strong>${escapeHtml(sourceName)}</strong><span>To</span><strong>${escapeHtml(targetName)}</strong><span>Time</span><strong>${minToTimeStr(span.startMin)}–${minToTimeStr(span.endMin)}</strong></div>
-      <p>The new driver will receive this duty as <strong>Pending confirmation</strong>.</p>${warning}`,
+      <p>The new driver will receive this duty as <strong>Pending confirmation</strong>.</p>${transferFatigue.fatigueWarning ? `<div class="dispatch-confirm-warning">${escapeHtml(transferFatigue.fatigueWarning)}</div>` : ""}${warning}`,
     confirmLabel: "Transfer Duty"
   });
   if (!confirmed) return;
@@ -3222,7 +3215,9 @@ async function transferDutySpanToDriver(spanId, targetEmpNo) {
       dutySpanId: span.id,
       blockIds: movedBlocks.map((block) => block.id),
       driverEmployeeNumber: targetEmpNo,
-      driverName: targetName
+      driverName: targetName,
+      fatigueStatus: transferFatigue.fatigueStatus,
+      fatigueWarning: transferFatigue.fatigueWarning
     });
     selectedDriverEmpNo = String(targetEmpNo);
     showPageMessage(`Duty transferred to ${targetName}. Driver confirmation is now pending.`, "success", 6500);
@@ -3430,6 +3425,7 @@ unassignedJobsTimeFilterEl.onchange = () => renderUnassignedJobs(blocksCache, ge
 listenEmployees(
   (employees) => {
     employeesCache = employees || [];
+    dutySpansCache = refreshRosterFatigue(fatigueRosterCache,employeesCache).filter(d=>d.serviceDate===getSelectedDate());
     renderDriverMultiSelect();
     renderDrivers();
   },

@@ -1,10 +1,10 @@
-import { refreshLegacyRestBreach } from "./dispatch_fatigue.js";
+import { refreshRosterFatigue, shiftServiceDate } from "./fatigue_schedule.js";
 import {
   collection,
   onSnapshot
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { db } from "./firebase.js";
-import { listenBlocksByDate, listenDutySpansByDate } from "./db.js";
+import { listenBlocksByDate, listenDutySpansByDateRange, listenEmployees } from "./db.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./utils.js";
 
@@ -319,10 +319,14 @@ export function renderOperationsDashboardPage({ onNavigate } = {}) {
   function subscribe() {
     state.unsubscribeOperationsDashboard?.();
     model.ready.clear();
+    model.duties=[];
     const stops = [];
-    const ready = (key, target) => (items) => { model[target] = (items || []).filter((item) => item.deleted !== true).map(item => target === "duties" ? refreshLegacyRestBreach(item) : item); model.ready.add(key); paint(); };
+    const ready = (key, target) => (items) => { model[target] = (items || []).filter((item) => item.deleted !== true); model.ready.add(key); paint(); };
     const fail = (key) => (error) => { console.error(`Operations Dashboard ${key}:`, error); model.ready.add(key); paint(); };
-    stops.push(listenDutySpansByDate(model.selectedDate, ready("duties", "duties"), fail("duties")));
+    let rawDuties=[], employees=[];
+    const applyFatigue=()=>{model.duties=refreshRosterFatigue(rawDuties,employees).filter(d=>d.serviceDate===model.selectedDate);paint();};
+    stops.push(listenEmployees(items=>{employees=items || [];applyFatigue();},()=>{employees=[];applyFatigue();}));
+    stops.push(listenDutySpansByDateRange(shiftServiceDate(model.selectedDate,-3),shiftServiceDate(model.selectedDate,3),items=>{rawDuties=items || [];model.ready.add("duties");applyFatigue();},fail("duties")));
     stops.push(listenBlocksByDate(model.selectedDate, ready("blocks", "blocks"), fail("blocks")));
     [["buses", "buses"], ["defectReports", "defects"], ["incidentReports", "incidents"]].forEach(([collectionName, target]) => {
       stops.push(onSnapshot(collection(db, collectionName), (snapshot) => ready(target, target)(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))), fail(target)));

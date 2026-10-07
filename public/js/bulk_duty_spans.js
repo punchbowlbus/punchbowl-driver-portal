@@ -9,7 +9,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
 import { auth, db } from "./firebase.js";
-import { calculateFatigue } from "./dispatch_fatigue.js";
+import { refreshRosterFatigue } from "./fatigue_schedule.js";
+import { calculateFatigue, fatigueStatusLabel } from "./dispatch_fatigue.js";
 import { els, showError } from "./ui.js";
 import { escapeHtml } from "./utils.js";
 
@@ -248,7 +249,7 @@ export async function renderBulkDutySpansPage() {
         <div class="bulk-duty-help-grid">
           <div><strong>Supported duty types</strong><span>${DUTY_TYPES.join(" · ")}</span></div>
           <div><strong>Rail Replacement</strong><span>Route number and HTTPS Route Description PDF link are required.</span></div>
-          <div><strong>Optional breaks</strong><span>Meal is unpaid; Crib is paid. Breaks are used for fatigue calculations.</span></div>
+          <div><strong>Optional breaks</strong><span>Meal is unpaid; Crib is paid. Breaks are assumed to be non-work rest for scheduled fatigue checks. A passed duty check does not establish legal compliance or fitness to drive.</span></div>
         </div>
 
         <div class="bulk-duty-actions">
@@ -512,9 +513,9 @@ export async function renderBulkDutySpansPage() {
           }
         });
 
-        const fatigue = calculateFatigue({startMin, endMin, breaks});
+        const fatigue = calculateFatigue({startMin, endMin, breaks, fatigueCategory: employee?.fatigueCategory || "Unknown"});
         if (fatigue.fatigueStatus !== "OK") {
-          warnings.push(`Fatigue ${fatigue.fatigueStatus}: ${fatigue.fatigueWarning}`);
+          warnings.push(`Fatigue ${fatigueStatusLabel(fatigue.fatigueStatus)}: ${fatigue.fatigueWarning}`);
         }
 
         return {
@@ -541,7 +542,7 @@ export async function renderBulkDutySpansPage() {
       });
 
       const validDates = [...new Set(processedRows.map((row) => row.serviceDate).filter(Boolean))];
-      const lookupDates = [...new Set(validDates.flatMap((date) => [date, shiftServiceDate(date, -1)]))];
+      const lookupDates = [...new Set(validDates.flatMap((date) => [-3,-2,-1,0,1,2,3].map(offset=>shiftServiceDate(date,offset))))];
       const existingSpans = [];
       for (const dateChunk of chunk(lookupDates, 10)) {
         const snapshot = await getDocs(query(collection(db, "dutySpans"), where("serviceDate", "in", dateChunk)));
@@ -581,22 +582,17 @@ export async function renderBulkDutySpansPage() {
         }
       });
 
-      const activeExisting = existingSpans.filter((span) => !span.deleted && !["cancelled", "canceled"].includes(String(span.dispatchStatus || "").toLowerCase()));
+      const activeExisting = existingSpans.filter((span) => !span.deleted && !["cancelled", "canceled"].includes(String(span.dispatchStatus || "").trim().toLowerCase()));
       const rosterRows = [...activeExisting, ...processedRows.filter((row) => !row.errors.length && !row.duplicate)];
-      processedRows.filter((row) => !row.errors.length && !row.duplicate).forEach((row) => {
-        const sameDayRows = rosterRows.filter((item) => String(item.driverEmployeeNumber || "").trim() === row.driverEmployeeNumber && item.serviceDate === row.serviceDate);
-        const firstStart = Math.min(...sameDayRows.map((item) => Number(item.startMin || 0)));
-        if (Number(row.startMin) !== firstStart) return;
-        const previousDate = shiftServiceDate(row.serviceDate, -1);
-        const previousRows = rosterRows.filter((item) => String(item.driverEmployeeNumber || "").trim() === row.driverEmployeeNumber && item.serviceDate === previousDate);
-        if (!previousRows.length) return;
-        const previousFinal = previousRows.reduce((latest, item) => !latest || Number(item.endMin || 0) > Number(latest.endMin || 0) ? item : latest, null);
-        const restMinutes = 1440 + Number(row.startMin || 0) - Number(previousFinal.endMin || 0);
-        if (restMinutes >= 480) return;
-        const warning = `Company 8-hour turnaround breach: previous duty ${previousFinal.dutyNumber || previousFinal.dutyType || "Duty"} finishes ${minToTime(previousFinal.endMin)} on ${previousDate}; next duty starts ${minToTime(row.startMin)}. Rest ${durationText(restMinutes)}, shortfall ${durationText(480 - restMinutes)}.`;
-        row.warnings.push(warning);
-        row.fatigueStatus = "BREACH";
-        row.fatigueWarning = [row.fatigueWarning, warning].filter(Boolean).join(" ");
+      const tagged = rosterRows.map((row,index)=>({...row,id:row.id || `csv-${index}`}));
+      const reviewed = refreshRosterFatigue(tagged,employees);
+      rosterRows.forEach((row,index) => {
+        if (!processedRows.includes(row)) return;
+        const result = reviewed[index];
+        row.fatigueStatus = result.fatigueStatus;
+        row.fatigueWarning = result.fatigueWarning;
+        row.warnings = row.warnings.filter(w=>!w.startsWith("Fatigue "));
+        if(result.fatigueWarning)row.warnings.push(`Fatigue ${fatigueStatusLabel(result.fatigueStatus)}: ${result.fatigueWarning}`);
       });
 
       renderPreview();

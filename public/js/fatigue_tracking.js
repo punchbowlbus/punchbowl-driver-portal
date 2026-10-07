@@ -1,8 +1,9 @@
-import { listenDutySpansByDateRange } from "./db.js";
+import { listenDutySpansByDateRange, listenEmployees } from "./db.js";
 import { state } from "./state.js";
 import { els } from "./ui.js";
 import { escapeHtml } from "./utils.js";
-import { qualifyingRestBlocks } from "./dispatch_fatigue.js";
+import { calculateTurnarounds, mergeIntervals, workIntervals, minutesWithin, shortWindowWork, shortWindowAssessment, shiftServiceDate } from "./fatigue_schedule.js";
+export { calculateTurnarounds } from "./fatigue_schedule.js";
 
 const COMPANY_MIN_REST_MINUTES = 8 * 60;
 const STYLE_ID = "fatigueTrackingStyles";
@@ -65,48 +66,7 @@ function dutyStatus(value) {
   return String(value || "Pending").trim().toLowerCase();
 }
 
-function mergeIntervals(items) {
-  const merged = [];
-  for (const item of items.filter(x => Number.isFinite(x.start) && Number.isFinite(x.end) && x.end > x.start).sort((a,b) => a.start - b.start)) {
-    const last = merged[merged.length - 1];
-    if (last && item.start - last.end < 15) last.end = Math.max(last.end, item.end);
-    else merged.push({...item});
-  }
-  return merged;
-}
-
-function workIntervals(duty) {
-  const base = absoluteMinute({...duty, startMin: 0}, "start");
-  let cursor = absoluteMinute(duty, "start");
-  const end = absoluteMinute(duty, "end");
-  const work = [];
-  for (const rest of qualifyingRestBlocks(duty)) {
-    if (base + rest.startMin > cursor) work.push({start: cursor, end: base + rest.startMin});
-    cursor = base + rest.endMin;
-  }
-  if (end > cursor) work.push({start: cursor, end});
-  return work;
-}
-
-function minutesWithin(intervals, start, end) {
-  return intervals.reduce((sum, x) => sum + Math.max(0, Math.min(end, x.end) - Math.max(start, x.start)), 0);
-}
-
-function shortWindowWork(intervals, start, end) {
-  let minutes = minutesWithin(intervals, start, end);
-  // A rest block must contribute at least 15 continuous minutes inside the
-  // counted window. A ten-minute fragment at its boundary earns no credit.
-  for (let i = 1; i < intervals.length; i += 1) {
-    const overlap = Math.max(0, Math.min(end, intervals[i].start) - Math.max(start, intervals[i - 1].end));
-    if (overlap > 0 && overlap < 15) minutes += overlap;
-  }
-  return minutes;
-}
-
-// Scheduled risk indicators are not statutory counting periods. The database
-// does not contain verified stationary rest, outside work, base timezone or the
-// end of the longest major rest used to anchor NHVR 24h/7d/28d periods.
-export function calculateStandardHoursAlerts(duties, range) {
+export function calculateStandardHoursAlerts(duties, range, employees = null) {
   const byDriver = new Map();
   for (const duty of duties || []) {
     if (duty.deleted === true || ["cancelled", "canceled"].includes(dutyStatus(duty.dispatchStatus))) continue;
@@ -121,9 +81,17 @@ export function calculateStandardHoursAlerts(duties, range) {
     if (!inRange.length) continue;
     const driverName = String(driverDuties[0].driverName || employeeNumber).trim();
     const add = (date, rule, detail, result = "REVIEW", observedMinutes = 0) => alerts.push({employeeNumber, driverName, date, rule, detail, result, observedMinutes});
+    for(const duty of inRange)if(duty.startMin == null || duty.endMin == null || String(duty.startMin).trim() === "" || String(duty.endMin).trim() === "" || !Number.isFinite(Number(duty.startMin)) || !Number.isFinite(Number(duty.endMin)) || Number(duty.endMin)<=Number(duty.startMin))add(duty.serviceDate,"Duty data verification","Duty start/end times are missing or invalid; no valid fatigue result can be established for this record.","DATA REVIEW");
+    const employee = employees && employees.find(e => String(e.employeeNumber || e.id).trim() === employeeNumber);
+    const profile = employees ? employee?.fatigueCategory || "Unknown" : driverDuties[0].fatigueCategory || "Standard";
+    if (profile.toLowerCase() !== "standard") {
+      add(inRange.map(d=>d.serviceDate).sort().at(-1), "Hours-option verification", `${profile}: Bus and Coach Standard Hours limits have not been applied. Verify this driver's applicable hours option and work/rest records.`, "DATA REVIEW");
+      continue;
+    }
     const work = mergeIntervals(driverDuties.flatMap(workIntervals));
     // Test every recorded work resumption, including after meals and split
     // duties. A break on one overlapping duty cannot cancel another duty's work.
+    const coverageEnd=Math.max(0,...driverDuties.map(d=>absoluteMinute(d,"end")));
     const checks = [
       {window: 330, maximum: 315, rule: "15-minute rest within 5½ hours"},
       {window: 480, maximum: 450, rule: "30-minute rest within 8 hours"},
@@ -132,10 +100,11 @@ export function calculateStandardHoursAlerts(duties, range) {
     for (const segment of work) {
       for (const check of checks) {
         const end = segment.start + check.window;
-        const minutes = shortWindowWork(work, segment.start, end);
-        if (minutes <= check.maximum) continue;
+        const assessment=shortWindowAssessment(work,segment.start,end,coverageEnd);
+        const minutes=assessment.work;
+        if (minutes <= check.maximum && !(assessment.complete && assessment.rest < check.window-check.maximum)) continue;
         const affected = inRange.find(d => absoluteMinute(d, "end") > segment.start && absoluteMinute(d, "start") < end);
-        if (affected) add(affected.serviceDate, check.rule, `${durationLabel(minutes)} scheduled work in a ${check.window / 60}-hour base-clock window starting at a recorded work resumption. Check actual work and qualifying rest.`);
+        if (affected) add(affected.serviceDate, check.rule, `${durationLabel(minutes)} scheduled work in a ${check.window / 60}-hour base-clock window starting at a recorded work resumption; ${assessment.rest} qualifying scheduled rest minutes. Check actual work and qualifying rest.`);
       }
     }
     // Search all endpoint candidates: a rolling total can peak at the start of
@@ -153,85 +122,11 @@ export function calculateStandardHoursAlerts(duties, range) {
     // Never invent rest at query boundaries or equate an empty roster to
     // stationary rest. Night/24h alternatives and statutory anchors need a diary.
     const date = inRange.map(d => d.serviceDate).sort().at(-1);
-    add(date, "7-day / 28-day rest verification", "Cannot confirm 6 night rests in 7 days or 4 × 24-hour rests in 28 days from duty records alone. Verify the work diary, hours option, base timezone and major-rest counting anchor. No rest shortfall has been calculated.", "DATA REVIEW");
+    add(date, "24-hour / 7-day / 28-day rest verification", "Cannot confirm 7 continuous hours stationary rest in 24 hours, 6 night rests in 7 days or 4 × 24-hour rests in 28 days from duty records alone. Verify the work diary, hours option, base timezone and major-rest counting anchor. No rest shortfall has been calculated.", "DATA REVIEW");
   }
   const unique = new Map();
-  alerts.sort((a,b) => a.date.localeCompare(b.date) || a.observedMinutes - b.observedMinutes).forEach(item => unique.set(`${item.employeeNumber}|${item.rule}`, item));
+  alerts.sort((a,b) => a.date.localeCompare(b.date) || a.observedMinutes - b.observedMinutes).forEach(item => unique.set(`${item.employeeNumber}|${item.rule}|${item.date}`, item));
   return [...unique.values()].sort((a,b) => b.date.localeCompare(a.date));
-}
-
-export function calculateTurnarounds(duties) {
-  const active = (duties || []).filter((duty) =>
-    duty.deleted !== true && !["cancelled", "canceled"].includes(dutyStatus(duty.dispatchStatus))
-  );
-  const byDriver = new Map();
-
-  active.forEach((duty) => {
-    const employeeNumber = String(duty.driverEmployeeNumber || "").trim();
-    if (!employeeNumber) return;
-    if (!byDriver.has(employeeNumber)) byDriver.set(employeeNumber, []);
-    byDriver.get(employeeNumber).push(duty);
-  });
-
-  const results = [];
-  byDriver.forEach((driverDuties, employeeNumber) => {
-    driverDuties.sort((a, b) => absoluteMinute(a, "start") - absoluteMinute(b, "start"));
-
-    const dutiesByDay = new Map();
-    driverDuties.forEach((duty) => {
-      const serviceDate = String(duty.serviceDate || "");
-      if (!dutiesByDay.has(serviceDate)) dutiesByDay.set(serviceDate, []);
-      dutiesByDay.get(serviceDate).push(duty);
-    });
-
-    const workDays = [...dutiesByDay.entries()]
-      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
-      .map(([serviceDate, dayDuties]) => {
-        dayDuties.sort((a, b) => absoluteMinute(a, "start") - absoluteMinute(b, "start"));
-
-        for (let index = 1; index < dayDuties.length; index += 1) {
-          const previous = dayDuties[index - 1];
-          const next = dayDuties[index];
-          const overlapMinutes = absoluteMinute(previous, "end") - absoluteMinute(next, "start");
-          if (overlapMinutes > 0) {
-            results.push({
-              employeeNumber,
-              driverName: String(next.driverName || previous.driverName || employeeNumber).trim(),
-              previous,
-              next,
-              restMinutes: -overlapMinutes,
-              status: "overlap",
-              shortfallMinutes: COMPANY_MIN_REST_MINUTES + overlapMinutes
-            });
-          }
-        }
-
-        const firstDuty = dayDuties.reduce((first, duty) =>
-          absoluteMinute(duty, "start") < absoluteMinute(first, "start") ? duty : first
-        );
-        const lastDuty = dayDuties.reduce((last, duty) =>
-          absoluteMinute(duty, "end") > absoluteMinute(last, "end") ? duty : last
-        );
-        return { serviceDate, firstDuty, lastDuty };
-      });
-
-    for (let index = 1; index < workDays.length; index += 1) {
-      const previous = workDays[index - 1].lastDuty;
-      const next = workDays[index].firstDuty;
-      const restMinutes = absoluteMinute(next, "start") - absoluteMinute(previous, "end");
-      const status = restMinutes < 0 ? "overlap" : restMinutes < COMPANY_MIN_REST_MINUTES ? "breach" : "compliant";
-      results.push({
-        employeeNumber,
-        driverName: String(next.driverName || previous.driverName || employeeNumber).trim(),
-        previous,
-        next,
-        restMinutes,
-        status,
-        shortfallMinutes: Math.max(0, COMPANY_MIN_REST_MINUTES - restMinutes)
-      });
-    }
-  });
-  return results.sort((a, b) => absoluteMinute(a.next, "start") - absoluteMinute(b.next, "start"));
 }
 
 function renderPage(results, standardAlerts, range, search = "", filter = "all") {
@@ -268,7 +163,7 @@ function renderPage(results, standardAlerts, range, search = "", filter = "all")
 
   body.innerHTML = visible.map((item) => {
     const message = item.status === "compliant"
-      ? "Company minimum met"
+      ? "Scheduled company gap met"
       : item.status === "overlap"
         ? `Duties overlap by ${durationLabel(Math.abs(item.restMinutes))}`
         : `${durationLabel(item.shortfallMinutes)} below company minimum`;
@@ -276,10 +171,10 @@ function renderPage(results, standardAlerts, range, search = "", filter = "all")
       <td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td>
       <td><strong>${escapeHtml(item.previous.dutyNumber || "Duty")}</strong><small>${dateLabel(item.previous.serviceDate)} · ${timeLabel(item.previous.startMin)}–${timeLabel(item.previous.endMin)}</small></td>
       <td><strong>${dateLabel(item.previous.serviceDate)}</strong><small>${timeLabel(item.previous.endMin)}</small></td>
-      <td class="ft-rest"><strong>${durationLabel(item.restMinutes)}</strong><small>Continuous planned rest</small></td>
+      <td class="ft-rest"><strong>${durationLabel(item.restMinutes)}</strong><small>Scheduled gap — actual rest unverified</small></td>
       <td><strong>${dateLabel(item.next.serviceDate)}</strong><small>${timeLabel(item.next.startMin)}</small></td>
       <td><strong>${escapeHtml(item.next.dutyNumber || "Duty")}</strong><small>${timeLabel(item.next.startMin)}–${timeLabel(item.next.endMin)}</small></td>
-      <td><span class="ft-status ${item.status}">${item.status === "compliant" ? "COMPLIANT" : item.status === "overlap" ? "CONFLICT" : "BREACH"}</span></td>
+      <td><span class="ft-status ${item.status}">${item.status === "compliant" ? "COMPANY GAP MET" : item.status === "overlap" ? "CONFLICT" : "UNDER COMPANY MINIMUM"}</span></td>
       <td><strong>${escapeHtml(message)}</strong><small>Company rule: minimum 8h</small></td>
     </tr>`;
   }).join("");
@@ -298,6 +193,8 @@ export function renderFatigueTrackingPage() {
   const range = { start: localDate(0), end: localDate(14) };
   let results = [];
   let standardAlerts = [];
+  let employeeRecords = [];
+  let loadedDuties = [];
 
   root.innerHTML = `<section class="ft-page">
     <header class="ft-head"><div><span>SAFETY & COMPLIANCE</span><h1>Fatigue Tracking</h1><p>Review planned work, consecutive-duty rest and company turnaround compliance.</p></div><div class="ft-rule"><small>COMPANY TURNAROUND</small><strong>Minimum 8 hours</strong></div></header>
@@ -305,11 +202,11 @@ export function renderFatigueTrackingPage() {
       <label><span>From</span><input id="ftStart" type="date" value="${range.start}"></label>
       <label><span>To</span><input id="ftEnd" type="date" value="${range.end}"></label>
       <label class="ft-search"><span>Search driver or duty</span><input id="ftSearch" type="search" placeholder="Name, employee number or duty"></label>
-      <label><span>Status</span><select id="ftFilter"><option value="all">All statuses</option><option value="breach">Under 8 hours</option><option value="overlap">Duty conflicts</option><option value="compliant">Compliant</option></select></label>
+      <label><span>Status</span><select id="ftFilter"><option value="all">All statuses</option><option value="breach">Under 8 hours</option><option value="overlap">Duty conflicts</option><option value="compliant">Company gap met</option></select></label>
       <button id="ftRefresh" type="button">Refresh</button>
     </section>
     <section id="ftMetrics" class="ft-metrics"></section>
-    <div class="ft-note"><strong>Rule profile:</strong> Standard Hours — Solo Driver in the Bus and Coach Sector, plus the company 8-hour turnaround rule. Scheduled times use the service-date base clock. Confirm the driver’s hours option before applying these limits. Actual elapsed time across daylight-saving changes, statutory counting anchors and stationary rest require work-diary verification.</div>
+    <div class="ft-note"><strong>Rule profile:</strong> Standard Hours — Solo Driver in the Bus and Coach Sector, plus the company 8-hour turnaround rule. A passed duty check does not establish fitness to drive or full legal compliance. Meal/crib entries are assumed to be non-work rest; verify actual activity. Scheduled times use the service-date base clock. Confirm the driver’s hours option before applying these limits. Actual elapsed time across daylight-saving changes, statutory counting anchors and stationary rest require work-diary verification. Minute-precision schedule checks do not apply written-work-diary rounding or constitute an approved electronic work diary.</div>
     <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>Bus and coach Standard Hours alerts</h2><span>Scheduled work risks and work-diary verification. REVIEW is not a confirmed legal breach.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
     <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Compares each working day's final finish with the driver's next working-day start. Same-day overlaps appear as conflicts.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
       <div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Previous duty</th><th>Finished</th><th>Rest available</th><th>Next start</th><th>Next duty</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftRows"><tr><td colspan="8"><div class="ft-empty">Loading fatigue records…</div></td></tr></tbody></table></div>
@@ -324,6 +221,7 @@ export function renderFatigueTrackingPage() {
   const redraw = () => renderPage(results, standardAlerts, range, searchInput.value, filterInput.value);
   const subscribe = () => {
     if (state.unsubscribeFatigueTracking) state.unsubscribeFatigueTracking();
+    loadedDuties=[];
     range.start = startInput.value;
     range.end = endInput.value;
     if (!range.start || !range.end || range.end < range.start) {
@@ -331,11 +229,14 @@ export function renderFatigueTrackingPage() {
       document.getElementById("ftRows").innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>Select a valid date range</strong></div></td></tr>`;
       return;
     }
-    state.unsubscribeFatigueTracking = listenDutySpansByDateRange(
+    const apply = () => {results = calculateTurnarounds(loadedDuties); standardAlerts = calculateStandardHoursAlerts(loadedDuties, range, employeeRecords); redraw();};
+    const stopEmployees = listenEmployees(items => {employeeRecords = items || []; apply();}, () => {employeeRecords = []; apply();});
+    const stopDuties = listenDutySpansByDateRange(
       shiftDate(range.start, -29), shiftDate(range.end, 1),
-      (duties) => { results = calculateTurnarounds(duties); standardAlerts = calculateStandardHoursAlerts(duties, range); redraw(); },
+      (duties) => { loadedDuties = duties; apply(); },
       (error) => { results = []; standardAlerts = []; redraw(); document.getElementById("ftStandardRows").innerHTML = `<tr><td colspan="5">Unable to load fatigue data</td></tr>`; document.getElementById("ftRows").innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>Unable to load fatigue data</strong><span>${escapeHtml(error?.message || "Please try again.")}</span></div></td></tr>`; }
     );
+    state.unsubscribeFatigueTracking = () => {stopEmployees?.(); stopDuties?.();};
   };
 
   startInput.onchange = subscribe;

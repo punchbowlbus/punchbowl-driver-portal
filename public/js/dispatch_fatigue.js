@@ -1,5 +1,5 @@
 // One rest definition for Dispatch, bulk entry and the tracking report.
-export function qualifyingRestBlocks(duty) {
+export function recordedRestBlocks(duty) {
   const start = Number(duty.startMin), end = Number(duty.endMin);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
   const blocks = (Array.isArray(duty.breaks) ? duty.breaks : [])
@@ -12,31 +12,30 @@ export function qualifyingRestBlocks(duty) {
     if (last && b.startMin <= last.endMin) last.endMin = Math.max(last.endMin, b.endMin);
     else merged.push({...b});
   }
-  return merged.filter(b => b.endMin - b.startMin >= 15);
+  return merged;
+}
+
+export function qualifyingRestBlocks(duty) {
+  return recordedRestBlocks(duty).filter(b=>b.endMin-b.startMin >= 15);
 }
 
 export function calculateFatigue(dutySpan) {
-  const start = Number(dutySpan.startMin ?? 0);
-  const end = Number(dutySpan.endMin ?? 0);
+  const start = Number(dutySpan.startMin);
+  const end = Number(dutySpan.endMin);
 
-  const totalSpanMinutes = Math.max(0, end - start);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || dutySpan.startMin == null || dutySpan.endMin == null || String(dutySpan.startMin).trim() === "" || String(dutySpan.endMin).trim() === "") {
+    return {totalSpanMinutes: 0, paidMinutes: 0, unpaidMinutes: 0, workMinutes: 0, qualifyingRestMinutes: 0,
+      fatigueStatus: "WARNING", fatigueWarning: "Data review: duty start/end times are missing or invalid.",
+      has7hContinuousStationaryRest: null, restIn24hMinutes: null};
+  }
+  const totalSpanMinutes = end - start;
   const breaks = Array.isArray(dutySpan.breaks) ? dutySpan.breaks : [];
 
-  const normalizedBreaks = breaks
-    .map((b) => ({
-      type: String(b.type || "").toLowerCase(),
-      startMin: Number(b.startMin || 0),
-      endMin: Number(b.endMin || 0)
-    }))
-    .filter((b) => b.endMin > b.startMin)
-    .sort((a, b) => a.startMin - b.startMin);
-
-  const unpaidMinutes = normalizedBreaks
-    .filter((b) => b.type === "meal")
-    .reduce((sum, b) => sum + Math.max(0, b.endMin - b.startMin), 0);
+  const unpaidMinutes = recordedRestBlocks({...dutySpan, breaks: breaks.filter(b=>String(b.type || "").toLowerCase()==="meal")}).reduce((sum,b)=>sum+b.endMin-b.startMin,0);
 
   const paidMinutes = Math.max(0, totalSpanMinutes - unpaidMinutes);
 
+  const recordedRest = recordedRestBlocks(dutySpan);
   const restBreaks = qualifyingRestBlocks(dutySpan);
 
   const LIMIT_5H30 = 5 * 60 + 30; // 330
@@ -44,7 +43,7 @@ export function calculateFatigue(dutySpan) {
   const LIMIT_11H = 11 * 60;      // 660
   const LIMIT_12H = 12 * 60;      // 720
 
-  const WARNING_FROM_5H15 = 5 * 60; // 300 min
+  const WARNING_FROM_5H15 = 5 * 60 + 15; // 315 min
 
   function hasContinuousRestWithinMinutes(windowMinutes, neededMinutes) {
     const windowEnd = start + windowMinutes;
@@ -68,14 +67,16 @@ export function calculateFatigue(dutySpan) {
 
   // Check every work resumption, not just the first window of the duty.
   function staysWithinWorkLimit(windowMinutes, maximumWork) {
-    const starts = [start, ...restBreaks.map(b => b.endMin)].filter(x => x < end);
+    const starts = [start, ...recordedRest.map(b => b.endMin)].filter(x => x < end);
     return starts.every(windowStart => {
       const windowEnd = Math.min(end, windowStart + windowMinutes);
       const rest = restBreaks.reduce((sum,b) => {
         const overlap = Math.max(0, Math.min(windowEnd,b.endMin) - Math.max(windowStart,b.startMin));
         return sum + (overlap >= 15 ? overlap : 0);
       },0);
-      return windowEnd - windowStart - rest <= maximumWork;
+      const actualRest=recordedRest.reduce((sum,b)=>sum+Math.max(0,Math.min(windowEnd,b.endMin)-Math.max(windowStart,b.startMin)),0);
+      const actualWork=windowEnd-windowStart-actualRest;
+      return actualWork <= maximumWork && (windowEnd-windowStart < windowMinutes || rest >= windowMinutes-maximumWork);
     });
   }
   const has15MinWithin5h15m = staysWithinWorkLimit(LIMIT_5H30, 315);
@@ -93,13 +94,22 @@ export function calculateFatigue(dutySpan) {
   // Merge overlapping rest so malformed legacy data cannot double-count it.
   const mergedRest = restBreaks;
   const qualifyingRestMinutes = mergedRest.reduce((sum, b) => sum + b.endMin - b.startMin, 0);
-  const workMinutes = Math.max(0, totalSpanMinutes - qualifyingRestMinutes);
-  const restIn24hMinutes = Math.max(0, 24 * 60 - workMinutes);
-  const has12hRestIn24h = workMinutes <= LIMIT_12H;
+  const recordedRestMinutes=recordedRest.reduce((sum,b)=>sum+b.endMin-b.startMin,0);
+  const workMinutes = Math.max(0, totalSpanMinutes - recordedRestMinutes);
+  const restIn24hMinutes = null; // A single duty cannot establish actual 24-hour rest.
+  const workBlocks = [];
+  let cursor = start;
+  for (const rest of recordedRest) {
+    if(rest.startMin > cursor)workBlocks.push({start:cursor,end:rest.startMin});
+    cursor=rest.endMin;
+  }
+  if(cursor < end)workBlocks.push({start:cursor,end});
+  const windowStarts=[...new Set(workBlocks.flatMap(b=>[b.start,b.end-1440]))];
+  const maximumWorkIn24hMinutes=Math.max(0,...windowStarts.map(windowStart=>workBlocks.reduce((sum,b)=>sum+Math.max(0,Math.min(windowStart+1440,b.end)-Math.max(windowStart,b.start)),0)));
+  const hasScheduled12hWorkLimit = maximumWorkIn24hMinutes <= LIMIT_12H;
   // Keep continuous off-duty rest separate: meal breaks cannot be added to it.
   // This remains a single-duty planning assumption, not verified roster rest.
-  const offDutyMinutes = Math.max(0, 24 * 60 - totalSpanMinutes);
-  const has7hContinuousStationaryRest = offDutyMinutes >= 7 * 60;
+  const has7hContinuousStationaryRest = null;
 
   // Company rule
   const firstBreakOffset = firstBreakStartOffset();
@@ -132,19 +142,14 @@ export function calculateFatigue(dutySpan) {
   }
 
   // These are only meaningful once duty becomes long enough to matter operationally.
-  if (reaches12h && !has12hRestIn24h) {
+  if (reaches12h && !hasScheduled12hWorkLimit) {
     fatigueStatus = "BREACH";
-    warnings.push("Recorded fatigue work exceeds 12 hours in this duty (excluding qualifying rest).");
-  }
-
-  if (reaches12h && !has7hContinuousStationaryRest) {
-    fatigueStatus = "BREACH";
-    warnings.push("Need at least 7 continuous hours rest in 24 hours.");
+    warnings.push("Scheduled work exceeds 12 hours in a rolling 24-hour base-clock window (excluding recorded non-work rest). Confirm the statutory counting period.");
   }
 
   // PRE-WARNING at 5h 15m, before the 5½-hour legal window closes.
   if (
-    !reaches5h15 &&
+    fatigueStatus === "OK" && !reaches5h15 &&
     totalSpanMinutes >= WARNING_FROM_5H15 &&
     !hasContinuousRestWithinMinutes(LIMIT_5H30, 15)
   ) {
@@ -156,18 +161,6 @@ export function calculateFatigue(dutySpan) {
     );
   }
 
-  // COMPANY WARNING: only show once duty is getting close, not for a 2-hour job
-  if (
-    !reaches5h15 &&
-    totalSpanMinutes >= WARNING_FROM_5H15 &&
-    !hasBreakBy5h15
-  ) {
-    if (fatigueStatus === "OK") {
-      fatigueStatus = "WARNING";
-    }
-    warnings.push("Plan a qualifying rest break before 5½ hours.");
-  }
-
   // COMPANY WARNING: 12+ hour shift needs 60 min break
   if (reaches12h && !has1HourBreakFor12hShift) {
     if (fatigueStatus === "OK") {
@@ -176,21 +169,29 @@ export function calculateFatigue(dutySpan) {
     warnings.push("Company rule: 12+ hour shift needs 60 min total break.");
   }
 
+  const profile = String(dutySpan.fatigueCategory ?? "Standard").trim();
+  if (profile.toLowerCase() !== "standard") {
+    fatigueStatus = "WARNING";
+    warnings.length = 0;
+    warnings.push(`Hours-option review: ${profile || "Unknown"} is not assessed by the Bus and Coach Standard Hours calculator. Verify the applicable work/rest limits.`);
+  }
   const fatigueWarning = warnings.join(" ");
 
   return {
     totalSpanMinutes,
     workMinutes,
+    maximumWorkIn24hMinutes,
     qualifyingRestMinutes,
     unpaidMinutes,
     paidMinutes,
     fatigueStatus,
     fatigueWarning,
 
-    has15MinWithin5h15m,
-    has30MinWithin8h,
-    has60MinWithin11h,
-    has12hRestIn24h,
+    has15MinWithin5h15m: profile.toLowerCase() === "standard" ? has15MinWithin5h15m : null,
+    has30MinWithin8h: profile.toLowerCase() === "standard" ? has30MinWithin8h : null,
+    has60MinWithin11h: profile.toLowerCase() === "standard" ? has60MinWithin11h : null,
+    has12hRestIn24h: null,
+    hasScheduled12hWorkLimit: profile.toLowerCase() === "standard" ? hasScheduled12hWorkLimit : null,
     has7hContinuousStationaryRest,
 
     reaches5h15,
@@ -209,15 +210,19 @@ export function calculateFatigue(dutySpan) {
 // saved turnaround / operational warnings or mutating Firestore records.
 export function refreshLegacyRestBreach(span) {
   const savedWarning = String(span.fatigueWarning || "");
-  const known = /Need at least 12 hours rest in 24 hours\.|Need at least 15 continuous minutes rest within 5½ hours\.|Need at least (?:30|60) min total rest within (?:first (?:8|11) hours|an (?:8|11)-hour counting window)\.|Recorded fatigue work exceeds 12 hours in this duty \(excluding qualifying rest\)\.|Need at least 7 continuous hours rest in 24 hours\.|Approaching 5½ hours without a 15-minute continuous rest break\.|Plan a qualifying rest break before 5½ hours\.|Company rule: 12\+ hour shift needs 60 min total break\./g;
+  const known = /Need at least 12 hours rest in 24 hours\.|Need at least 15 continuous minutes rest within 5½ hours\.|Need at least (?:30|60) min total rest within (?:first (?:8|11) hours|an (?:8|11)-hour counting window)\.|Recorded fatigue work exceeds 12 hours in this duty \(excluding (?:qualifying rest|recorded non-work rest)\)\.|Scheduled work exceeds 12 hours in a rolling 24-hour base-clock window \(excluding (?:qualifying rest|recorded non-work rest)\)\. Confirm the statutory counting period\.|Need at least 7 continuous hours rest in 24 hours\.|Approaching 5½ hours without a 15-minute continuous rest break\.|Plan a qualifying rest break before 5½ hours\.|Company rule: 12\+ hour shift needs 60 min total break\.|Hours-option review: [\s\S]*?Verify the applicable work\/rest limits\.|Data review: duty start\/end times are missing or invalid\./g;
   const remaining = savedWarning.replace(known, "").trim();
   // Refresh existing fatigue results and duties without any saved result.
-  if (remaining === savedWarning && savedWarning) return span;
+
   const current = calculateFatigue(span);
   const warnings = [...new Set([current.fatigueWarning, remaining].filter(Boolean))];
   const severity = {OK: 0, WARNING: 1, BREACH: 2};
-  const savedStatus = remaining ? String(span.fatigueStatus || "OK") : "OK";
+  const savedStatus = remaining ? (String(span.fatigueStatus || "").toUpperCase() === "BREACH" ? "BREACH" : "WARNING") : "OK";
   const fatigueStatus = (severity[savedStatus] || 0) > severity[current.fatigueStatus]
     ? savedStatus : current.fatigueStatus;
   return {...span, fatigueStatus, fatigueWarning: warnings.join(" ")};
+}
+
+export function fatigueStatusLabel(status) {
+  return String(status).toUpperCase() === "BREACH" ? "PLAN ALERT" : String(status).toUpperCase() === "WARNING" ? "REVIEW" : "NO DUTY ALERT";
 }

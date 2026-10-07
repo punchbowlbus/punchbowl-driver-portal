@@ -337,6 +337,7 @@ export async function renderDriverDutySheet({dutySpan, blocks, isAdmin, onYes, o
         <span>${formatDuration(Number(dutySpan.endMin || 0) - Number(dutySpan.startMin || 0))} shift</span>
       </section>
 
+      <p class="driver-duty-safety-note">These are scheduled times. Take required rest and contact Dispatch if you are fatigued or cannot complete this duty safely.</p>
       <div class="driver-duty-job-list">
         ${groupedJobs.length
           ? groupedJobs.map((group, index) => {

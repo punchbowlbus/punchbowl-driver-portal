@@ -1,5 +1,5 @@
-import { refreshLegacyRestBreach } from "./dispatch_fatigue.js";
-import { listenDutySpansByDate, listenBlocksByDate } from "./db.js";
+import { refreshRosterFatigue, shiftServiceDate } from "./fatigue_schedule.js";
+import { listenDutySpansByDateRange, listenEmployees, listenBlocksByDate } from "./db.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./utils.js";
 
@@ -377,8 +377,11 @@ export function renderDriverMonitorPage() {
     model.blocksReady = false;
     tableEl.innerHTML = `<div class="dm-loading">Loading driver duties…</div>`;
 
-    const stopDuties = listenDutySpansByDate(date, (items) => {
-      model.duties = (items || []).map(refreshLegacyRestBreach);
+    let rawDuties = [], employees = [];
+    const applyFatigue = () => {model.duties=refreshRosterFatigue(rawDuties,employees).filter(d=>d.serviceDate===date);paint();};
+    const stopEmployees = listenEmployees(items=>{employees=items || [];applyFatigue();},()=>{employees=[];applyFatigue();});
+    const stopDuties = listenDutySpansByDateRange(shiftServiceDate(date,-3),shiftServiceDate(date,3), (items) => {
+      rawDuties = items || []; applyFatigue();
       model.dutiesReady = true;
       paint();
     }, (error) => {
@@ -401,6 +404,7 @@ export function renderDriverMonitorPage() {
       if (stopped) return;
       stopped = true;
       stopDuties?.();
+      stopEmployees?.();
       stopBlocks?.();
     };
   }

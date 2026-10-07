@@ -367,7 +367,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=17");
+    const mod = await import("./dispatch_board.js?v=18");
     mod.renderDispatchBoardPage();
     return;
   }
@@ -436,7 +436,7 @@ export async function go(pageId) {
     }
 
     if (pageId === "adminBulkDutySpans") {
-      const bulkModule = await import("./bulk_duty_spans.js?v=3");
+      const bulkModule = await import("./bulk_duty_spans.js?v=4");
       await bulkModule.renderBulkDutySpansPage();
       return;
     }
@@ -607,7 +607,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "driverMonitor") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./driver_monitor.js?v=2");
+    const mod = await import("./driver_monitor.js?v=3");
     mod.renderDriverMonitorPage();
     return;
   }
@@ -615,7 +615,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "fatigueTracking") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./fatigue_tracking.js?v=2");
+    const mod = await import("./fatigue_tracking.js?v=3");
     mod.renderFatigueTrackingPage();
     return;
   }
@@ -623,7 +623,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "operationsDashboard") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./operations_dashboard.js?v=2");
+    const mod = await import("./operations_dashboard.js?v=3");
     mod.renderOperationsDashboardPage({ onNavigate: go });
     return;
   }
