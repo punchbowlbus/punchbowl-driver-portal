@@ -1,4 +1,4 @@
-const CACHE = "pbc-v81"; // Refresh Workshop and mechanic display stability
+const CACHE = "pbc-v82"; // Stop replaying historical inspection dates
 
 const ASSETS = [
   "/",
