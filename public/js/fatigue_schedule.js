@@ -176,3 +176,69 @@ export function refreshRosterFatigue(duties, employees = null) {
   }
   return rows;
 }
+
+export function serviceMinute(date, minutes = 0) {
+  return Date.parse(`${date}T00:00:00Z`) / 60000 + minutes;
+}
+
+// The operator's roster policy: no active duty span means no scheduled work.
+// Infer rest only inside the explicitly loaded, complete schedule coverage.
+export function plannedRestIntervals(duties, start, end) {
+  const work = mergeIntervals(duties.filter(d=>!d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus))).flatMap(workIntervals));
+  const rest=[];let cursor=start;
+  for(const interval of work.filter(x=>x.end>start && x.start<end)) {
+    const workStart=Math.max(start,interval.start);
+    if(workStart>cursor)rest.push({start:cursor,end:workStart});
+    cursor=Math.max(cursor,Math.min(end,interval.end));
+  }
+  if(cursor<end)rest.push({start:cursor,end});
+  return rest;
+}
+
+// Choose non-overlapping night-rest or 24-hour alternatives. Recompute the
+// earliest possible finish after every choice so one rest block is not credited
+// twice and a 24-hour alternative can start after an earlier night-rest block.
+export function countPlannedNightRests(rest, start, end) {
+  let cursor=start,count=0;const usedNights=new Set();
+  const firstDay=Math.floor(start/1440)-1,lastDay=Math.floor(end/1440);
+  while(cursor<end) {
+    let best=null;
+    const consider=(candidate)=>{if(!best || candidate.end<best.end)best=candidate;};
+    for(const gap of rest) {
+      const gapStart=Math.max(cursor,start,gap.start),gapEnd=Math.min(end,gap.end);
+      if(gapStart+1440<=gapEnd)consider({start:gapStart,end:gapStart+1440,kind:"day"});
+      for(let day=firstDay;day<=lastDay;day++) {
+        if(usedNights.has(day))continue;
+        const nightStart=day*1440+1320,nightEnd=(day+1)*1440+480;
+        const blockStart=Math.max(gapStart,nightStart);
+        if(blockStart+420<=Math.min(gapEnd,nightEnd))consider({start:blockStart,end:blockStart+420,kind:"night",day});
+      }
+    }
+    if(!best)break;
+    cursor=best.end;count++;
+    if(best.kind==="night")usedNights.add(best.day);
+  }
+  return count;
+}
+
+export function calculatePlannedRestChecks(duties, reviewDate, coverage) {
+  const end=serviceMinute(shiftServiceDate(reviewDate,1),480);
+  const definitions=[
+    {window:1440,rule:"Planned rest: 7 continuous hours in 24 hours",required:420,unit:"minutes"},
+    {window:10080,rule:"Planned rest: 6 night rests in 7 days",required:6,unit:"blocks"},
+    {window:40320,rule:"Planned rest: 4 × 24-hour rests in 28 days",required:4,unit:"blocks"}
+  ];
+  const active=duties.filter(d=>!d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus)));
+  const invalid=active.some(d=>d.startMin==null || d.endMin==null || String(d.startMin).trim()==="" || String(d.endMin).trim()==="" || !Number.isFinite(absoluteMinute(d,"start")) || !Number.isFinite(absoluteMinute(d,"end")) || Number(d.startMin)<0 || Number(d.endMin)>2939 || Number(d.endMin)<=Number(d.startMin));
+  return definitions.map(definition=>{
+    const start=end-definition.window;
+    const bounds=`${new Date(start*60000).toISOString().slice(0,16).replace("T"," ")}–${new Date(end*60000).toISOString().slice(0,16).replace("T"," ")} base clock`;
+    if(invalid || !coverage || !Number.isFinite(coverage.start) || !Number.isFinite(coverage.end) || coverage.start>start || coverage.end<end) {
+      return {...definition,date:reviewDate,start,end,count:null,result:"DATA REVIEW",detail:invalid ? "Invalid duty times prevent a reliable planned-rest calculation. Correct the duty records." : `Complete schedule coverage is unavailable for ${bounds}; no rest pass or shortfall has been inferred.`};
+    }
+    const rest=plannedRestIntervals(active,start,end);
+    const count=definition.window===1440 ? Math.max(0,...rest.map(gap=>gap.end-gap.start)) : definition.window===10080 ? countPlannedNightRests(rest,start,end) : rest.reduce((sum,gap)=>sum+Math.floor((gap.end-gap.start)/1440),0);
+    const description=definition.window===1440 ? `${durationLabel(count)} longest continuous planned rest; 7h required` : definition.window===10080 ? `${count} non-overlapping planned night-rest/24-hour alternatives; 6 required` : `${count} non-overlapping 24-hour planned rest blocks; 4 required`;
+    return {...definition,date:reviewDate,start,end,count,result:count>=definition.required ? "PLANNED PASS" : "PLANNED SHORTFALL",detail:`${description}. Rolling planning window: ${bounds}. No active duty span is treated as planned rest; recorded breaks are non-work rest. This is a schedule assessment, not confirmation of actual stationary rest or a statutory counting period.`};
+  });
+}

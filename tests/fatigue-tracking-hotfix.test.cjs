@@ -8,7 +8,7 @@ const modules=Promise.all(['dispatch_fatigue.js','fatigue_tracking.js','fatigue_
  const scheduleUrl=asModule(`import {calculateFatigue,refreshLegacyRestBreach,qualifyingRestBlocks,recordedRestBlocks} from '${calcUrl}';\n` + schedule.replace(/^import .*;\s*$/gm,'').replace(/^export function /gm,'export function '));
  const report=tracking.replace(/^(?:import|export \{).*;\s*$/gm,'');
  const escapeHtml = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
- return {calc:await import(calcUrl),schedule:await import(scheduleUrl),report:await import(asModule(`import {calculateTurnarounds,mergeIntervals,workIntervals,minutesWithin,shortWindowWork,shortWindowAssessment} from '${scheduleUrl}';\nconst escapeHtml = ${escapeHtml.toString()};\n${report}\nexport {renderPage};`))};
+ return {calc:await import(calcUrl),schedule:await import(scheduleUrl),report:await import(asModule(`import {calculateTurnarounds,mergeIntervals,workIntervals,minutesWithin,shortWindowWork,shortWindowAssessment,calculatePlannedRestChecks,serviceMinute} from '${scheduleUrl}';\nconst escapeHtml = ${escapeHtml.toString()};\n${report}\nexport {renderPage};`))};
 });
 const range={start:'2026-10-13',end:'2026-10-13'};
 const duty=(date,start,end,breaks=[])=>({serviceDate:date,startMin:start,endMin:end,breaks,driverEmployeeNumber:'899',driverName:'Test Driver',dutyNumber:'WAD',dispatchStatus:'Pending'});
@@ -194,4 +194,88 @@ test('independent operator warning cannot be hidden by a saved OK status',async(
  const {calc}=await modules;
  const row=calc.refreshLegacyRestBreach({...duty('2026-10-13',0,120),fatigueStatus:'OK',fatigueWarning:'Operator review required.'});
  assert.equal(row.fatigueStatus,'WARNING');assert.match(row.fatigueWarning,/Operator review required/);
+});
+const fullCoverage={start:Date.parse('2026-09-01T00:00:00Z')/60000,end:Date.parse('2026-10-20T00:00:00Z')/60000};
+test('no duty means planned rest throughout a completely loaded roster window',async()=>{
+ const {schedule}=await modules;
+ const checks=schedule.calculatePlannedRestChecks([],'2026-10-13',fullCoverage);
+ assert.deepEqual(checks.map(x=>x.result),['PLANNED PASS','PLANNED PASS','PLANNED PASS']);
+ assert.equal(checks[0].count,1440);assert.equal(checks[1].count,7);assert.equal(checks[2].count,28);
+});
+test('one normal duty does not produce a false zero-rest warning from empty previous days',async()=>{
+ const {schedule}=await modules;
+ const checks=schedule.calculatePlannedRestChecks([duty('2026-10-13',540,1020)],'2026-10-13',fullCoverage);
+ assert.equal(checks[0].count,900);assert.equal(checks[1].count,7);assert.ok(checks[2].count>=4);
+ assert.ok(checks.every(x=>x.result==='PLANNED PASS'));
+});
+test('daily early starts prevent seven-hour night rest; the following day is included',async()=>{
+ const {schedule}=await modules;
+ const days=Array.from({length:8},(_,i)=>duty('2026-10-'+String(7+i).padStart(2,'0'),240,720));
+ const checks=schedule.calculatePlannedRestChecks(days,'2026-10-13',fullCoverage);
+ assert.equal(checks[1].count,0);assert.equal(checks[1].result,'PLANNED SHORTFALL');
+});
+test('a 24-hour alternative counts when neither adjoining night contains seven continuous hours',async()=>{
+ const {schedule}=await modules;
+ const start=schedule.serviceMinute('2026-10-12',120),end=start+1440;
+ assert.equal(schedule.countPlannedNightRests([{start,end}],start,end),1);
+});
+test('the same 24-hour rest is not credited again as a night rest',async()=>{
+ const {schedule}=await modules;
+ const start=schedule.serviceMinute('2026-10-12',1320),end=start+1440;
+ assert.equal(schedule.countPlannedNightRests([{start,end}],start,end),1);
+});
+test('48-hour planned rest provides two non-overlapping 24-hour alternatives',async()=>{
+ const {schedule}=await modules;
+ const start=schedule.serviceMinute('2026-10-12',120),end=start+2880;
+ assert.equal(schedule.countPlannedNightRests([{start,end}],start,end),2);
+});
+test('overnight work cuts a rest gap on the following service date',async()=>{
+ const {schedule}=await modules;
+ const start=schedule.serviceMinute('2026-10-13',0),end=start+1440;
+ const rest=schedule.plannedRestIntervals([duty('2026-10-12',1200,1620),duty('2026-10-13',540,1020)],start,end);
+ assert.deepEqual(rest,[{start:start+180,end:start+540},{start:start+1020,end}]);
+});
+test('cancelled/deleted duties disappear from planned-rest occupancy',async()=>{
+ const {schedule}=await modules;
+ const days=[{...duty('2026-10-13',0,1440),dispatchStatus:'Cancelled'},{...duty('2026-10-13',0,1440),deleted:true}];
+ assert.deepEqual(schedule.calculatePlannedRestChecks(days,'2026-10-13',fullCoverage).map(x=>x.result),['PLANNED PASS','PLANNED PASS','PLANNED PASS']);
+});
+test('unloaded history or following-day coverage produces DATA REVIEW, not an inferred pass',async()=>{
+ const {schedule}=await modules;
+ const missingHistory={start:schedule.serviceMinute('2026-10-07'),end:fullCoverage.end};
+ const checks=schedule.calculatePlannedRestChecks([],'2026-10-13',missingHistory);
+ assert.equal(checks[0].result,'PLANNED PASS');assert.equal(checks[2].result,'DATA REVIEW');
+ const missingNextDay={start:fullCoverage.start,end:schedule.serviceMinute('2026-10-14',0)};
+ assert.ok(schedule.calculatePlannedRestChecks([],'2026-10-13',missingNextDay).every(x=>x.result==='DATA REVIEW'));
+});
+test('work on one overlapping duty prevents a break in another becoming planned rest',async()=>{
+ const {schedule}=await modules;
+ const start=schedule.serviceMinute('2026-10-13');
+ const rest=schedule.plannedRestIntervals([duty('2026-10-13',0,600,[{startMin:100,endMin:200}]),duty('2026-10-13',100,200)],start,start+600);
+ assert.deepEqual(rest,[]);
+});
+test('seven-hour continuous planned rest includes the boundary exactly',async()=>{
+ const {schedule}=await modules;
+ const end=schedule.serviceMinute('2026-10-14',480),start=end-1440;
+ // Cover the entire review except one rest gap of 420 or 419 minutes.
+ for(const minutes of [420,419]){
+  const d=duty('2026-10-13',480,1920,[{startMin:900,endMin:900+minutes}]);
+  const check=schedule.calculatePlannedRestChecks([d],'2026-10-13',fullCoverage)[0];
+  assert.equal(check.count,minutes);assert.equal(check.result,minutes===420?'PLANNED PASS':'PLANNED SHORTFALL');
+ }
+});
+test('report displays planned-rest counts instead of blanket rest DATA REVIEW when coverage is loaded',async()=>{
+ const {report}=await modules;
+ const results=report.calculateStandardHoursAlerts([duty('2026-10-13',540,1020,[{startMin:780,endMin:810}])],range,[employee],fullCoverage);
+ assert.equal(results.filter(x=>x.result==='PLANNED PASS').length,3);
+ assert.ok(!results.some(x=>x.rule.includes('rest verification')));
+});
+test('active employee with no duty spans still receives planned-rest results',async()=>{
+ const {report}=await modules;
+ const results=report.calculateStandardHoursAlerts([],range,[{...employee,role:'Driver',status:'Active',displayName:'Test Driver'}],fullCoverage);
+ assert.equal(results.length,3);assert.ok(results.every(x=>x.result==='PLANNED PASS'));
+});
+test('invalid duty times prevent a planned rest pass despite empty work intervals',async()=>{
+ const {schedule}=await modules;
+ assert.ok(schedule.calculatePlannedRestChecks([duty('2026-10-13',0,NaN)],'2026-10-13',fullCoverage).every(x=>x.result==='DATA REVIEW'));
 });

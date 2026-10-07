@@ -615,7 +615,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "fatigueTracking") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./fatigue_tracking.js?v=3");
+    const mod = await import("./fatigue_tracking.js?v=4");
     mod.renderFatigueTrackingPage();
     return;
   }
