@@ -1,3 +1,4 @@
+import { syncMaintenanceEmpty } from "./workshop_maintenance_display.js";
 import {
   collection,
   doc,
@@ -127,10 +128,8 @@ function augmentMaintenanceDue() {
   ensureDashboardMetrics();
   const wrap = $("maintenanceDueList");
   if (!wrap) return;
-  const hint = wrap.closest(".panel")?.querySelector(".panel-head .hint");
-  if (hint) hint.textContent = "Service, A/C, Fire Suppression, Radiator Wash, 90 Day Safety and Registration due";
   const due = dueItems();
-  const signature = due.map(({bus,program,state}) => `${bus.id}:${program.key}:${state.kind}:${state.dueDate}`).join("|");
+  const signature = due.map(({bus,program,state}) => `${bus.id}:${fleetNo(bus)}:${bus.rego || ""}:${bus.depot || ""}:${program.key}:${bus[program.lastField] || ""}:${state.kind}:${state.days}:${state.dueDate}`).join("|");
   const existing = [...wrap.querySelectorAll("[data-special-service-dashboard]")];
   if (wrap.dataset.specialServiceSignature === signature && existing.length === due.length) return;
   existing.forEach((element) => element.remove());
@@ -158,6 +157,8 @@ function augmentMaintenanceDue() {
       <div class="list-meta"><strong>Last completed:</strong> ${esc(formatDate(bus[program.lastField]))}</div>`;
     wrap.appendChild(item);
   });
+
+  syncMaintenanceEmpty(wrap);
 
   const all = buses.flatMap((bus) => PROGRAMS.map((program) => programState(bus, program)));
   if ($("metricSpecialServiceDueSoon")) $("metricSpecialServiceDueSoon").textContent = String(all.filter((state) => ["urgent","soon","book","plan"].includes(state.kind)).length);

@@ -1,3 +1,4 @@
+import { syncMaintenanceEmpty } from "./workshop_maintenance_display.js";
 import {
   collection,
   doc,
@@ -100,9 +101,6 @@ function ensureDashboardUi() {
 
   // 90 Day warnings now live inside the main Maintenance Due panel.
   $("safety90Panel")?.remove();
-  const maintenance = $("maintenanceDueList")?.closest(".panel");
-  const hint = maintenance?.querySelector(".panel-head .hint");
-  if (hint) hint.textContent = "Service, Annual A/C, 90 Day Safety and Registration due";
 }
 
 function dueSafetyBuses() {
@@ -118,17 +116,17 @@ function augmentMaintenanceDue() {
   if (!wrap) return;
 
   const due = dueSafetyBuses();
-  const signature = due.map(({bus,state}) => `${bus.id}:${state.kind}:${bus.next90DaySafetyCheckDate || ""}`).join("|");
+  const signature = due.map(({bus,state}) => `${bus.id}:${fleetNo(bus)}:${state.kind}:${state.days}:${bus.last90DaySafetyCheckDate || ""}:${bus.next90DaySafetyCheckDate || ""}`).join("|");
   const existing = [...wrap.querySelectorAll("[data-safety90-dashboard]")];
   if (wrap.dataset.safety90Signature === signature && existing.length === due.length) return;
 
   existing.forEach((el) => el.remove());
   wrap.dataset.safety90Signature = signature;
 
-  if (!due.length) return;
+  if (!due.length) { syncMaintenanceEmpty(wrap); return; }
 
   [...wrap.querySelectorAll(".empty")].forEach((el) => {
-    if (/no buses currently due based on recorded schedules/i.test(el.textContent || "")) el.remove();
+    if (/no .* currently due/i.test(el.textContent || "")) el.remove();
   });
 
   due.forEach(({bus,state}) => {
@@ -146,6 +144,7 @@ function augmentMaintenanceDue() {
       <div class="list-meta">${esc(state.detail)}</div>`;
     wrap.appendChild(item);
   });
+  syncMaintenanceEmpty(wrap);
 }
 
 function renderDashboardSafety() {

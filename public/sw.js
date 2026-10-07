@@ -1,4 +1,4 @@
-const CACHE = "pbc-v79"; // Refresh fatigue calculations and linked planning screens
+const CACHE = "pbc-v80"; // Refresh Workshop maintenance display
 
 const ASSETS = [
   "/",
