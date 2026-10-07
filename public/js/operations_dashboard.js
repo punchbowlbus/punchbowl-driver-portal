@@ -1,3 +1,4 @@
+import { refreshLegacyRestBreach } from "./dispatch_fatigue.js";
 import {
   collection,
   onSnapshot
@@ -319,7 +320,7 @@ export function renderOperationsDashboardPage({ onNavigate } = {}) {
     state.unsubscribeOperationsDashboard?.();
     model.ready.clear();
     const stops = [];
-    const ready = (key, target) => (items) => { model[target] = (items || []).filter((item) => item.deleted !== true); model.ready.add(key); paint(); };
+    const ready = (key, target) => (items) => { model[target] = (items || []).filter((item) => item.deleted !== true).map(item => target === "duties" ? refreshLegacyRestBreach(item) : item); model.ready.add(key); paint(); };
     const fail = (key) => (error) => { console.error(`Operations Dashboard ${key}:`, error); model.ready.add(key); paint(); };
     stops.push(listenDutySpansByDate(model.selectedDate, ready("duties", "duties"), fail("duties")));
     stops.push(listenBlocksByDate(model.selectedDate, ready("blocks", "blocks"), fail("blocks")));

@@ -1,3 +1,20 @@
+// One rest definition for Dispatch, bulk entry and the tracking report.
+export function qualifyingRestBlocks(duty) {
+  const start = Number(duty.startMin), end = Number(duty.endMin);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+  const blocks = (Array.isArray(duty.breaks) ? duty.breaks : [])
+    .map(b => ({startMin: Math.max(start, Number(b.startMin)), endMin: Math.min(end, Number(b.endMin))}))
+    .filter(b => Number.isFinite(b.startMin) && Number.isFinite(b.endMin) && b.endMin > b.startMin)
+    .sort((a, b) => a.startMin - b.startMin);
+  const merged = [];
+  for (const b of blocks) {
+    const last = merged[merged.length - 1];
+    if (last && b.startMin <= last.endMin) last.endMin = Math.max(last.endMin, b.endMin);
+    else merged.push({...b});
+  }
+  return merged.filter(b => b.endMin - b.startMin >= 15);
+}
+
 export function calculateFatigue(dutySpan) {
   const start = Number(dutySpan.startMin ?? 0);
   const end = Number(dutySpan.endMin ?? 0);
@@ -20,7 +37,7 @@ export function calculateFatigue(dutySpan) {
 
   const paidMinutes = Math.max(0, totalSpanMinutes - unpaidMinutes);
 
-  const restBreaks = normalizedBreaks;
+  const restBreaks = qualifyingRestBlocks(dutySpan);
 
   const LIMIT_5H30 = 5 * 60 + 30; // 330
   const LIMIT_8H = 8 * 60;        // 480
@@ -28,16 +45,6 @@ export function calculateFatigue(dutySpan) {
   const LIMIT_12H = 12 * 60;      // 720
 
   const WARNING_FROM_5H15 = 5 * 60; // 300 min
-
-  function restMinutesWithinMinutes(windowMinutes) {
-    const windowEnd = start + windowMinutes;
-
-    return restBreaks.filter((b) => b.endMin - b.startMin >= 15).reduce((sum, b) => {
-      const overlapStart = Math.max(start, b.startMin);
-      const overlapEnd = Math.min(windowEnd, b.endMin);
-      return sum + Math.max(0, overlapEnd - overlapStart);
-    }, 0);
-  }
 
   function hasContinuousRestWithinMinutes(windowMinutes, neededMinutes) {
     const windowEnd = start + windowMinutes;
@@ -59,10 +66,21 @@ export function calculateFatigue(dutySpan) {
     0
   );
 
-  // Rule results
-  const has15MinWithin5h15m = hasContinuousRestWithinMinutes(LIMIT_5H30, 15);
-  const has30MinWithin8h = restMinutesWithinMinutes(LIMIT_8H) >= 30;
-  const has60MinWithin11h = restMinutesWithinMinutes(LIMIT_11H) >= 60;
+  // Check every work resumption, not just the first window of the duty.
+  function staysWithinWorkLimit(windowMinutes, maximumWork) {
+    const starts = [start, ...restBreaks.map(b => b.endMin)].filter(x => x < end);
+    return starts.every(windowStart => {
+      const windowEnd = Math.min(end, windowStart + windowMinutes);
+      const rest = restBreaks.reduce((sum,b) => {
+        const overlap = Math.max(0, Math.min(windowEnd,b.endMin) - Math.max(windowStart,b.startMin));
+        return sum + (overlap >= 15 ? overlap : 0);
+      },0);
+      return windowEnd - windowStart - rest <= maximumWork;
+    });
+  }
+  const has15MinWithin5h15m = staysWithinWorkLimit(LIMIT_5H30, 315);
+  const has30MinWithin8h = staysWithinWorkLimit(LIMIT_8H, 450);
+  const has60MinWithin11h = staysWithinWorkLimit(LIMIT_11H, 600);
 
   // Threshold flags
   const reaches5h15 = totalSpanMinutes >= LIMIT_5H30;
@@ -73,15 +91,7 @@ export function calculateFatigue(dutySpan) {
   // Fatigue work time is separate from payroll and elapsed duty span.
   // Credit only recorded rest blocks of at least 15 minutes, within this duty.
   // Merge overlapping rest so malformed legacy data cannot double-count it.
-  const qualifyingRest = normalizedBreaks
-    .map((b) => ({startMin: Math.max(start, b.startMin), endMin: Math.min(end, b.endMin)}))
-    .filter((b) => b.endMin - b.startMin >= 15);
-  const mergedRest = [];
-  for (const rest of qualifyingRest) {
-    const last = mergedRest[mergedRest.length - 1];
-    if (last && rest.startMin <= last.endMin) last.endMin = Math.max(last.endMin, rest.endMin);
-    else mergedRest.push({...rest});
-  }
+  const mergedRest = restBreaks;
   const qualifyingRestMinutes = mergedRest.reduce((sum, b) => sum + b.endMin - b.startMin, 0);
   const workMinutes = Math.max(0, totalSpanMinutes - qualifyingRestMinutes);
   const restIn24hMinutes = Math.max(0, 24 * 60 - workMinutes);
@@ -104,21 +114,21 @@ export function calculateFatigue(dutySpan) {
   const warnings = [];
 
   // Bus and coach Standard Hours: 15 continuous minutes within 5.5 hours.
-  if (reaches5h15 && !has15MinWithin5h15m) {
+  if (!has15MinWithin5h15m) {
     fatigueStatus = "BREACH";
     warnings.push("Need at least 15 continuous minutes rest within 5½ hours.");
   }
 
-  // LEGAL: 30 min total within first 8h
-  if (reaches8h && !has30MinWithin8h) {
+  // Scheduled 8-hour work/rest check
+  if (!has30MinWithin8h) {
     fatigueStatus = "BREACH";
-    warnings.push("Need at least 30 min total rest within first 8 hours.");
+    warnings.push("Need at least 30 min total rest within an 8-hour counting window.");
   }
 
-  // LEGAL: 60 min total within first 11h
-  if (reaches11h && !has60MinWithin11h) {
+  // Scheduled 11-hour work/rest check
+  if (!has60MinWithin11h) {
     fatigueStatus = "BREACH";
-    warnings.push("Need at least 60 min total rest within first 11 hours.");
+    warnings.push("Need at least 60 min total rest within an 11-hour counting window.");
   }
 
   // These are only meaningful once duty becomes long enough to matter operationally.
@@ -136,7 +146,7 @@ export function calculateFatigue(dutySpan) {
   if (
     !reaches5h15 &&
     totalSpanMinutes >= WARNING_FROM_5H15 &&
-    !has15MinWithin5h15m
+    !hasContinuousRestWithinMinutes(LIMIT_5H30, 15)
   ) {
     if (fatigueStatus === "OK") {
       fatigueStatus = "WARNING";
@@ -195,13 +205,14 @@ export function calculateFatigue(dutySpan) {
   };
 }
 
-// Refresh this specific obsolete saved warning on the board without changing
-// Firestore records or suppressing independent warnings such as turnaround.
+// Recalculate recognised calculator messages without losing independent
+// saved turnaround / operational warnings or mutating Firestore records.
 export function refreshLegacyRestBreach(span) {
-  const obsolete = "Need at least 12 hours rest in 24 hours.";
   const savedWarning = String(span.fatigueWarning || "");
-  if (!savedWarning.includes(obsolete)) return span;
-  const remaining = savedWarning.replaceAll(obsolete, "").trim();
+  const known = /Need at least 12 hours rest in 24 hours\.|Need at least 15 continuous minutes rest within 5½ hours\.|Need at least (?:30|60) min total rest within (?:first (?:8|11) hours|an (?:8|11)-hour counting window)\.|Recorded fatigue work exceeds 12 hours in this duty \(excluding qualifying rest\)\.|Need at least 7 continuous hours rest in 24 hours\.|Approaching 5½ hours without a 15-minute continuous rest break\.|Plan a qualifying rest break before 5½ hours\.|Company rule: 12\+ hour shift needs 60 min total break\./g;
+  const remaining = savedWarning.replace(known, "").trim();
+  // Refresh existing fatigue results and duties without any saved result.
+  if (remaining === savedWarning && savedWarning) return span;
   const current = calculateFatigue(span);
   const warnings = [...new Set([current.fatigueWarning, remaining].filter(Boolean))];
   const severity = {OK: 0, WARNING: 1, BREACH: 2};

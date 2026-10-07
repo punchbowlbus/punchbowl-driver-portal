@@ -1,3 +1,4 @@
+import { refreshLegacyRestBreach } from "./dispatch_fatigue.js";
 import { listenDutySpansByDate, listenBlocksByDate } from "./db.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./utils.js";
@@ -377,7 +378,7 @@ export function renderDriverMonitorPage() {
     tableEl.innerHTML = `<div class="dm-loading">Loading driver duties…</div>`;
 
     const stopDuties = listenDutySpansByDate(date, (items) => {
-      model.duties = items || [];
+      model.duties = (items || []).map(refreshLegacyRestBreach);
       model.dutiesReady = true;
       paint();
     }, (error) => {

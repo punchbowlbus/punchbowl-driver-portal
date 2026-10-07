@@ -1,4 +1,4 @@
-const CACHE = "pbc-v76"; // Refresh professional register and special-service tracking
+const CACHE = "pbc-v77"; // Refresh fatigue calculations and linked planning screens
 
 const ASSETS = [
   "/",
