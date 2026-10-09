@@ -13,7 +13,7 @@ function ensureStyles() {
   const link = document.createElement("link");
   link.id = STYLE_ID;
   link.rel = "stylesheet";
-  link.href = "./styles/fatigue_tracking.css?v=1";
+  link.href = "./styles/fatigue_tracking.css?v=2";
   document.head.appendChild(link);
 }
 
@@ -87,7 +87,7 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
     if (!inRange.length && !coverage) continue;
     const employeeName=(employees || []).find(e=>String(e.employeeNumber || e.id).trim()===employeeNumber)?.displayName;
     const driverName = String(driverDuties[0]?.driverName || employeeName || employeeNumber).trim();
-    const add = (date, rule, detail, result = "REVIEW", observedMinutes = 0) => alerts.push({employeeNumber, driverName, date, rule, detail, result, observedMinutes});
+    const add = (date, rule, detail, result = "REVIEW", observedMinutes = 0, assessment = {}) => alerts.push({employeeNumber, driverName, date, rule, detail, result, observedMinutes, assessment});
     for(const duty of driverDuties)if(!validDutyRecord(duty))add(duty.serviceDate>=range.start && duty.serviceDate<=range.end ? duty.serviceDate : range.end,"Duty data verification","Duty or break times are invalid; correct the records before relying on planned work/rest results.","DATA REVIEW");
     const employee = employees && employees.find(e => String(e.employeeNumber || e.id).trim() === employeeNumber);
     const profile = employees ? employee?.fatigueCategory || "Unknown" : driverDuties[0]?.fatigueCategory || "Standard";
@@ -97,7 +97,7 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
     }
     for(const risk of scheduledWorkRisks(driverDuties,coverage)) {
       const affected=inRange.filter(d=>absoluteMinute(d,"end")>risk.start && absoluteMinute(d,"start")<risk.end).sort((a,b)=>b.serviceDate.localeCompare(a.serviceDate))[0];
-      if(affected)add(affected.serviceDate,risk.rule,risk.detail,"PLANNED SHORTFALL",risk.rule.startsWith("Planned rest:") ? risk.count : risk.minutes);
+      if(affected)add(affected.serviceDate,risk.rule,risk.detail,"PLANNED SHORTFALL",risk.rule.startsWith("Planned rest:") ? risk.count : risk.minutes,risk);
     }
     const periods=plannedCountingPeriods(driverDuties,coverage);
     const reviewDates=[...new Set(inRange.map(d=>d.serviceDate))].sort();
@@ -109,7 +109,7 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
       for(const date of reviewDates) {
         for(const check of calculatePlannedRestChecks(driverDuties,date,coverage,periods)) {
           // Show every shortfall/date and the latest positive totals per driver.
-          if(check.result!=="PLANNED PASS" || date===latest)add(date,check.rule,check.detail,check.result,check.count || 0);
+          if(check.result!=="PLANNED PASS" || date===latest)add(date,check.rule,check.detail,check.result,check.count || 0,check);
         }
       }
     }
@@ -122,6 +122,33 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
     if(!old || priority[item.result]>priority[old.result] || (priority[item.result]===priority[old.result] && worseCount))unique.set(key,item);
   }
   return [...unique.values()].sort((a,b) => b.date.localeCompare(a.date));
+}
+
+function checkTableCells(item) {
+  const a=item.assessment || {},rest=item.rule.startsWith("Planned rest:"),work=item.rule.startsWith("Planned work:");
+  let label=item.rule,planned="—",required="—";
+  if(rest) {
+    label=a.window===1440 ? "Continuous rest · 24 hours" : a.window===10080 ? "Night rest · 7 days" : "Full-day rest · 28 days";
+    if(Number.isFinite(a.count))planned=a.window===1440 ? durationLabel(a.count) : `${a.count} ${a.window===10080 ? "night rests" : "full-day rests"}`;
+    required=a.window===1440 ? "At least 7h continuous" : a.window===10080 ? "At least 6 night rests" : "At least 4 × 24h rests";
+  } else if(work) {
+    label=a.window===1440 ? "Work · 24 hours" : "Work · 28 days";
+    if(Number.isFinite(a.minutes))planned=durationLabel(a.minutes);
+    if(Number.isFinite(a.maximum))required=`At most ${durationLabel(a.maximum)}`;
+  } else if(Number.isFinite(a.minutes)) {
+    label=`Work / breaks · ${a.window===330 ? "5½" : a.window/60} hours`;
+    planned=`${durationLabel(a.minutes)} work / ${durationLabel(a.restMinutes)} rest`;
+    required=`Max ${durationLabel(a.maximum)} work / min ${durationLabel(a.required)} rest`;
+  }
+  let period=item.result==="NO SCHEDULED WORK" ? "No work period" : "Not available";
+  if(Number.isFinite(a.start) && Number.isFinite(a.end)) {
+    const format=minute=>new Date(minute*60000).toISOString().slice(0,16).replace("T"," ");
+    period=`<span>${escapeHtml(format(a.start))}</span><span>to ${escapeHtml(format(a.end))}</span>`;
+  }
+  if(item.result==="NO SCHEDULED WORK")planned="No work scheduled";
+  const labels={"PLANNED PASS":"Meets planned minimum","PLANNED SHORTFALL":"Outside planned limit","DATA REVIEW":"Needs more information","NO SCHEDULED WORK":"No scheduled work","REVIEW":"Review required"};
+  const tone=["PLANNED PASS","NO SCHEDULED WORK"].includes(item.result) ? "compliant" : item.result==="PLANNED SHORTFALL" ? "breach" : "review";
+  return {label,planned,required,period,result:labels[item.result] || item.result || "Review required",tone};
 }
 
 function renderPage(results, standardAlerts, range, search = "", filter = "all") {
@@ -178,7 +205,11 @@ function renderPage(results, standardAlerts, range, search = "", filter = "all")
   const standardBody = document.getElementById("ftStandardRows");
   if (standardBody) {
     const matching = standardAlerts.filter((item) => !normalizedSearch || [item.driverName, item.employeeNumber, item.rule].join(" ").toLowerCase().includes(normalizedSearch));
-    standardBody.innerHTML = matching.length ? matching.map((item) => `<tr><td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(item.rule)}</strong><small>Bus and coach Standard Hours</small></td><td>${dateLabel(item.date)}</td><td><span class="ft-status ${["PLANNED PASS","NO SCHEDULED WORK"].includes(item.result) ? "compliant" : item.result==="PLANNED SHORTFALL" ? "breach" : "review"}">${escapeHtml(item.result || "REVIEW")}</span></td><td><strong>${escapeHtml(item.detail)}</strong></td></tr>`).join("") : `<tr><td colspan="5"><div class="ft-empty ft-empty-small"><strong>No bus and coach Standard Hours alerts</strong></div></td></tr>`;
+    matching.sort((a,b)=>a.driverName.localeCompare(b.driverName) || a.employeeNumber.localeCompare(b.employeeNumber) || b.date.localeCompare(a.date));
+    standardBody.innerHTML = matching.length ? matching.map(item=>{
+      const cells=checkTableCells(item);
+      return `<tr><td class="ft-driver-cell"><strong>${escapeHtml(item.driverName)}</strong><small>Employee ${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(cells.label)}</strong></td><td class="ft-review-date">${dateLabel(item.date)}</td><td class="ft-period">${cells.period}</td><td class="ft-value"><strong>${escapeHtml(cells.planned)}</strong></td><td><span>${escapeHtml(cells.required)}</span></td><td><span class="ft-status ${cells.tone}">${escapeHtml(cells.result)}</span></td><td><details class="ft-check-details"><summary>View calculation</summary><p>${escapeHtml(item.detail)}</p></details></td></tr>`;
+    }).join("") : `<tr><td colspan="8"><div class="ft-empty ft-empty-small"><strong>No matching work and rest checks</strong></div></td></tr>`;
   }
 }
 
@@ -203,7 +234,7 @@ export function renderFatigueTrackingPage() {
     </section>
     <section id="ftMetrics" class="ft-metrics"></section>
     <div class="ft-note"><strong>Rule profile:</strong> Standard Hours — Solo Driver in the Bus and Coach Sector, plus the company 8-hour turnaround rule. A passed duty check does not establish fitness to drive or full legal compliance. No active duty span means no scheduled work and is counted as planned rest. Meal/crib entries are non-work rest. Long periods start at the end of qualifying planned rest. Earlier overlapping periods remain active. Incomplete periods cannot produce a rest pass or shortfall. Any other work or changed duty times must be recorded. Scheduled times use the service-date base clock. Confirm the driver’s hours option before applying these limits. Actual elapsed time across daylight-saving changes and actual stationary rest require work-diary verification. Minute-precision schedule checks do not apply written-work-diary rounding or constitute an approved electronic work diary.</div>
-    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>Duty-span work and rest checks</h2><span>Work and rest calculated from daily duty spans. No active duty span means planned rest. Periods follow qualifying planned rest; results are planning checks.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
+    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>Duty-span work and rest checks</h2><span>Work and rest calculated from daily duty spans. No active duty span means planned rest. Periods follow qualifying planned rest; results are planning checks.</span></div></div><div class="ft-table-wrap"><table class="ft-check-table"><thead><tr><th>Driver / employee</th><th>Check</th><th>Review date</th><th>Counting period</th><th>Planned amount</th><th>Requirement</th><th>Result</th><th>Details</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="8"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
     <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Compares each working day's final finish with the driver's next working-day start. Same-day overlaps appear as conflicts.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
       <div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Previous duty</th><th>Finished</th><th>Rest available</th><th>Next start</th><th>Next duty</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftRows"><tr><td colspan="8"><div class="ft-empty">Loading fatigue records…</div></td></tr></tbody></table></div>
     </section>
@@ -228,7 +259,7 @@ export function renderFatigueTrackingPage() {
     results=[]; standardAlerts=[];
     redraw();
     document.getElementById("ftRows").innerHTML=`<tr><td colspan="8">Loading schedule checks…</td></tr>`;
-    document.getElementById("ftStandardRows").innerHTML=`<tr><td colspan="5">Loading work and planned rest…</td></tr>`;
+    document.getElementById("ftStandardRows").innerHTML=`<tr><td colspan="8">Loading work and planned rest…</td></tr>`;
     const apply = () => {
       if(!scheduleReady)return;
       const coverage={start:serviceMinute(shiftDate(range.start,-28)),end:serviceMinute(shiftDate(range.end,2))};
@@ -238,7 +269,7 @@ export function renderFatigueTrackingPage() {
     const stopDuties = listenDutySpansByDateRange(
       shiftDate(range.start, -31), shiftDate(range.end, 1),
       (duties) => { loadedDuties = duties; scheduleReady=true; apply(); },
-      (error) => { scheduleReady=false; loadedDuties=[]; results = []; standardAlerts = []; redraw(); document.getElementById("ftStandardRows").innerHTML = `<tr><td colspan="5">Unable to load fatigue data</td></tr>`; document.getElementById("ftRows").innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>Unable to load fatigue data</strong><span>${escapeHtml(error?.message || "Please try again.")}</span></div></td></tr>`; }
+      (error) => { scheduleReady=false; loadedDuties=[]; results = []; standardAlerts = []; redraw(); document.getElementById("ftStandardRows").innerHTML = `<tr><td colspan="8">Unable to load fatigue data</td></tr>`; document.getElementById("ftRows").innerHTML = `<tr><td colspan="8"><div class="ft-empty"><strong>Unable to load fatigue data</strong><span>${escapeHtml(error?.message || "Please try again.")}</span></div></td></tr>`; }
     );
     state.unsubscribeFatigueTracking = () => {stopEmployees?.(); stopDuties?.();};
   };

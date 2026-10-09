@@ -189,7 +189,7 @@ export function scheduledWorkRisks(duties, coverage = null) {
     for(const start of work.map(x=>x.start)) {
       const end=start+window,check=shortWindowAssessment(work,start,end,coverageEnd);
       if(check.work<=maximum && !(check.complete && check.rest<window-maximum))continue;
-      risks.push({rule,minutes:check.work,start,end,dutyIds:active.filter(d=>absoluteMinute(d,"end")>start && absoluteMinute(d,"start")<end).map(d=>d.id),detail:`Scheduled roster risk: ${durationLabel(check.work)} work; ${check.rest} qualifying rest minutes in ${boundsLabel(start,end)} (${durationLabel(maximum)} maximum work; ${window-maximum} minutes rest required). Verify actual work/rest and the statutory counting period.`});
+      risks.push({rule,minutes:check.work,restMinutes:check.rest,maximum,required:window-maximum,window,start,end,dutyIds:active.filter(d=>absoluteMinute(d,"end")>start && absoluteMinute(d,"start")<end).map(d=>d.id),detail:`Scheduled roster risk: ${durationLabel(check.work)} work; ${check.rest} qualifying rest minutes in ${boundsLabel(start,end)} (${durationLabel(maximum)} maximum work; ${window-maximum} minutes rest required). Verify actual work/rest and the statutory counting period.`});
     }
   }
   for(const period of plannedCountingPeriods(duties,coverage)) {

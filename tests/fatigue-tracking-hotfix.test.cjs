@@ -64,10 +64,10 @@ test('Standard Hours table renders even with no turnaround results',async()=>{
   const alerts=report.calculateStandardHoursAlerts([duty('2026-10-13',0,360)],range);
   report.renderPage([],alerts,range);
   assert.match(nodes.ftRows.innerHTML,/No matching turnaround/);
-  assert.match(nodes.ftStandardRows.innerHTML,/DATA REVIEW/);
+  assert.match(nodes.ftStandardRows.innerHTML,/Needs more information/);
   assert.match(nodes.ftStandardRows.innerHTML,/5½/);
   report.renderPage([],[],range);
-  assert.doesNotMatch(nodes.ftStandardRows.innerHTML,/DATA REVIEW/);
+  assert.doesNotMatch(nodes.ftStandardRows.innerHTML,/Needs more information/);
  } finally {delete global.document;}
 });
 test('a saved obsolete break message is refreshed while company turnaround survives',async()=>{
