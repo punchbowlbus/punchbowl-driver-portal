@@ -2,7 +2,7 @@ import { listenDutySpansByDateRange, listenEmployees } from "./db.js";
 import { state } from "./state.js";
 import { els } from "./ui.js";
 import { escapeHtml } from "./utils.js";
-import { calculateTurnarounds, mergeIntervals, workIntervals, minutesWithin, shortWindowWork, shortWindowAssessment, shiftServiceDate, calculatePlannedRestChecks, serviceMinute } from "./fatigue_schedule.js";
+import { validDutyRecord, plannedCountingPeriods, scheduledWorkRisks, calculateTurnarounds, mergeIntervals, workIntervals, minutesWithin, shortWindowWork, shortWindowAssessment, shiftServiceDate, calculatePlannedRestChecks, serviceMinute } from "./fatigue_schedule.js";
 export { calculateTurnarounds } from "./fatigue_schedule.js";
 
 const COMPANY_MIN_REST_MINUTES = 8 * 60;
@@ -88,44 +88,18 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
     const employeeName=(employees || []).find(e=>String(e.employeeNumber || e.id).trim()===employeeNumber)?.displayName;
     const driverName = String(driverDuties[0]?.driverName || employeeName || employeeNumber).trim();
     const add = (date, rule, detail, result = "REVIEW", observedMinutes = 0) => alerts.push({employeeNumber, driverName, date, rule, detail, result, observedMinutes});
-    for(const duty of inRange)if(duty.startMin == null || duty.endMin == null || String(duty.startMin).trim() === "" || String(duty.endMin).trim() === "" || !Number.isFinite(Number(duty.startMin)) || !Number.isFinite(Number(duty.endMin)) || Number(duty.endMin)<=Number(duty.startMin))add(duty.serviceDate,"Duty data verification","Duty start/end times are missing or invalid; no valid fatigue result can be established for this record.","DATA REVIEW");
+    for(const duty of driverDuties)if(!validDutyRecord(duty))add(duty.serviceDate>=range.start && duty.serviceDate<=range.end ? duty.serviceDate : range.end,"Duty data verification","Duty or break times are invalid; correct the records before relying on planned work/rest results.","DATA REVIEW");
     const employee = employees && employees.find(e => String(e.employeeNumber || e.id).trim() === employeeNumber);
     const profile = employees ? employee?.fatigueCategory || "Unknown" : driverDuties[0]?.fatigueCategory || "Standard";
     if (profile.toLowerCase() !== "standard") {
       add(inRange.map(d=>d.serviceDate).sort().at(-1) || range.end, "Hours-option verification", `${profile}: Bus and Coach Standard Hours limits have not been applied. Verify this driver's applicable hours option and work/rest records.`, "DATA REVIEW");
       continue;
     }
-    const work = mergeIntervals(driverDuties.flatMap(workIntervals));
-    // Test every recorded work resumption, including after meals and split
-    // duties. A break on one overlapping duty cannot cancel another duty's work.
-    const coverageEnd=Math.max(0,...driverDuties.map(d=>absoluteMinute(d,"end")));
-    const checks = [
-      {window: 330, maximum: 315, rule: "15-minute rest within 5½ hours"},
-      {window: 480, maximum: 450, rule: "30-minute rest within 8 hours"},
-      {window: 660, maximum: 600, rule: "60-minute rest within 11 hours"}
-    ];
-    for (const segment of work) {
-      for (const check of checks) {
-        const end = segment.start + check.window;
-        const assessment=shortWindowAssessment(work,segment.start,end,coverageEnd);
-        const minutes=assessment.work;
-        if (minutes <= check.maximum && !(assessment.complete && assessment.rest < check.window-check.maximum)) continue;
-        const affected = inRange.find(d => absoluteMinute(d, "end") > segment.start && absoluteMinute(d, "start") < end);
-        if (affected) add(affected.serviceDate, check.rule, `${durationLabel(minutes)} scheduled work in a ${check.window / 60}-hour base-clock window starting at a recorded work resumption; ${assessment.rest} qualifying scheduled rest minutes. Check actual work and qualifying rest.`);
-      }
+    for(const risk of scheduledWorkRisks(driverDuties,coverage)) {
+      const affected=inRange.filter(d=>absoluteMinute(d,"end")>risk.start && absoluteMinute(d,"start")<risk.end).sort((a,b)=>b.serviceDate.localeCompare(a.serviceDate))[0];
+      if(affected)add(affected.serviceDate,risk.rule,risk.detail,"PLANNED SHORTFALL",risk.rule.startsWith("Planned rest:") ? risk.count : risk.minutes);
     }
-    // Search all endpoint candidates: a rolling total can peak at the start of
-    // work, its end, or an endpoint shifted back by the window length.
-    for (const [window, maximum, rule] of [[1440,720,"Scheduled work risk: 24-hour window"], [40320,17280,"Scheduled work risk: 28-day window"]]) {
-      const candidates = new Set(work.flatMap(x => [x.start, x.end - window]));
-      for (const start of candidates) {
-        const end = start + window;
-        const minutes = minutesWithin(work, start, end);
-        if (minutes <= maximum) continue;
-        const affected = inRange.filter(d => absoluteMinute(d, "end") > start && absoluteMinute(d, "start") < end).sort((a,b) => b.serviceDate.localeCompare(a.serviceDate))[0];
-        if (affected) add(affected.serviceDate, rule, `${durationLabel(minutes)} scheduled work exceeds ${maximum / 60}h in a rolling base-clock window. This is a planning risk indicator; confirm the statutory period from the work diary.`, "REVIEW", minutes);
-      }
-    }
+    const periods=plannedCountingPeriods(driverDuties,coverage);
     const reviewDates=[...new Set(inRange.map(d=>d.serviceDate))].sort();
     if(!reviewDates.length)reviewDates.push(range.end);
     const latest=reviewDates.at(-1);
@@ -133,7 +107,7 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
       add(latest,"24-hour / 7-day / 28-day rest verification","Complete loaded schedule coverage is required to calculate planned rest. No active duty span will be treated as no scheduled work within that coverage.","DATA REVIEW");
     } else {
       for(const date of reviewDates) {
-        for(const check of calculatePlannedRestChecks(driverDuties,date,coverage)) {
+        for(const check of calculatePlannedRestChecks(driverDuties,date,coverage,periods)) {
           // Show every shortfall/date and the latest positive totals per driver.
           if(check.result!=="PLANNED PASS" || date===latest)add(date,check.rule,check.detail,check.result,check.count || 0);
         }
@@ -141,7 +115,12 @@ export function calculateStandardHoursAlerts(duties, range, employees = null, co
     }
   }
   const unique = new Map();
-  alerts.sort((a,b) => a.date.localeCompare(b.date) || a.observedMinutes - b.observedMinutes).forEach(item => unique.set(`${item.employeeNumber}|${item.rule}|${item.date}`, item));
+  const priority={"PLANNED SHORTFALL":3,"DATA REVIEW":2,"REVIEW":2,"PLANNED PASS":1,"NO SCHEDULED WORK":1};
+  for(const item of alerts) {
+    const key=`${item.employeeNumber}|${item.rule}|${item.date}`,old=unique.get(key);
+    const worseCount=item.rule.startsWith("Planned rest:") ? item.observedMinutes<old?.observedMinutes : item.observedMinutes>old?.observedMinutes;
+    if(!old || priority[item.result]>priority[old.result] || (priority[item.result]===priority[old.result] && worseCount))unique.set(key,item);
+  }
   return [...unique.values()].sort((a,b) => b.date.localeCompare(a.date));
 }
 
@@ -199,7 +178,7 @@ function renderPage(results, standardAlerts, range, search = "", filter = "all")
   const standardBody = document.getElementById("ftStandardRows");
   if (standardBody) {
     const matching = standardAlerts.filter((item) => !normalizedSearch || [item.driverName, item.employeeNumber, item.rule].join(" ").toLowerCase().includes(normalizedSearch));
-    standardBody.innerHTML = matching.length ? matching.map((item) => `<tr><td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(item.rule)}</strong><small>Bus and coach Standard Hours</small></td><td>${dateLabel(item.date)}</td><td><span class="ft-status ${item.result === "PLANNED PASS" ? "compliant" : "breach"}">${escapeHtml(item.result || "REVIEW")}</span></td><td><strong>${escapeHtml(item.detail)}</strong></td></tr>`).join("") : `<tr><td colspan="5"><div class="ft-empty ft-empty-small"><strong>No bus and coach Standard Hours alerts</strong></div></td></tr>`;
+    standardBody.innerHTML = matching.length ? matching.map((item) => `<tr><td><strong>${escapeHtml(item.driverName)}</strong><small>${escapeHtml(item.employeeNumber)}</small></td><td><strong>${escapeHtml(item.rule)}</strong><small>Bus and coach Standard Hours</small></td><td>${dateLabel(item.date)}</td><td><span class="ft-status ${["PLANNED PASS","NO SCHEDULED WORK"].includes(item.result) ? "compliant" : item.result==="PLANNED SHORTFALL" ? "breach" : "review"}">${escapeHtml(item.result || "REVIEW")}</span></td><td><strong>${escapeHtml(item.detail)}</strong></td></tr>`).join("") : `<tr><td colspan="5"><div class="ft-empty ft-empty-small"><strong>No bus and coach Standard Hours alerts</strong></div></td></tr>`;
   }
 }
 
@@ -223,8 +202,8 @@ export function renderFatigueTrackingPage() {
       <button id="ftRefresh" type="button">Refresh</button>
     </section>
     <section id="ftMetrics" class="ft-metrics"></section>
-    <div class="ft-note"><strong>Rule profile:</strong> Standard Hours — Solo Driver in the Bus and Coach Sector, plus the company 8-hour turnaround rule. A passed duty check does not establish fitness to drive or full legal compliance. No active duty span means no scheduled work and is counted as planned rest. Meal/crib entries are non-work rest. Rest results use rolling schedule windows ending at 08:00 the following day, including night-rest or 24-hour alternatives. Any other work or changed duty times must be recorded. Scheduled times use the service-date base clock. Confirm the driver’s hours option before applying these limits. Actual elapsed time across daylight-saving changes, statutory counting anchors and stationary rest require work-diary verification. Minute-precision schedule checks do not apply written-work-diary rounding or constitute an approved electronic work diary.</div>
-    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>Duty-span work and rest checks</h2><span>Work and rest calculated from daily duty spans. No active duty span means planned rest. Review windows end at 08:00 the following day; results are planning checks.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
+    <div class="ft-note"><strong>Rule profile:</strong> Standard Hours — Solo Driver in the Bus and Coach Sector, plus the company 8-hour turnaround rule. A passed duty check does not establish fitness to drive or full legal compliance. No active duty span means no scheduled work and is counted as planned rest. Meal/crib entries are non-work rest. Long periods start at the end of qualifying planned rest. Earlier overlapping periods remain active. Incomplete periods cannot produce a rest pass or shortfall. Any other work or changed duty times must be recorded. Scheduled times use the service-date base clock. Confirm the driver’s hours option before applying these limits. Actual elapsed time across daylight-saving changes and actual stationary rest require work-diary verification. Minute-precision schedule checks do not apply written-work-diary rounding or constitute an approved electronic work diary.</div>
+    <section class="ft-table-card ft-standard-card"><div class="ft-table-head"><div><h2>Duty-span work and rest checks</h2><span>Work and rest calculated from daily duty spans. No active duty span means planned rest. Periods follow qualifying planned rest; results are planning checks.</span></div></div><div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Rule</th><th>Review date</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftStandardRows"><tr><td colspan="5"><div class="ft-empty ft-empty-small">Loading checks…</div></td></tr></tbody></table></div></section>
     <section class="ft-table-card"><div class="ft-table-head"><div><h2>Turnaround review</h2><span>Compares each working day's final finish with the driver's next working-day start. Same-day overlaps appear as conflicts.</span></div><span class="ft-live"><i></i> Live schedule data</span></div>
       <div class="ft-table-wrap"><table><thead><tr><th>Driver</th><th>Previous duty</th><th>Finished</th><th>Rest available</th><th>Next start</th><th>Next duty</th><th>Result</th><th>Explanation</th></tr></thead><tbody id="ftRows"><tr><td colspan="8"><div class="ft-empty">Loading fatigue records…</div></td></tr></tbody></table></div>
     </section>

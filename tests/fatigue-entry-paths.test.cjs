@@ -8,7 +8,7 @@ const prepared=Promise.all(['dispatch_fatigue.js','fatigue_schedule.js','db.js',
 });
 test('automatic duty creation stores freshly calculated warnings and pay totals',async()=>{
  const p=await prepared;
- const m=await import(url(`import {calculateFatigue} from '${p.calcUrl}';import {refreshRosterFatigue,shiftServiceDate} from '${p.scheduleUrl}';
+ const m=await import(url(`import {calculateFatigue} from '${p.calcUrl}';import {scheduleCoverage,refreshRosterFatigue,shiftServiceDate} from '${p.scheduleUrl}';
  export const calls=[];
  const getEmployee=async()=>({employeeNumber:'899',email:'test@example.com',fatigueCategory:'Standard'});
  const getDutySpansByDriverAndDate=async()=>[];
@@ -21,7 +21,7 @@ test('automatic duty creation stores freshly calculated warnings and pay totals'
 });
 test('invalid automatic duty cannot partially assign its job',async()=>{
  const p=await prepared;
- const m=await import(url(`import {calculateFatigue} from '${p.calcUrl}';import {refreshRosterFatigue,shiftServiceDate} from '${p.scheduleUrl}';
+ const m=await import(url(`import {calculateFatigue} from '${p.calcUrl}';import {scheduleCoverage,refreshRosterFatigue,shiftServiceDate} from '${p.scheduleUrl}';
  export const calls=[];
  const getEmployee=async()=>({employeeNumber:'899',email:'test@example.com',fatigueCategory:'Standard'});
  const getDutySpansByDriverAndDate=async()=>[];

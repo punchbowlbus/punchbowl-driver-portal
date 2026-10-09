@@ -9,7 +9,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
 import { auth, db } from "./firebase.js";
-import { refreshRosterFatigue } from "./fatigue_schedule.js";
+import { scheduleCoverage, refreshRosterFatigue } from "./fatigue_schedule.js";
 import { calculateFatigue, fatigueStatusLabel } from "./dispatch_fatigue.js";
 import { els, showError } from "./ui.js";
 import { escapeHtml } from "./utils.js";
@@ -542,7 +542,9 @@ export async function renderBulkDutySpansPage() {
       });
 
       const validDates = [...new Set(processedRows.map((row) => row.serviceDate).filter(Boolean))];
-      const lookupDates = [...new Set(validDates.flatMap((date) => [-3,-2,-1,0,1,2,3].map(offset=>shiftServiceDate(date,offset))))];
+      const sortedDates=validDates.slice().sort();
+      const lookupDates=[];
+      if(sortedDates.length)for(let date=shiftServiceDate(sortedDates[0],-31),end=shiftServiceDate(sortedDates.at(-1),2);date<=end;date=shiftServiceDate(date,1))lookupDates.push(date);
       const existingSpans = [];
       for (const dateChunk of chunk(lookupDates, 10)) {
         const snapshot = await getDocs(query(collection(db, "dutySpans"), where("serviceDate", "in", dateChunk)));
@@ -585,7 +587,7 @@ export async function renderBulkDutySpansPage() {
       const activeExisting = existingSpans.filter((span) => !span.deleted && !["cancelled", "canceled"].includes(String(span.dispatchStatus || "").trim().toLowerCase()));
       const rosterRows = [...activeExisting, ...processedRows.filter((row) => !row.errors.length && !row.duplicate)];
       const tagged = rosterRows.map((row,index)=>({...row,id:row.id || `csv-${index}`}));
-      const reviewed = refreshRosterFatigue(tagged,employees);
+      const reviewed = refreshRosterFatigue(tagged,employees,sortedDates.length ? scheduleCoverage(sortedDates[0],sortedDates.at(-1)) : null);
       rosterRows.forEach((row,index) => {
         if (!processedRows.includes(row)) return;
         const result = reviewed[index];

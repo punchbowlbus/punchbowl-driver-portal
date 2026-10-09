@@ -1,4 +1,4 @@
-import { refreshRosterFatigue, shiftServiceDate } from "./fatigue_schedule.js";
+import { scheduleCoverage, refreshRosterFatigue, shiftServiceDate } from "./fatigue_schedule.js";
 import { listenDutySpansByDateRange, listenEmployees, listenBlocksByDate } from "./db.js";
 import { state } from "./state.js";
 import { escapeHtml } from "./utils.js";
@@ -378,14 +378,14 @@ export function renderDriverMonitorPage() {
     tableEl.innerHTML = `<div class="dm-loading">Loading driver duties…</div>`;
 
     let rawDuties = [], employees = [];
-    const applyFatigue = () => {model.duties=refreshRosterFatigue(rawDuties,employees).filter(d=>d.serviceDate===date);paint();};
+    const applyFatigue = () => {model.duties=refreshRosterFatigue(rawDuties,employees,scheduleCoverage(date)).filter(d=>d.serviceDate===date);paint();};
     const stopEmployees = listenEmployees(items=>{employees=items || [];applyFatigue();},()=>{employees=[];applyFatigue();});
-    const stopDuties = listenDutySpansByDateRange(shiftServiceDate(date,-3),shiftServiceDate(date,3), (items) => {
+    const stopDuties = listenDutySpansByDateRange(shiftServiceDate(date,-31),shiftServiceDate(date,2), (items) => {
       rawDuties = items || []; applyFatigue();
       model.dutiesReady = true;
       paint();
     }, (error) => {
-      model.dutiesReady = true;
+      rawDuties=[]; model.duties=[]; model.dutiesReady = true;
       tableEl.innerHTML = `<div class="dm-empty"><strong>Could not load duties</strong><span>${escapeHtml(error?.message || "Please try again.")}</span></div>`;
     });
     const stopBlocks = listenBlocksByDate(date, (items) => {

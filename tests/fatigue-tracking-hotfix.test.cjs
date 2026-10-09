@@ -8,14 +8,14 @@ const modules=Promise.all(['dispatch_fatigue.js','fatigue_tracking.js','fatigue_
  const scheduleUrl=asModule(`import {calculateFatigue,refreshLegacyRestBreach,qualifyingRestBlocks,recordedRestBlocks} from '${calcUrl}';\n` + schedule.replace(/^import .*;\s*$/gm,'').replace(/^export function /gm,'export function '));
  const report=tracking.replace(/^(?:import|export \{).*;\s*$/gm,'');
  const escapeHtml = value => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
- return {calc:await import(calcUrl),schedule:await import(scheduleUrl),report:await import(asModule(`import {calculateTurnarounds,mergeIntervals,workIntervals,minutesWithin,shortWindowWork,shortWindowAssessment,calculatePlannedRestChecks,serviceMinute} from '${scheduleUrl}';\nconst escapeHtml = ${escapeHtml.toString()};\n${report}\nexport {renderPage};`))};
+ return {calc:await import(calcUrl),schedule:await import(scheduleUrl),report:await import(asModule(`import {validDutyRecord,plannedCountingPeriods,scheduledWorkRisks,calculateTurnarounds,mergeIntervals,workIntervals,minutesWithin,shortWindowWork,shortWindowAssessment,calculatePlannedRestChecks,serviceMinute} from '${scheduleUrl}';\nconst escapeHtml = ${escapeHtml.toString()};\n${report}\nexport {renderPage};`))};
 });
 const range={start:'2026-10-13',end:'2026-10-13'};
 const duty=(date,start,end,breaks=[])=>({serviceDate:date,startMin:start,endMin:end,breaks,driverEmployeeNumber:'899',driverName:'Test Driver',dutyNumber:'WAD',dispatchStatus:'Pending'});
 test('cross-midnight work over two service dates is detected',async()=>{
  const {report}=await modules;
- const results=report.calculateStandardHoursAlerts([duty('2026-10-12',1200,1620),duty('2026-10-13',660,1080)],range);
- assert.ok(results.some(x=>x.rule==='Scheduled work risk: 24-hour window' && x.detail.includes('14h 00m')));
+ const results=report.calculateStandardHoursAlerts([duty('2026-10-12',1200,1620),duty('2026-10-13',660,1080)],range,null,{start:Date.parse('2026-09-01T00:00:00Z')/60000,end:Date.parse('2026-10-20T00:00:00Z')/60000});
+ assert.ok(results.some(x=>x.rule==='Planned work: 24-hour counting period' && x.detail.includes('14h 00m')));
 });
 test('empty roster history is not invented as zero statutory rests',async()=>{
  const {report}=await modules;
@@ -115,7 +115,7 @@ test('invalid times cannot silently pass as zero-hour duties',async()=>{
 test('employee profile loading clears temporary Unknown messages',async()=>{
  const {schedule}=await modules;const d={...duty('2026-10-13',0,120),id:'d'};
  const unknown=schedule.refreshRosterFatigue([d],[])[0];assert.equal(unknown.fatigueStatus,'WARNING');
- const standard=schedule.refreshRosterFatigue([unknown],[employee])[0];assert.equal(standard.fatigueStatus,'OK');assert.equal(standard.fatigueWarning,'');
+ const standard=schedule.refreshRosterFatigue([unknown],[employee],fullCoverage)[0];assert.equal(standard.fatigueStatus,'OK');assert.equal(standard.fatigueWarning,'');
 });
 test('short duty with an operator warning still receives newly detected roster risk',async()=>{
  const {schedule}=await modules;
@@ -141,7 +141,7 @@ test('nested overlapping duties remain conflicts beyond an intervening short dut
 test('transfer or roster edit removes a stale company warning and computes the new driver result',async()=>{
  const {schedule}=await modules;
  const stale={...duty('2026-10-13',540,660),id:'transferred',fatigueStatus:'BREACH',fatigueWarning:'Company 8-hour turnaround breach. Rest available: 6h.'};
- const updated=schedule.refreshRosterFatigue([stale],[employee])[0];assert.equal(updated.fatigueStatus,'OK');assert.equal(updated.fatigueWarning,'');
+ const updated=schedule.refreshRosterFatigue([stale],[employee],fullCoverage)[0];assert.equal(updated.fatigueStatus,'OK');assert.equal(updated.fatigueWarning,'');
  assert.equal(stale.fatigueStatus,'BREACH');
 });
 test('cancelled and deleted records never raise active fatigue alerts',async()=>{
@@ -199,14 +199,14 @@ const fullCoverage={start:Date.parse('2026-09-01T00:00:00Z')/60000,end:Date.pars
 test('no duty means planned rest throughout a completely loaded roster window',async()=>{
  const {schedule}=await modules;
  const checks=schedule.calculatePlannedRestChecks([],'2026-10-13',fullCoverage);
- assert.deepEqual(checks.map(x=>x.result),['PLANNED PASS','PLANNED PASS','PLANNED PASS']);
- assert.equal(checks[0].count,1440);assert.equal(checks[1].count,7);assert.equal(checks[2].count,28);
+ assert.deepEqual(checks.map(x=>x.result),['NO SCHEDULED WORK','NO SCHEDULED WORK','NO SCHEDULED WORK']);
+ assert.ok(checks.every(x=>x.count===null));
 });
 test('one normal duty does not produce a false zero-rest warning from empty previous days',async()=>{
  const {schedule}=await modules;
  const checks=schedule.calculatePlannedRestChecks([duty('2026-10-13',540,1020)],'2026-10-13',fullCoverage);
- assert.equal(checks[0].count,900);assert.equal(checks[1].count,7);assert.ok(checks[2].count>=4);
- assert.ok(checks.every(x=>x.result==='PLANNED PASS'));
+ assert.equal(checks[0].count,960);assert.equal(checks[0].result,'PLANNED PASS');
+ assert.ok(checks.slice(1).every(x=>x.result==='DATA REVIEW'));
 });
 test('daily early starts prevent seven-hour night rest; the following day is included',async()=>{
  const {schedule}=await modules;
@@ -238,14 +238,14 @@ test('overnight work cuts a rest gap on the following service date',async()=>{
 test('cancelled/deleted duties disappear from planned-rest occupancy',async()=>{
  const {schedule}=await modules;
  const days=[{...duty('2026-10-13',0,1440),dispatchStatus:'Cancelled'},{...duty('2026-10-13',0,1440),deleted:true}];
- assert.deepEqual(schedule.calculatePlannedRestChecks(days,'2026-10-13',fullCoverage).map(x=>x.result),['PLANNED PASS','PLANNED PASS','PLANNED PASS']);
+ assert.deepEqual(schedule.calculatePlannedRestChecks(days,'2026-10-13',fullCoverage).map(x=>x.result),['NO SCHEDULED WORK','NO SCHEDULED WORK','NO SCHEDULED WORK']);
 });
 test('unloaded history or following-day coverage produces DATA REVIEW, not an inferred pass',async()=>{
  const {schedule}=await modules;
  const missingHistory={start:schedule.serviceMinute('2026-10-07'),end:fullCoverage.end};
  const checks=schedule.calculatePlannedRestChecks([],'2026-10-13',missingHistory);
- assert.equal(checks[0].result,'PLANNED PASS');assert.equal(checks[2].result,'DATA REVIEW');
- const missingNextDay={start:fullCoverage.start,end:schedule.serviceMinute('2026-10-14',0)};
+ assert.equal(checks[0].result,'NO SCHEDULED WORK');assert.equal(checks[2].result,'DATA REVIEW');
+ const missingNextDay={start:fullCoverage.start,end:schedule.serviceMinute('2026-10-13',0)};
  assert.ok(schedule.calculatePlannedRestChecks([],'2026-10-13',missingNextDay).every(x=>x.result==='DATA REVIEW'));
 });
 test('work on one overlapping duty prevents a break in another becoming planned rest',async()=>{
@@ -267,15 +267,70 @@ test('seven-hour continuous planned rest includes the boundary exactly',async()=
 test('report displays planned-rest counts instead of blanket rest DATA REVIEW when coverage is loaded',async()=>{
  const {report}=await modules;
  const results=report.calculateStandardHoursAlerts([duty('2026-10-13',540,1020,[{startMin:780,endMin:810}])],range,[employee],fullCoverage);
- assert.equal(results.filter(x=>x.result==='PLANNED PASS').length,3);
+ assert.equal(results.filter(x=>x.result==='PLANNED PASS').length,1);
  assert.ok(!results.some(x=>x.rule.includes('rest verification')));
 });
 test('active employee with no duty spans still receives planned-rest results',async()=>{
  const {report}=await modules;
  const results=report.calculateStandardHoursAlerts([],range,[{...employee,role:'Driver',status:'Active',displayName:'Test Driver'}],fullCoverage);
- assert.equal(results.length,3);assert.ok(results.every(x=>x.result==='PLANNED PASS'));
+ assert.equal(results.length,3);assert.ok(results.every(x=>x.result==='NO SCHEDULED WORK'));
 });
 test('invalid duty times prevent a planned rest pass despite empty work intervals',async()=>{
  const {schedule}=await modules;
  assert.ok(schedule.calculatePlannedRestChecks([duty('2026-10-13',0,NaN)],'2026-10-13',fullCoverage).every(x=>x.result==='DATA REVIEW'));
+});
+
+
+test('12th/13th example uses 07:33 anchor, not the arbitrary 13:25 window',async()=>{
+ const {schedule,report}=await modules;
+ const duties=[{...duty('2026-10-12',453,542),id:'am'},{...duty('2026-10-12',805,1232,[{type:'meal',startMin:905,endMin:953}]),id:'pm'},{...duty('2026-10-13',355,1005,[{type:'meal',startMin:626,endMin:659},{type:'meal',startMin:837,endMin:893}]),id:'next'}];
+ const periods=schedule.plannedCountingPeriods(duties,fullCoverage).filter(x=>x.window===1440);
+ assert.equal(periods.find(x=>x.start===schedule.serviceMinute('2026-10-12',453)).minutes,566);
+ assert.ok(!periods.some(x=>x.start===schedule.serviceMinute('2026-10-12',805)));
+ assert.equal(schedule.calculateTurnarounds(duties)[0].restMinutes,563);
+ assert.equal(schedule.calculateTurnarounds(duties)[0].status,'compliant');
+ assert.ok(!report.calculateStandardHoursAlerts(duties,range,[employee],fullCoverage).some(x=>x.rule.includes('24-hour') && x.result==='PLANNED SHORTFALL'));
+ assert.ok(schedule.refreshRosterFatigue(duties,[employee],fullCoverage).every(x=>x.fatigueStatus==='OK'));
+});
+test('subsequent 8-hour rest does not erase work in an earlier 24-hour period',async()=>{
+ const {schedule}=await modules;
+ const duties=[{...duty('2026-10-12',360,1140,[{startMin:660,endMin:675},{startMin:960,endMin:1005}]),id:'first'},{...duty('2026-10-13',180,360),id:'second'}];
+ const risks=schedule.scheduledWorkRisks(duties,fullCoverage).filter(x=>x.rule==='Planned work: 24-hour counting period');
+ assert.ok(risks.some(x=>x.minutes===900 && x.start===schedule.serviceMinute('2026-10-12',360)));
+ assert.equal(schedule.calculateTurnarounds(duties)[0].restMinutes,480);
+ assert.equal(schedule.calculateTurnarounds(duties)[0].status,'compliant');
+});
+test('broken shift has no 8-hour requirement between its same-day parts',async()=>{
+ const {schedule}=await modules;
+ const duties=[{...duty('2026-10-12',420,540),id:'am'},{...duty('2026-10-12',780,1200),id:'pm'},{...duty('2026-10-13',239,300),id:'next'}];
+ const gaps=schedule.calculateTurnarounds(duties);
+ assert.equal(gaps.length,1);assert.equal(gaps[0].previous.id,'pm');assert.equal(gaps[0].restMinutes,479);assert.equal(gaps[0].shortfallMinutes,1);assert.equal(gaps[0].status,'breach');
+ duties[2].startMin=240;assert.equal(schedule.calculateTurnarounds(duties)[0].status,'compliant');
+});
+test('long overnight duty remains the turnaround frontier across intervening days',async()=>{
+ const {schedule}=await modules;
+ const duties=[{...duty('2026-10-11',1200,2940),id:'long'},{...duty('2026-10-12',600,700),id:'inside'},{...duty('2026-10-13',360,480),id:'next'}];
+ const next=schedule.calculateTurnarounds(duties).find(x=>x.next.id==='next');
+ assert.equal(next.previous.id,'long');assert.equal(next.restMinutes,300);assert.equal(next.status,'breach');
+});
+test('malformed break cannot establish planned rest passes',async()=>{
+ const {schedule,report}=await modules;
+ const duties=[{...duty('2026-10-13',540,1020,[{type:'crib',startMin:null,endMin:900}]),id:'bad'}];
+ assert.deepEqual(schedule.plannedCountingPeriods(duties,fullCoverage),[]);
+ assert.ok(schedule.calculatePlannedRestChecks(duties,'2026-10-13',fullCoverage).every(x=>x.result==='DATA REVIEW'));
+ assert.ok(report.calculateStandardHoursAlerts(duties,range,[employee],fullCoverage).some(x=>x.rule==='Duty data verification'));
+});
+test('completed 28-day anchored period detects work and missing full-day rests',async()=>{
+ const {schedule}=await modules;
+ const duties=Array.from({length:29},(_,i)=>({...duty(schedule.shiftServiceDate('2026-09-15',i),360,1080,[{startMin:660,endMin:720}]),id:'d'+i}));
+ const risks=schedule.scheduledWorkRisks(duties,fullCoverage);
+ assert.ok(risks.some(x=>x.rule==='Planned work: 28-day counting period' && x.minutes===18480));
+ assert.ok(risks.some(x=>x.window===40320 && x.rule.startsWith('Planned rest:') && x.count===0));
+});
+test('future incomplete period cannot claim a rest shortfall or pass',async()=>{
+ const {schedule}=await modules;
+ const coverage={start:fullCoverage.start,end:schedule.serviceMinute('2026-10-13',1100)};
+ const duties=[{...duty('2026-10-13',540,1020),id:'d'}];
+ assert.ok(!schedule.scheduledWorkRisks(duties,coverage).some(x=>x.rule.startsWith('Planned rest:')));
+ assert.ok(schedule.calculatePlannedRestChecks(duties,'2026-10-13',coverage).every(x=>x.result==='DATA REVIEW'));
 });

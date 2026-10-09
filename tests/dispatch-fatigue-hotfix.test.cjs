@@ -15,13 +15,13 @@ test('902PM: 15:00–03:05 with two meals does not trigger the false 12-hour bre
   assert.equal(result.restIn24hMinutes,null);assert.equal(result.fatigueStatus,'OK');
   assert.equal(result.fatigueWarning,'');
 });
-test('12-hour net-work boundary still enforces real over-limit work',async()=>{
+test('single duty over 12 hours requires roster anchor review',async()=>{
   const {calculateFatigue}=await modulePromise;
   assert.equal(calculateFatigue({...duty,endMin:1680}).workMinutes,720);
   assert.equal(calculateFatigue({...duty,endMin:1680}).fatigueStatus,'OK');
   const over=calculateFatigue({...duty,endMin:1685});
-  assert.equal(over.workMinutes,725);assert.equal(over.fatigueStatus,'BREACH');
-  assert.match(over.fatigueWarning,/work exceeds 12 hours/);
+  assert.equal(over.workMinutes,725);assert.equal(over.fatigueStatus,'WARNING');
+  assert.match(over.fatigueWarning,/roster rest anchor/);
 });
 test('break violations remain breaches',async()=>{
   const {calculateFatigue}=await modulePromise;
@@ -61,7 +61,7 @@ test('legacy false warning refresh preserves independent warnings and original r
   const turnaround={...original,fatigueWarning:original.fatigueWarning+' Company 8-hour turnaround breach. Rest available: 6h.'};
   const retained=refreshLegacyRestBreach(turnaround);assert.equal(retained.fatigueStatus,'BREACH');
   assert.match(retained.fatigueWarning,/turnaround breach/);assert.doesNotMatch(retained.fatigueWarning,/12 hours rest/);
-  const genuine={...original,endMin:1685};assert.equal(refreshLegacyRestBreach(genuine).fatigueStatus,'BREACH');
+  const genuine={...original,endMin:1685};assert.equal(refreshLegacyRestBreach(genuine).fatigueStatus,'WARNING');
   const unrelated={...duty,fatigueStatus:'BREACH',fatigueWarning:'Other review required.'};
   assert.match(refreshLegacyRestBreach(unrelated).fatigueWarning,/Other review required/);
 });

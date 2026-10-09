@@ -111,7 +111,7 @@ export function calculateFatigue(dutySpan) {
   // This remains a single-duty planning assumption, not verified roster rest.
   const has7hContinuousStationaryRest = null;
 
-  // Company rule
+  // Legacy display fields; these do not add rules to the supplied policy.
   const firstBreakOffset = firstBreakStartOffset();
   const hasBreakBy5h15 =
     firstBreakOffset !== null && firstBreakOffset <= LIMIT_5H30;
@@ -142,9 +142,12 @@ export function calculateFatigue(dutySpan) {
   }
 
   // These are only meaningful once duty becomes long enough to matter operationally.
-  if (reaches12h && !hasScheduled12hWorkLimit) {
-    fatigueStatus = "BREACH";
-    warnings.push("Scheduled work exceeds 12 hours in a rolling 24-hour base-clock window (excluding recorded non-work rest). Confirm the statutory counting period.");
+  // A single duty has no preceding rest anchor. Long-period alerts are
+  // calculated from the complete driver roster by fatigue_schedule.js.
+
+  if (!hasScheduled12hWorkLimit) {
+    if(fatigueStatus==="OK")fatigueStatus="WARNING";
+    warnings.push("Planned history review: this duty has more than 12 hours work in a rolling window; the roster rest anchor is required to assess the counting period.");
   }
 
   // PRE-WARNING at 5h 15m, before the 5½-hour legal window closes.
@@ -159,14 +162,6 @@ export function calculateFatigue(dutySpan) {
     warnings.push(
       "Approaching 5½ hours without a 15-minute continuous rest break."
     );
-  }
-
-  // COMPANY WARNING: 12+ hour shift needs 60 min break
-  if (reaches12h && !has1HourBreakFor12hShift) {
-    if (fatigueStatus === "OK") {
-      fatigueStatus = "WARNING";
-    }
-    warnings.push("Company rule: 12+ hour shift needs 60 min total break.");
   }
 
   const profile = String(dutySpan.fatigueCategory ?? "Standard").trim();
@@ -210,7 +205,7 @@ export function calculateFatigue(dutySpan) {
 // saved turnaround / operational warnings or mutating Firestore records.
 export function refreshLegacyRestBreach(span) {
   const savedWarning = String(span.fatigueWarning || "");
-  const known = /Need at least 12 hours rest in 24 hours\.|Need at least 15 continuous minutes rest within 5½ hours\.|Need at least (?:30|60) min total rest within (?:first (?:8|11) hours|an (?:8|11)-hour counting window)\.|Recorded fatigue work exceeds 12 hours in this duty \(excluding (?:qualifying rest|recorded non-work rest)\)\.|Scheduled work exceeds 12 hours in a rolling 24-hour base-clock window \(excluding (?:qualifying rest|recorded non-work rest)\)\. Confirm the statutory counting period\.|Need at least 7 continuous hours rest in 24 hours\.|Approaching 5½ hours without a 15-minute continuous rest break\.|Plan a qualifying rest break before 5½ hours\.|Company rule: 12\+ hour shift needs 60 min total break\.|Hours-option review: [\s\S]*?Verify the applicable work\/rest limits\.|Data review: duty start\/end times are missing or invalid\./g;
+  const known = /Need at least 12 hours rest in 24 hours\.|Need at least 15 continuous minutes rest within 5½ hours\.|Need at least (?:30|60) min total rest within (?:first (?:8|11) hours|an (?:8|11)-hour counting window)\.|Recorded fatigue work exceeds 12 hours in this duty \(excluding (?:qualifying rest|recorded non-work rest)\)\.|Scheduled work exceeds 12 hours in a rolling 24-hour base-clock window \(excluding (?:qualifying rest|recorded non-work rest)\)\. Confirm the statutory counting period\.|Need at least 7 continuous hours rest in 24 hours\.|Approaching 5½ hours without a 15-minute continuous rest break\.|Plan a qualifying rest break before 5½ hours\.|Company rule: 12\+ hour shift needs 60 min total break\.|Hours-option review: [\s\S]*?Verify the applicable work\/rest limits\.|Data review: duty start\/end times are missing or invalid\.|Planned history review: this duty has more than 12 hours work in a rolling window; the roster rest anchor is required to assess the counting period\./g;
   const remaining = savedWarning.replace(known, "").trim();
   // Refresh existing fatigue results and duties without any saved result.
 

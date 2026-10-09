@@ -17,7 +17,7 @@ import {
 import { els, showError } from "./ui.js";
 import { state } from "./state.js";
 import { calculateFatigue, fatigueStatusLabel } from "./dispatch_fatigue.js";
-import { refreshRosterFatigue } from "./fatigue_schedule.js";
+import { scheduleCoverage, refreshRosterFatigue } from "./fatigue_schedule.js";
 import { assignBlockToDriver } from "./dispatch_assignments.js";
 import { unassignBlockFromDriver } from "./dispatch_assignments.js";
 
@@ -1513,9 +1513,9 @@ function renderDriverDetail(driver) {
       });
       try {
         const serviceDate = getSelectedDate();
-        const adjacent = (await Promise.all([-3,-2,-1,0,1,2,3].map(offset => getDutySpansByDriverAndDate(empNo, shiftServiceDate(serviceDate, offset))))).flat().filter(d=>d.id!==editingSpanId);
+        const adjacent = (await Promise.all(Array.from({length:34},(_,index)=>index-31).map(offset => getDutySpansByDriverAndDate(empNo, shiftServiceDate(serviceDate, offset))))).flat().filter(d=>d.id!==editingSpanId);
         const candidate = {id: editingSpanId || "fatigue-candidate",serviceDate,driverEmployeeNumber:empNo,startMin,endMin,breaks,dutyNumber};
-        const reviewed = refreshRosterFatigue([...adjacent,candidate],employeesCache).find(d=>d.id===candidate.id);
+        const reviewed = refreshRosterFatigue([...adjacent,candidate],employeesCache,scheduleCoverage(serviceDate)).find(d=>d.id===candidate.id);
         fatigue.fatigueStatus = reviewed.fatigueStatus;
         fatigue.fatigueWarning = reviewed.fatigueWarning;
       } catch (error) {
@@ -3026,10 +3026,10 @@ function startDutySpanListener(selectedDate) {
   }
 
   unsubscribeDutySpans = listenDutySpansByDateRange(
-    shiftServiceDate(selectedDate,-3), shiftServiceDate(selectedDate,3),
+    shiftServiceDate(selectedDate,-31), shiftServiceDate(selectedDate,2),
     (items) => {
       fatigueRosterCache = items || [];
-      dutySpansCache = refreshRosterFatigue(fatigueRosterCache, employeesCache).filter(d=>d.serviceDate===selectedDate);
+      dutySpansCache = refreshRosterFatigue(fatigueRosterCache, employeesCache,scheduleCoverage(selectedDate)).filter(d=>d.serviceDate===selectedDate);
       renderDrivers();
 
       if (selectedDriverEmpNo) {
@@ -3041,6 +3041,7 @@ function startDutySpanListener(selectedDate) {
     },
     (err) => {
       console.error("Duty spans error:", err);
+      fatigueRosterCache=[]; dutySpansCache=[]; renderDrivers();
       showError(err?.message || "Failed to load duty spans.");
     }
   );
@@ -3195,8 +3196,8 @@ async function transferDutySpanToDriver(spanId, targetEmpNo) {
   );
   let transferFatigue;
   try {
-    const adjacent = (await Promise.all([-3,-2,-1,0,1,2,3].map(offset => getDutySpansByDriverAndDate(targetEmpNo,shiftServiceDate(span.serviceDate,offset))))).flat().filter(d=>d.id!==span.id);
-    transferFatigue = refreshRosterFatigue([...adjacent,{...span,driverEmployeeNumber:targetEmpNo,driverName:targetName,fatigueWarning:"",fatigueStatus:"OK"}],employeesCache).find(d=>d.id===span.id);
+    const adjacent = (await Promise.all(Array.from({length:34},(_,index)=>index-31).map(offset => getDutySpansByDriverAndDate(targetEmpNo,shiftServiceDate(span.serviceDate,offset))))).flat().filter(d=>d.id!==span.id);
+    transferFatigue = refreshRosterFatigue([...adjacent,{...span,driverEmployeeNumber:targetEmpNo,driverName:targetName,fatigueWarning:"",fatigueStatus:"OK"}],employeesCache,scheduleCoverage(span.serviceDate)).find(d=>d.id===span.id);
   } catch (error) {return showPageMessage(error?.message || "Unable to check target driver roster. Transfer not completed.","error",6500);}
   const warning = busConflict
     ? `<div class="dispatch-confirm-warning">Warning: bus ${escapeHtml(bus)} has an overlapping allocation.</div>`
@@ -3425,7 +3426,7 @@ unassignedJobsTimeFilterEl.onchange = () => renderUnassignedJobs(blocksCache, ge
 listenEmployees(
   (employees) => {
     employeesCache = employees || [];
-    dutySpansCache = refreshRosterFatigue(fatigueRosterCache,employeesCache).filter(d=>d.serviceDate===getSelectedDate());
+    dutySpansCache = refreshRosterFatigue(fatigueRosterCache,employeesCache,scheduleCoverage(getSelectedDate())).filter(d=>d.serviceDate===getSelectedDate());
     renderDriverMultiSelect();
     renderDrivers();
   },

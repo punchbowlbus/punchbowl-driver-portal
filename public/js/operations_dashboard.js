@@ -1,4 +1,4 @@
-import { refreshRosterFatigue, shiftServiceDate } from "./fatigue_schedule.js";
+import { scheduleCoverage, refreshRosterFatigue, shiftServiceDate } from "./fatigue_schedule.js";
 import {
   collection,
   onSnapshot
@@ -324,9 +324,9 @@ export function renderOperationsDashboardPage({ onNavigate } = {}) {
     const ready = (key, target) => (items) => { model[target] = (items || []).filter((item) => item.deleted !== true); model.ready.add(key); paint(); };
     const fail = (key) => (error) => { console.error(`Operations Dashboard ${key}:`, error); model.ready.add(key); paint(); };
     let rawDuties=[], employees=[];
-    const applyFatigue=()=>{model.duties=refreshRosterFatigue(rawDuties,employees).filter(d=>d.serviceDate===model.selectedDate);paint();};
+    const applyFatigue=()=>{model.duties=refreshRosterFatigue(rawDuties,employees,scheduleCoverage(model.selectedDate)).filter(d=>d.serviceDate===model.selectedDate);paint();};
     stops.push(listenEmployees(items=>{employees=items || [];applyFatigue();},()=>{employees=[];applyFatigue();}));
-    stops.push(listenDutySpansByDateRange(shiftServiceDate(model.selectedDate,-3),shiftServiceDate(model.selectedDate,3),items=>{rawDuties=items || [];model.ready.add("duties");applyFatigue();},fail("duties")));
+    stops.push(listenDutySpansByDateRange(shiftServiceDate(model.selectedDate,-31),shiftServiceDate(model.selectedDate,2),items=>{rawDuties=items || [];model.ready.add("duties");applyFatigue();},error=>{rawDuties=[];model.duties=[];fail("duties")(error);}));
     stops.push(listenBlocksByDate(model.selectedDate, ready("blocks", "blocks"), fail("blocks")));
     [["buses", "buses"], ["defectReports", "defects"], ["incidentReports", "incidents"]].forEach(([collectionName, target]) => {
       stops.push(onSnapshot(collection(db, collectionName), (snapshot) => ready(target, target)(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))), fail(target)));

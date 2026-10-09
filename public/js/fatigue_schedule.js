@@ -1,6 +1,9 @@
 import { calculateFatigue, refreshLegacyRestBreach, qualifyingRestBlocks, recordedRestBlocks } from "./dispatch_fatigue.js";
 const COMPANY_MIN_REST_MINUTES = 480;
 export function shiftServiceDate(value, days) {return new Date(Date.parse(value + "T12:00:00Z") + days * 86400000).toISOString().slice(0,10);}
+export function scheduleCoverage(firstDate, lastDate = firstDate) {
+  return {start:serviceMinute(shiftServiceDate(firstDate,-28)),end:serviceMinute(shiftServiceDate(lastDate,3))};
+}
 function dutyStatus(value) {return String(value || "Pending").trim().toLowerCase();}
 function absoluteMinute(duty, which) {return Date.parse(duty.serviceDate + "T00:00:00Z") / 60000 + Number(which === "end" ? duty.endMin : duty.startMin);}
 function durationLabel(minutes) {return `${Math.floor(Math.max(0,minutes)/60)}h ${String(Math.max(0,minutes)%60).padStart(2,"0")}m`;}
@@ -104,7 +107,7 @@ export function calculateTurnarounds(duties) {
       });
 
     for (let index = 1; index < workDays.length; index += 1) {
-      const previous = workDays[index - 1].lastDuty;
+      const previous = workDays.slice(0,index).map(day=>day.lastDuty).reduce((latest,duty)=>absoluteMinute(duty,"end")>absoluteMinute(latest,"end")?duty:latest);
       const next = workDays[index].firstDuty;
       const restMinutes = absoluteMinute(next, "start") - absoluteMinute(previous, "end");
       const status = restMinutes < 0 ? "overlap" : restMinutes < COMPANY_MIN_REST_MINUTES ? "breach" : "compliant";
@@ -122,32 +125,87 @@ export function calculateTurnarounds(duties) {
   return results.sort((a, b) => absoluteMinute(a.next, "start") - absoluteMinute(b.next, "start"));
 }
 
-export function scheduledWorkRisks(duties) {
-  const active = duties.filter(d => !d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus)));
-  const work = mergeIntervals(active.flatMap(workIntervals));
-  const risks = [];
-  const coverageEnd=Math.max(0,...active.map(d=>absoluteMinute(d,"end")));
-  for (const [window, maximum, rule] of [[330,315,"15-minute rest within 5½ hours"],[480,450,"30-minute rest within 8 hours"],[660,600,"60-minute rest within 11 hours"],[1440,720,"Scheduled work risk: 24-hour window"]]) {
-    const starts = window < 1440 ? work.map(x=>x.start) : [...new Set(work.flatMap(x=>[x.start,x.end-window]))];
-    for (const start of starts) {
-      const end = start + window;
-      const check = window < 1440 ? shortWindowAssessment(work,start,end,coverageEnd) : null;
-      const minutes = check ? check.work : minutesWithin(work,start,end);
-      if (minutes <= maximum && !(check?.complete && check.rest < window-maximum)) continue;
-      const affected = active.filter(d=>absoluteMinute(d,"end")>start && absoluteMinute(d,"start")<end);
-      risks.push({rule,minutes,dutyIds:affected.map(d=>d.id),detail:`Scheduled roster risk: ${durationLabel(minutes)} work in a ${window/60}-hour base-clock window (${durationLabel(maximum)} maximum under Bus and Coach Standard Hours)${check ? `; ${check.rest} qualifying scheduled rest minutes (${window-maximum} required when the full window is reached)` : ""}. Verify actual work/rest and the statutory counting period.`});
+// One planned counting engine for all entry paths and reports. Coordinates are
+// service-date base-clock minutes, not UTC instants or verified diary records.
+export function validDutyTimes(duty) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(duty.serviceDate || "")) &&
+    Number.isFinite(absoluteMinute(duty,"start")) && Number.isFinite(absoluteMinute(duty,"end")) && new Date(Date.parse(duty.serviceDate+"T00:00:00Z")).toISOString().slice(0,10)===duty.serviceDate &&
+    duty.startMin != null && duty.endMin != null && String(duty.startMin).trim() !== "" && String(duty.endMin).trim() !== "" &&
+    Number.isInteger(Number(duty.startMin)) && Number.isInteger(Number(duty.endMin)) && Number(duty.startMin)>=0 && Number(duty.endMin)<=2940 && Number(duty.endMin)>Number(duty.startMin);
+}
+export function validDutyRecord(duty) {
+  return validDutyTimes(duty) && (!duty.breaks || Array.isArray(duty.breaks)) && (duty.breaks || []).every(b=>
+    b.startMin!=null && b.endMin!=null && String(b.startMin).trim()!=="" && String(b.endMin).trim()!=="" &&
+    Number.isInteger(Number(b.startMin)) && Number.isInteger(Number(b.endMin)) && Number(b.startMin)>=Number(duty.startMin) &&
+    Number(b.endMin)<=Number(duty.endMin) && Number(b.endMin)>Number(b.startMin) && (!b.type || ["meal","crib"].includes(String(b.type).toLowerCase())));
+}
+function boundsLabel(start,end) {
+  return `${new Date(start*60000).toISOString().slice(0,16).replace("T"," ")}–${new Date(end*60000).toISOString().slice(0,16).replace("T"," ")} base clock`;
+}
+function nightRestInGap(gap) {
+  if(gap.end-gap.start>=1440)return true;
+  for(let day=Math.floor(gap.start/1440)-1;day<=Math.floor(gap.end/1440);day++)
+    if(Math.min(gap.end,(day+1)*1440+480)-Math.max(gap.start,day*1440+1320)>=420)return true;
+  return false;
+}
+export function plannedCountingPeriods(duties, coverage) {
+  const active=duties.filter(d=>!d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus)));
+  if(active.some(d=>!validDutyRecord(d)) || !coverage || !Number.isFinite(coverage.start) || !Number.isFinite(coverage.end) || coverage.end<=coverage.start)return [];
+  const work=mergeIntervals(active.flatMap(workIntervals));
+  const rest=plannedRestIntervals(active,coverage.start,coverage.end);
+  const definitions=[
+    {window:1440,maximum:720,required:420,rule:"Planned rest: 7 continuous hours in 24 hours",workRule:"Planned work: 24-hour counting period"},
+    {window:10080,required:6,rule:"Planned rest: 6 night rests in 7 days"},
+    {window:40320,maximum:17280,required:4,rule:"Planned rest: 4 × 24-hour rests in 28 days",workRule:"Planned work: 28-day counting period"}
+  ];
+  const periods=[];
+  for(const definition of definitions) {
+    const qualifies=gap=>definition.window===1440 ? gap.end-gap.start>=420 : definition.window===10080 ? nightRestInGap(gap) : gap.end-gap.start>=1440;
+    // Keep every anchor: taking another major rest does not erase a period
+    // already running. Never use a shifted work endpoint as a long-period anchor.
+    const majorEnds=rest.filter(qualifies).map(gap=>gap.end).filter(end=>end<coverage.end);
+    const starts=new Set(majorEnds);
+    for(const gap of rest) {
+      if(gap.end>=coverage.end)continue;
+      // Required major rest absent: count from any observed rest resumption.
+      // Only do so with a complete preceding window; otherwise history is unknown.
+      if(gap.end-coverage.start>=definition.window && !majorEnds.some(end=>end<=gap.end && end>gap.end-definition.window))starts.add(gap.end);
     }
+    for(const start of starts) {
+      const end=start+definition.window, countedEnd=Math.min(end,coverage.end);
+      const gaps=plannedRestIntervals(active,start,countedEnd);
+      const count=definition.window===1440 ? Math.max(0,...gaps.map(gap=>gap.end-gap.start)) : definition.window===10080 ? countPlannedNightRests(gaps,start,countedEnd) : gaps.reduce((sum,gap)=>sum+Math.floor((gap.end-gap.start)/1440),0);
+      const minutes=minutesWithin(work,start,countedEnd),complete=end<=coverage.end;
+      periods.push({...definition,start,end,minutes,count,complete,bounds:boundsLabel(start,end),dutyIds:active.filter(d=>absoluteMinute(d,"end")>start && absoluteMinute(d,"start")<countedEnd).map(d=>d.id)});
+    }
+  }
+  return periods;
+}
+export function scheduledWorkRisks(duties, coverage = null) {
+  const active=duties.filter(d=>!d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus)) && validDutyTimes(d));
+  const work=mergeIntervals(active.flatMap(workIntervals)),risks=[];
+  const coverageEnd=coverage?.end ?? Math.max(0,...active.map(d=>absoluteMinute(d,"end")));
+  for(const [window,maximum,rule] of [[330,315,"15-minute rest within 5½ hours"],[480,450,"30-minute rest within 8 hours"],[660,600,"60-minute rest within 11 hours"]]) {
+    for(const start of work.map(x=>x.start)) {
+      const end=start+window,check=shortWindowAssessment(work,start,end,coverageEnd);
+      if(check.work<=maximum && !(check.complete && check.rest<window-maximum))continue;
+      risks.push({rule,minutes:check.work,start,end,dutyIds:active.filter(d=>absoluteMinute(d,"end")>start && absoluteMinute(d,"start")<end).map(d=>d.id),detail:`Scheduled roster risk: ${durationLabel(check.work)} work; ${check.rest} qualifying rest minutes in ${boundsLabel(start,end)} (${durationLabel(maximum)} maximum work; ${window-maximum} minutes rest required). Verify actual work/rest and the statutory counting period.`});
+    }
+  }
+  for(const period of plannedCountingPeriods(duties,coverage)) {
+    if(period.maximum!=null && period.minutes>period.maximum)risks.push({...period,rule:period.workRule,detail:`Scheduled roster risk: ${durationLabel(period.minutes)} work in planned rest-anchored period ${period.bounds} (${durationLabel(period.maximum)} maximum). Verify actual work/rest and the statutory counting period.`});
+    if(period.complete && period.count<period.required)risks.push({...period,rule:period.rule,detail:`Scheduled roster risk: ${period.window===1440 ? durationLabel(period.count) : period.count} planned rest; ${period.window===1440 ? "7h continuous" : period.required+" rest blocks"} required in planned rest-anchored period ${period.bounds}. Verify actual work/rest and the statutory counting period.`});
   }
   return risks;
 }
 
-export function refreshRosterFatigue(duties, employees = null) {
+export function refreshRosterFatigue(duties, employees = null, coverage = null) {
   const employeeMap = employees && new Map(employees.map(e=>[String(e.employeeNumber || e.id).trim(),e]));
   const rows = duties.map(d => {
     if (d.deleted || ["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus))) return {...d,fatigueStatus:"OK",fatigueWarning:""};
     const profile = employeeMap ? employeeMap.get(String(d.driverEmployeeNumber).trim())?.fatigueCategory || "Unknown" : d.fatigueCategory ?? "Standard";
     const cleaned = String(d.fatigueWarning || "")
-      .replace(/Company 8-hour turnaround breach\. Scheduled base-clock gap [\s\S]*?This is the company rule, not a legal fatigue determination\./g, "")
+      .replace(/Planned history review: [\s\S]*?no full work\/rest pass is established\./g, "").replace(/Company 8-hour turnaround breach\. Scheduled base-clock gap [\s\S]*?This is the company rule, not a legal fatigue determination\./g, "")
       .replace(/Company 8-hour turnaround breach\. Previous duty [\s\S]*?Shortfall: [^.]+\./g, "")
       .replace(/Company 8-hour turnaround breach: previous duty [\s\S]*?shortfall [^.]+\./g, "")
       .replace(/Company 8-hour turnaround breach\.(?: Rest available: [^.]+\.)?/g, "").replace(/Scheduled roster risk:[\s\S]*?Verify actual work\/rest and the statutory counting period\./g, "").replace(/Scheduled roster conflict: duties overlap by [^.]+\./g,"").trim();
@@ -161,7 +219,15 @@ export function refreshRosterFatigue(duties, employees = null) {
   const add = (row,message) => {row.fatigueStatus="BREACH";if(!row.fatigueWarning.includes(message))row.fatigueWarning=[row.fatigueWarning,message].filter(Boolean).join(" ");};
   for (const driverRows of byDriver.values()) {
     if (driverRows[0].fatigueCategory.toLowerCase() === "standard") {
-      const risks=scheduledWorkRisks(driverRows);
+      const risks=scheduledWorkRisks(driverRows,coverage);
+      for(const row of driverRows) {
+        row.plannedFatigueCoverage = coverage && driverRows.every(validDutyRecord) ? "LOADED" : "UNKNOWN";
+        const dateStart=serviceMinute(row.serviceDate);
+        if(driverRows.some(d=>!validDutyRecord(d)) || !coverage || coverage.start>dateStart-40320 || coverage.end<dateStart+1440) {
+          if(row.fatigueStatus==="OK")row.fatigueStatus="WARNING";
+          row.fatigueWarning=[row.fatigueWarning,"Planned history review: complete 28-day schedule coverage is unavailable or duty/break records are invalid; no full work/rest pass is established."].filter(Boolean).join(" ");
+        }
+      }
       for (const row of driverRows) {
         const worst=new Map();
         for(const risk of risks.filter(r=>r.dutyIds.includes(row.id)))if(!worst.has(risk.rule) || risk.minutes>worst.get(risk.rule).minutes)worst.set(risk.rule,risk);
@@ -221,24 +287,17 @@ export function countPlannedNightRests(rest, start, end) {
   return count;
 }
 
-export function calculatePlannedRestChecks(duties, reviewDate, coverage) {
-  const end=serviceMinute(shiftServiceDate(reviewDate,1),480);
-  const definitions=[
-    {window:1440,rule:"Planned rest: 7 continuous hours in 24 hours",required:420,unit:"minutes"},
-    {window:10080,rule:"Planned rest: 6 night rests in 7 days",required:6,unit:"blocks"},
-    {window:40320,rule:"Planned rest: 4 × 24-hour rests in 28 days",required:4,unit:"blocks"}
-  ];
-  const active=duties.filter(d=>!d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus)));
-  const invalid=active.some(d=>d.startMin==null || d.endMin==null || String(d.startMin).trim()==="" || String(d.endMin).trim()==="" || !Number.isFinite(absoluteMinute(d,"start")) || !Number.isFinite(absoluteMinute(d,"end")) || Number(d.startMin)<0 || Number(d.endMin)>2939 || Number(d.endMin)<=Number(d.startMin));
+export function calculatePlannedRestChecks(duties, reviewDate, coverage, suppliedPeriods = null) {
+  const dayStart=serviceMinute(reviewDate),dayEnd=dayStart+1440;
+  const periods=suppliedPeriods || plannedCountingPeriods(duties,coverage);
+  const definitions=[{window:1440,rule:"Planned rest: 7 continuous hours in 24 hours",required:420},{window:10080,rule:"Planned rest: 6 night rests in 7 days",required:6},{window:40320,rule:"Planned rest: 4 × 24-hour rests in 28 days",required:4}];
   return definitions.map(definition=>{
-    const start=end-definition.window;
-    const bounds=`${new Date(start*60000).toISOString().slice(0,16).replace("T"," ")}–${new Date(end*60000).toISOString().slice(0,16).replace("T"," ")} base clock`;
-    if(invalid || !coverage || !Number.isFinite(coverage.start) || !Number.isFinite(coverage.end) || coverage.start>start || coverage.end<end) {
-      return {...definition,date:reviewDate,start,end,count:null,result:"DATA REVIEW",detail:invalid ? "Invalid duty times prevent a reliable planned-rest calculation. Correct the duty records." : `Complete schedule coverage is unavailable for ${bounds}; no rest pass or shortfall has been inferred.`};
-    }
-    const rest=plannedRestIntervals(active,start,end);
-    const count=definition.window===1440 ? Math.max(0,...rest.map(gap=>gap.end-gap.start)) : definition.window===10080 ? countPlannedNightRests(rest,start,end) : rest.reduce((sum,gap)=>sum+Math.floor((gap.end-gap.start)/1440),0);
-    const description=definition.window===1440 ? `${durationLabel(count)} longest continuous planned rest; 7h required` : definition.window===10080 ? `${count} non-overlapping planned night-rest/24-hour alternatives; 6 required` : `${count} non-overlapping 24-hour planned rest blocks; 4 required`;
-    return {...definition,date:reviewDate,start,end,count,result:count>=definition.required ? "PLANNED PASS" : "PLANNED SHORTFALL",detail:`${description}. Rolling planning window: ${bounds}. No active duty span is treated as planned rest; recorded breaks are non-work rest. This is a schedule assessment, not confirmation of actual stationary rest or a statutory counting period.`};
+    const active=duties.filter(d=>!d.deleted && !["cancelled","canceled"].includes(dutyStatus(d.dispatchStatus)));
+    const occupied=active.some(d=>absoluteMinute(d,"end")>dayStart-definition.window && absoluteMinute(d,"start")<dayEnd);
+    if(coverage && coverage.start<=dayStart-definition.window && coverage.end>=dayEnd && active.every(validDutyRecord) && !occupied)return {...definition,date:reviewDate,count:null,result:"NO SCHEDULED WORK",detail:"No scheduled work in the fully loaded review history. No work counting period has started; this is planned time off, not verification of actual stationary rest."};
+    const relevant=periods.filter(p=>p.window===definition.window && p.start<dayEnd && p.end>dayStart && p.complete);
+    if(!coverage || coverage.start>dayStart-definition.window || coverage.end<dayEnd || !relevant.length)return {...definition,date:reviewDate,count:null,result:"DATA REVIEW",detail:"Insufficient complete schedule coverage or completed planned rest-anchored counting periods. No rest pass or shortfall has been inferred."};
+    const worst=relevant.reduce((a,b)=>a.count<=b.count?a:b);
+    return {...worst,date:reviewDate,result:worst.count>=worst.required ? "PLANNED PASS" : "PLANNED SHORTFALL",detail:`${definition.window===1440 ? durationLabel(worst.count)+" longest continuous planned rest" : worst.count+" non-overlapping planned rest blocks"}; ${definition.window===1440 ? "7h" : worst.required} required. Planned rest-anchored period: ${worst.bounds}. No active duty span means planned rest; meal/crib breaks are non-work rest. This does not confirm actual stationary rest.`};
   });
 }
