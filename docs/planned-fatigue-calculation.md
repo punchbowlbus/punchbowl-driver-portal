@@ -25,3 +25,9 @@ Run `node --test tests/dispatch-fatigue-hotfix.test.cjs tests/fatigue-entry-path
 This remains a minute-precision planned schedule calculator. The coordinates are nominal service-date base-clock minutes; daylight-saving elapsed time, driver base-zone differences, actual stationary rest, outside work and written-work-diary rounding are not verified. The application is not an approved electronic work diary. No live deployment or live Firestore verification is included. Check the affected screens locally before merging to master or deploying.
 
 Reference: https://www.nhvr.gov.au/safety-accreditation-compliance/fatigue-management/counting-time and https://www.nhvr.gov.au/safety-accreditation-compliance/fatigue-management/work-and-rest-hours
+
+## Driver review interface
+
+Fatigue Review starts with one row per driver. The row summarizes the highest 24-hour work total attached to reported checks, the shortest assessed company turnaround and the status of longer-period rest checks. Planned alerts take priority; a passed daily check does not hide missing history. Values may refer to different counting periods, so the selected driver view lists each period, review date, requirement, result and margin. These margins are not an estimate of additional work availability.
+
+Review opens the driver's checks and expandable active duty-span/break records from the loaded history. Search, result filtering, refresh and realtime updates remain available. Selection remains open during realtime updates; date-range changes clear selection. All turnaround records remain available in an expandable section. This interface uses real loaded records, not the illustrative drivers in the design example.

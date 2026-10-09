@@ -64,10 +64,10 @@ test('Standard Hours table renders even with no turnaround results',async()=>{
   const alerts=report.calculateStandardHoursAlerts([duty('2026-10-13',0,360)],range);
   report.renderPage([],alerts,range);
   assert.match(nodes.ftRows.innerHTML,/No matching turnaround/);
-  assert.match(nodes.ftStandardRows.innerHTML,/Needs more information/);
-  assert.match(nodes.ftStandardRows.innerHTML,/5½/);
+  assert.match(nodes.ftStandardRows.innerHTML,/Planned alert/);
+  assert.match(nodes.ftStandardRows.innerHTML,/data-employee="899"/);
   report.renderPage([],[],range);
-  assert.doesNotMatch(nodes.ftStandardRows.innerHTML,/Needs more information/);
+  assert.doesNotMatch(nodes.ftStandardRows.innerHTML,/Planned alert/);
  } finally {delete global.document;}
 });
 test('a saved obsolete break message is refreshed while company turnaround survives',async()=>{
@@ -333,4 +333,46 @@ test('future incomplete period cannot claim a rest shortfall or pass',async()=>{
  const duties=[{...duty('2026-10-13',540,1020),id:'d'}];
  assert.ok(!schedule.scheduledWorkRisks(duties,coverage).some(x=>x.rule.startsWith('Planned rest:')));
  assert.ok(schedule.calculatePlannedRestChecks(duties,'2026-10-13',coverage).every(x=>x.result==='DATA REVIEW'));
+});
+
+
+test('driver overview combines records into one row and preserves missing-history review',async()=>{
+ const {report}=await modules;
+ const alerts=[{employeeNumber:'899',driverName:'Test',rule:'Planned rest: 7 continuous hours in 24 hours',result:'PLANNED PASS',assessment:{window:1440,minutes:566}},{employeeNumber:'899',driverName:'Test',rule:'Planned rest: 4 × 24-hour rests in 28 days',result:'DATA REVIEW',assessment:{window:40320}}];
+ const gaps=[{employeeNumber:'899',driverName:'Test',previous:duty('2026-10-12',805,1232),next:duty('2026-10-13',355,1005),restMinutes:563,status:'compliant'}];
+ const reviews=report.buildFatigueDriverReviews(alerts,gaps,range);
+ assert.equal(reviews.length,1);assert.equal(reviews[0].result,'Review information');assert.equal(reviews[0].work24.assessment.minutes,566);assert.equal(reviews[0].gap.restMinutes,563);assert.equal(reviews[0].history,'History needed');
+});
+test('overview alert takes precedence over passes and uses shortest gap in range',async()=>{
+ const {report}=await modules;
+ const alerts=[{employeeNumber:'899',driverName:'Test',rule:'Planned rest: 7 continuous hours in 24 hours',result:'PLANNED PASS',assessment:{window:1440,minutes:600}}];
+ const gaps=[600,479].map(restMinutes=>({employeeNumber:'899',driverName:'Test',previous:duty('2026-10-12',600,900),next:duty('2026-10-13',400,900),restMinutes,status:restMinutes<480?'breach':'compliant'}));
+ const result=report.buildFatigueDriverReviews(alerts,gaps,range)[0];
+ assert.equal(result.result,'Planned alert');assert.equal(result.gap.restMinutes,479);
+});
+test('driver detail retains zero rest, shows actual break records and escapes names',async()=>{
+ const {report}=await modules;
+ const driver={employeeNumber:'899',driverName:'<script>bad</script>',tone:'breach',result:'Planned alert',turnarounds:[],checks:[{date:'2026-10-13',rule:'Planned rest: 6 night rests in 7 days',result:'PLANNED SHORTFALL',detail:'No night rest',assessment:{window:10080,count:0,required:6}}]};
+ const html=report.renderDriverReview(driver,[duty('2026-10-13',540,1020,[{type:'crib',startMin:780,endMin:810}])]);
+ assert.match(html,/0 night rests/);assert.match(html,/6 rest blocks below minimum/);assert.match(html,/crib 13:00–13:30/);assert.doesNotMatch(html,/<script>bad/);assert.match(html,/&lt;script&gt;/);
+});
+
+
+test('Review opens only the selected driver and survives updated results',async()=>{
+ const {report}=await modules;
+ function element(){return {innerHTML:'',hidden:false,dataset:{},setAttribute(key,value){this[key]=value;},querySelector(){return null;},querySelectorAll(){return [...this.innerHTML.matchAll(/data-employee="([^"]+)"/g)].map(match=>({dataset:{employee:match[1]},addEventListener(name,handler){this.click=handler;}}));}};}
+ const nodes=Object.fromEntries(['ftRows','ftStandardRows','ftMetrics','ftDriverCounts','ftDriverDetail','ftSummaryPanel','ftDetailPanel','ftSummaryTab','ftDetailTab'].map(id=>[id,element()]));
+ // Keep the actual button references returned to the renderer.
+ nodes.ftStandardRows.querySelectorAll=function(){this.buttons=[...this.innerHTML.matchAll(/data-employee="([^"]+)"/g)].map(match=>({dataset:{employee:match[1]},addEventListener(name,handler){this.click=handler;}}));return this.buttons;};
+ const alerts=['899','900'].map(employeeNumber=>({employeeNumber,driverName:'Driver '+employeeNumber,date:'2026-10-13',rule:'Hours-option verification',result:'DATA REVIEW',detail:'Profile needed'}));
+ const view={employeeNumber:'',tab:'summary',duties:[]};
+ global.document={getElementById:id=>nodes[id]};
+ try {
+   view.redraw=()=>report.renderPage([],alerts,range,'','all',view);
+   view.redraw();assert.equal(nodes.ftDetailPanel.hidden,true);
+   nodes.ftStandardRows.buttons.find(b=>b.dataset.employee==='900').click();
+   assert.equal(view.employeeNumber,'900');assert.equal(nodes.ftSummaryPanel.hidden,true);assert.equal(nodes.ftDetailPanel.hidden,false);
+   assert.match(nodes.ftDriverDetail.innerHTML,/Driver 900/);assert.doesNotMatch(nodes.ftDriverDetail.innerHTML,/Driver 899/);
+   view.redraw();assert.equal(view.employeeNumber,'900');assert.equal(nodes.ftDetailPanel.hidden,false);
+ } finally {delete global.document;}
 });
