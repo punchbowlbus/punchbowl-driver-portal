@@ -9,3 +9,7 @@ The same sign-off block appears in Job Card review, the original popup printer, 
 Validate locally with `node --test tests/workshop-electronic-signoff.test.cjs`. Also test the actual signed-in manager account against the project's Firestore rules before deployment. Live rules are not in this repository and have not been verified: frontend/transaction validation does not establish server-enforced immutability, signature admissibility or legal compliance. Confirm any specific BOAS/inspection/form requirements and company-authorised signing titles. Existing approvals are not migrated.
 
 Pending separate fatigue update: distinguish missing roster coverage from an ongoing 28-day counting period, and show when required planned full-day rests are already present within an ongoing period. Retained for a future fatigue update; not part of this Workshop change.
+
+## Active employee lookup correction
+
+Signing ignores inactive/deleted historical employee records that share the login email. Exactly one active canonical-email match is still required, with the existing Manager/Admin authorisation checks and transaction-time revalidation. Missing and multiple active matches are distinguished. If the exact Firestore email query returns no active record, a read-only directory lookup can verify older saved email casing/whitespace; it never matches by name, chooses between active duplicates, changes employee records or bypasses database permissions. Existing closed approvals, schema, signature payload and fleet update paths are unchanged.

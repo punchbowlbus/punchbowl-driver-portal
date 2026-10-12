@@ -44,15 +44,34 @@ function fmtDateTime(v) {
   }).format(d);
 }
 
+// Employee formalisation may leave inactive historical records for the same
+// email. Only active, non-deleted matches can identify a current signatory.
+export function selectActiveWorkshopEmployee(records, email) {
+  const loginEmail=norm(email);
+  const matching=records.filter(record=>norm(record.data.email)===loginEmail);
+  const active=matching.filter(record=>norm(record.data.status)==="active" && record.data.deleted!==true);
+  if(active.length>1)throw new Error("Multiple active employee records match this signed-in account. An administrator must resolve the duplicate active records before signing.");
+  if(active.length===1)return active[0];
+  if(matching.length)throw new Error("Only inactive or deleted employee records match this signed-in account. Check the saved active employee email.");
+  throw new Error(`No active employee record matches the signed-in email (${loginEmail}). Check the saved employee email and Google sign-in account.`);
+}
 async function loadApprover(user = auth.currentUser) {
   const superAdmin=ADMIN_EMAILS.some(email=>norm(email)===norm(user?.email));
   if(superAdmin)return {approver:resolveWorkshopApprover(user,null,true),employeeRef:null};
-  if(!user?.uid)throw new Error("Sign in before approving a job card.");
-  const result=await getDocs(query(collection(db,"employees"),where("email","==",norm(user.email))));
-  if(result.docs.length!==1)throw new Error("Exactly one active employee record must identify this approving account.");
-  const record=result.docs[0];
-  return {approver:resolveWorkshopApprover(user,record.data()),employeeRef:doc(db,"employees",record.id)};
+  if(!user?.uid || !user.email)throw new Error("Sign in before approving a job card.");
+  const toRecords=snapshot=>snapshot.docs.map(record=>({id:record.id,data:record.data()}));
+  let records=toRecords(await getDocs(query(collection(db,"employees"),where("email","==",norm(user.email)))));
+  // Firestore equality is exact: older saved emails may have different case
+  // or whitespace. Fall back to a read-only directory check only if no active
+  // exact match exists. The same canonical email is still required.
+  if(!records.some(record=>norm(record.data.email)===norm(user.email) && norm(record.data.status)==="active" && record.data.deleted!==true)) {
+    try { records=toRecords(await getDocs(collection(db,"employees"))); }
+    catch(error) { throw new Error("The email lookup returned no active match and the employee directory could not be verified. Check the saved employee email and employee-read permissions."); }
+  }
+  const record=selectActiveWorkshopEmployee(records,user.email);
+  return {approver:resolveWorkshopApprover(user,record.data),employeeRef:doc(db,"employees",record.id)};
 }
+
 function updateSignatureButton() {
   const button=$("wmApproveClose");
   if(button)button.disabled=signingJob || !$("wmSignoffConsent")?.checked || $("wmSignoffIdentity")?.dataset.verified!=="true";

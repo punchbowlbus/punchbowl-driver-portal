@@ -57,9 +57,9 @@ async function integration(overrides={}) {
  const nodes=Object.fromEntries(['wmSignoffConsent','wmSignoffIdentity','wmApproveClose','wmReturnToService','wmVehicleStatus','wmManagerComments','wmInspectionCompletedDate','wmReviewMessage','fleetManagerReviewDialog','status'].map(id=>[id,{checked:true,value:'',textContent:'',dataset:{verified:'true'},scrollIntoView(){},close(){this.closed=true}}]));
  nodes.wmReturnToService.value=seed.returnToService || 'Yes';nodes.wmInspectionCompletedDate.value=seed.inspectionDate || '';nodes.wmVehicleStatus.value='Active';nodes.wmManagerComments.value='Reviewed';nodes.wmSignoffConsent.checked=seed.consent!==false;
  const document={getElementById:id=>nodes[id]};const window={};
- const collection=(db,name)=>({name});const where=()=>({});const query=ref=>ref;
+ const collection=(db,name)=>({name});const where=()=>({});const query=ref=>({...ref,exactEmailQuery:true});
  const doc=(...args)=>args.length===1 ? {name:args[0].name,id:'generated'} : {name:args[1],id:args[2]};
- const getDocs=async()=>({docs:[{id:'99001',data:()=>seed.employee}]});
+ const getDocs=async ref=>({docs:(ref.exactEmailQuery ? seed.exactRecords || seed.employeeRecords || [seed.employee] : seed.employeeRecords || [seed.employee]).map((employee,index)=>({id:employee.recordId || employee.employeeNumber || 'record'+index,data:()=>employee}))});
  const serverTimestamp=()=>({serverTimestamp:true});
  const runTransaction=async(db,fn)=>fn({get:async ref=>({exists:()=>true,data:()=>ref.name==='workshopJobs' ? seed.latestJob || seed.job : ref.name==='employees' ? seed.latestEmployee || seed.employee : {currentOdometer:49000}}),update:(ref,data)=>writes.push({type:'update',ref,data}),set:(ref,data)=>writes.push({type:'set',ref,data})});
  ${source}
@@ -113,4 +113,30 @@ test('same-page printing retains saved legacy block instead of inventing the cur
  const document={getElementById:id=>fields[id],createElement:()=>frame,body:{appendChild(){}}};
  const fn=new Function('document','setTimeout',source.slice(0,source.indexOf('document.addEventListener'))+';return printCurrentReview;')(document,()=>{});
  assert.equal(fn(),true);assert.match(output,/Legacy approval record: original@example.com/);assert.doesNotMatch(output,/Fleet Manager Decision|Changed form text/);
+});
+
+
+test('inactive and deleted duplicate accounts do not block the active manager or rewrite old data',async()=>{
+ const old={...employee,recordId:'legacy-record',status:'Inactive',firstName:'Old',lastName:'Account'};
+ const removed={...employee,recordId:'deleted-record',deleted:true};
+ const m=await integration({employeeRecords:[old,removed,employee]});await m.approveAndClose();
+ const saved=m.writes.find(w=>w.ref.name==='workshopJobs').data;
+ assert.equal(saved.fleetManagerApproval.approvedByName,'Test Manager');assert.equal(saved.fleetManagerApproval.approvedByEmployeeNumber,'99001');
+ assert.ok(m.writes.every(w=>w.ref.name!=='employees'));
+});
+test('saved email case and whitespace can be verified by read-only fallback',async()=>{
+ const canonical={...employee,email:' WORKSHOP-MANAGER@EXAMPLE.COM '};
+ const m=await integration({employee:canonical,exactRecords:[],employeeRecords:[canonical]});await m.approveAndClose();
+ assert.equal(m.writes.find(w=>w.ref.name==='workshopJobs').data.fleetManagerApproval.approvedByEmail,'workshop-manager@example.com');
+});
+test('multiple active matching people remain blocked without picking the first result',async()=>{
+ const duplicate={...employee,employeeNumber:'99002',firstName:'Another',recordId:'another-record'};
+ const m=await integration({employeeRecords:[employee,duplicate]});await m.approveAndClose();
+ assert.equal(m.writes.length,0);assert.match(m.message(),/Multiple active employee records/);
+});
+test('a missing email match reports the missing record and writes nothing',async()=>{
+ const m=await integration({exactRecords:[],employeeRecords:[]});await m.approveAndClose();assert.equal(m.writes.length,0);assert.match(m.message(),/No active employee record matches/);
+});
+test('inactive-only records do not grant signing access',async()=>{
+ const m=await integration({employeeRecords:[{...employee,status:'Inactive'}]});await m.approveAndClose();assert.equal(m.writes.length,0);assert.match(m.message(),/Only inactive or deleted/);
 });
