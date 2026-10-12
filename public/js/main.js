@@ -375,7 +375,7 @@ export async function go(pageId) {
   if (pageId === "adminBusAllocation") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./bus_allocation.js?v=20260924-local-1");
+    const mod = await import("./bus_allocation.js?v=20261013-departure-print-types");
     mod.renderBusAllocationPage();
     return;
   }
