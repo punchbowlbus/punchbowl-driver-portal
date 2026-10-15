@@ -59,6 +59,8 @@ function isAdminEmail(email) {
       state.unsubscribeJobDetailsBlocks();
       state.unsubscribeJobDetailsBlocks = null;
     }
+    state.blocks = null;
+    state.blocksDate = "";
 
     if (state.unsubscribeDriverMonitor) {
       state.unsubscribeDriverMonitor();
@@ -640,11 +642,13 @@ if (pageId === "adminAllJobs") {
 
           const dutyDate = String(dutySpan.serviceDate || dutySpan.date || "").trim();
           if (String(state.blocksDate || "") !== dutyDate) {
+            state.unsubscribeJobDetailsBlocks?.();
+            state.unsubscribeJobDetailsBlocks = null;
             state.blocks = null;
             state.blocksDate = dutyDate;
           }
 
-          if (!state.blocks && dutyDate) {
+          if ((!state.blocks || !state.unsubscribeJobDetailsBlocks) && dutyDate) {
             els.contentArea.innerHTML = `
               <div class="driver-duty-loading card">
                 <div class="driver-duty-loading-spinner"></div>
@@ -658,15 +662,14 @@ if (pageId === "adminAllJobs") {
               state.unsubscribeJobDetailsBlocks = null;
             }
 
-            const currentDutySpanId = String(dutySpan.id || "");
             state.unsubscribeJobDetailsBlocks = listenBlocksByDate(
               dutyDate,
               (blocks) => {
+                // Ignore late snapshots from a stopped subscription. The date
+                // listener also serves another duty opened on this same date.
+                if (String(state.blocksDate || "") !== dutyDate) return;
                 state.blocks = blocks || [];
-                if (
-                  state.activePage === "jobDetails" &&
-                  String(state.selectedJobId || "") === currentDutySpanId
-                ) {
+                if (state.activePage === "jobDetails") {
                   go("jobDetails");
                 }
               },
