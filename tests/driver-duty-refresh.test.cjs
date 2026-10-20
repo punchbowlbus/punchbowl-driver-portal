@@ -6,7 +6,7 @@ const vm=require('node:vm');
 const source=fs.readFileSync(path.join(__dirname,'../public/js/main.js'),'utf8');
 const sheet=fs.readFileSync(path.join(__dirname,'../public/js/driver_duty_sheet.js'),'utf8');
 const branch=source.slice(source.indexOf('        if (pageId === "jobDetails")'),source.indexOf('  // Shared menu'))
- .replace('await import("./driver_duty_sheet.js?v=6")','({renderDriverDutySheet: renderSheet})');
+ .replace(/await import\("\.\/driver_duty_sheet\.js\?v=\d+"\)/,'({renderDriverDutySheet: renderSheet})');
 const stop=source.slice(source.indexOf('  function stopAllListeners()'),source.indexOf('async function setShiftConfirmation'));
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function setup(){

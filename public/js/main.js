@@ -678,10 +678,15 @@ if (pageId === "adminAllJobs") {
             return;
           }
 
-          const dutySheetModule = await import("./driver_duty_sheet.js?v=6");
+          const displayedBlocks = state.blocks || [];
+          const dutySheetModule = await import("./driver_duty_sheet.js?v=7");
           await dutySheetModule.renderDriverDutySheet({
             dutySpan,
-            blocks: state.blocks || [],
+            blocks: displayedBlocks,
+            isCurrent: () => state.activePage === "jobDetails" &&
+              String(state.selectedJobId || "") === String(dutySpan.id || "") &&
+              state.blocks === displayedBlocks,
+            dutySpans: state.driverDutySpans || [dutySpan],
             isAdmin: state.isAdmin,
             onYes: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "Yes"),
             onNo: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "No"),
