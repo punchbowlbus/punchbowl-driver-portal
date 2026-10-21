@@ -1,3 +1,4 @@
+import { fleetPrintCellText, printFleetSnapshot } from "./workshop_fleet_print.js";
 import { setHtmlIfChanged, setTextIfChanged } from "./workshop_display_stability.js";
 import { collection, onSnapshot } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { db } from "./firebase.js";
@@ -41,6 +42,7 @@ let workshopJobsLoaded = false;
 let sortState = {key:"fleet", direction:"asc"};
 let refreshTimer = null;
 let tableObserver = null;
+let printing = false;
 
 function columnKey(label) {
   return norm(label).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -75,11 +77,12 @@ function injectStyles() {
   const style = document.createElement("style");
   style.id = "fleetRegistryControlStyles";
   style.textContent = `
-    .fleet-register-controls{display:grid;grid-template-columns:minmax(170px,1fr) minmax(150px,.8fr) minmax(150px,.8fr) minmax(180px,1fr) auto auto;gap:10px;align-items:end;margin:0 0 14px;padding:14px;border:1px solid #dfe5ec;border-radius:14px;background:#fff;box-shadow:0 5px 18px rgba(16,24,40,.04)}
-    .fleet-register-filter{display:grid;gap:5px}.fleet-register-filter>span{font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#667085}
-    .fleet-register-filter select{min-height:40px;border:1px solid #cfd6dd;border-radius:9px;background:#fff;padding:8px 34px 8px 10px;color:#101828;font-weight:700}
-    .fleet-register-actions{display:flex;gap:8px;align-items:center;position:relative}
+    .fleet-register-controls{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;align-items:end;margin:0 0 14px;padding:14px;border:1px solid #dfe5ec;border-radius:14px;background:#fff;box-shadow:0 5px 18px rgba(16,24,40,.04)}
+    .fleet-register-filter{display:grid;gap:5px;min-width:0}.fleet-register-filter>span{font-size:10px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:#667085}
+    .fleet-register-filter select{width:100%;min-width:0;min-height:40px;border:1px solid #cfd6dd;border-radius:9px;background:#fff;padding:8px 34px 8px 10px;color:#101828;font-weight:700}
+    .fleet-register-actions{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-end;position:relative}
     .fleet-register-button{min-height:40px;border:1px solid #cfd6dd;border-radius:9px;background:#fff;color:#344054;padding:8px 12px;font-weight:800;cursor:pointer;white-space:nowrap}
+    .fleet-register-button:disabled{opacity:.5;cursor:default}
     .fleet-register-button:hover{border-color:#98a2b3;background:#f8fafc}.fleet-register-button[aria-expanded="true"]{border-color:#c62828;box-shadow:0 0 0 3px rgba(198,40,40,.1)}
     .fleet-column-menu{position:absolute;z-index:30;right:0;top:46px;width:270px;padding:12px;border:1px solid #d0d5dd;border-radius:12px;background:#fff;box-shadow:0 16px 40px rgba(16,24,40,.18)}
     .fleet-column-menu-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.fleet-column-menu-head strong{font-size:13px}.fleet-column-menu-head button{border:0;background:none;color:#175cd3;font-size:12px;font-weight:800;cursor:pointer}
@@ -149,6 +152,7 @@ function ensureControls() {
       <label class="fleet-register-filter"><span>Row density</span><select id="fleetRegisterDensity"><option value="compact">Compact</option><option value="standard">Standard</option><option value="comfortable">Comfortable</option></select></label>
       <div class="fleet-register-actions">
         <button id="fleetClearFilters" class="fleet-register-button" type="button">Clear filters</button>
+        <button id="fleetPrintFiltered" class="fleet-register-button" type="button" title="Print matching vehicles and visible columns" disabled>Print</button>
         <button id="fleetColumnsButton" class="fleet-register-button" type="button" aria-expanded="false">Columns ▾</button>
         <div id="fleetColumnMenu" class="fleet-column-menu" hidden>
           <div class="fleet-column-menu-head"><strong>Visible columns</strong><button id="fleetResetColumns" type="button">Reset</button></div>
@@ -169,6 +173,7 @@ function ensureControls() {
       applyDensity();
     });
     $("fleetClearFilters").onclick = clearFilters;
+    $("fleetPrintFiltered").onclick = printFilteredFleet;
     $("fleetColumnsButton").onclick = (event) => {
       event.stopPropagation();
       const menu = $("fleetColumnMenu");
@@ -312,6 +317,7 @@ function applyFilters() {
     row.dataset.fleetFiltered = matches ? "false" : "true";
     if (matches) visible++;
   });
+  if ($("fleetPrintFiltered")) $("fleetPrintFiltered").disabled = printing || visible === 0;
   const total = rows.filter(busForRow).length;
   setHtmlIfChanged($("fleetRegisterResultCount"), `<strong>${visible}</strong> of ${total} vehicles shown`);
 }
@@ -392,6 +398,46 @@ function applyColumns() {
     header.cell.style.display = hidden ? "none" : "";
     rows.forEach((row) => { if (row.cells[header.index]) row.cells[header.index].style.display = hidden ? "none" : ""; });
   });
+}
+
+function fleetPrintSnapshot() {
+  const columns = currentHeaders().filter(header => header.key !== "action" && header.cell.style.display !== "none" && !header.cell.hidden);
+  const rows = [...($("fleetTableBody")?.rows || [])]
+    .filter(row => busForRow(row) && row.dataset.fleetFiltered !== "true" && !row.hidden && row.style.display !== "none")
+    .map(row => columns.map(header => fleetPrintCellText(row.cells[header.index])));
+  const filters = [];
+  const search = $("fleetSearch")?.value.trim();
+  if (search) filters.push(`Search: ${search}`);
+  for (const [id, label] of [["fleetRegisterDepot", "Depot"], ["fleetRegisterStatus", "Status"], ["fleetRegisterFuel", "Fuel"], ["fleetRegisterMaintenance", "Maintenance"]]) {
+    const select = $(id);
+    if (select?.value) filters.push(`${label}: ${select.selectedOptions[0]?.textContent.trim() || select.value}`);
+  }
+  const sortColumn = currentHeaders().find(header => header.key === sortState.key);
+  return {columns, rows, filters, sort:`${sortColumn?.label || "Fleet"} — ${sortState.direction === "desc" ? "descending" : "ascending"}`};
+}
+
+async function printFilteredFleet() {
+  if (printing) return;
+  printing = true;
+  const button = $("fleetPrintFiltered");
+  button.disabled = true;
+  button.textContent = "Preparing…";
+  try {
+    // Finish the existing row decorators before capturing a read-only snapshot.
+    await new Promise(resolve => setTimeout(resolve, 60));
+    clearTimeout(refreshTimer);
+    refresh();
+    const snapshot = fleetPrintSnapshot();
+    if (!snapshot.rows.length) throw new Error("No matching vehicles to print. Change your filters and try again.");
+    await printFleetSnapshot(snapshot);
+  } catch (error) {
+    const status = $("status");
+    if (status) { status.className = "status error"; status.textContent = error?.message || "Unable to prepare the fleet printout."; }
+  } finally {
+    printing = false;
+    button.textContent = "Print";
+    applyFilters();
+  }
 }
 
 function clearFilters() {
