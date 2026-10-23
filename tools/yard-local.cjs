@@ -5,8 +5,8 @@ const {createService}=require('../functions-yard/service');
 const {identity,today}=require('../functions-yard/domain');
 const publicDir=path.resolve(__dirname,'../public'),dataFile=path.join(__dirname,'yard-local-data.json');
 const employees={
-  'yard1@example.test':{employeeNumber:'101',displayName:'Yard Employee A',role:'Yard Man',accessLevel:'Yard Man',department:'Yard',status:'Active'},
-  'yard2@example.test':{employeeNumber:'102',displayName:'Yard Employee B',role:'Yard Man',accessLevel:'Yard Man',department:'Yard',status:'Active'},
+  'yard1@example.test':{employeeNumber:'101',displayName:'K SOTHISWARAN',role:'Yard Man',accessLevel:'Yard Man',department:'Yard',status:'Active'},
+  'yard2@example.test':{employeeNumber:'102',displayName:'Palad-im',role:'Yard Man',accessLevel:'Yard Man',department:'Yard',status:'Active'},
   'manager@example.test':{employeeNumber:'1',displayName:'Fleet Manager',role:'Manager',accessLevel:'Admin',department:'Workshop',status:'Active'}
 };
 function seed(){return Object.fromEntries(Object.entries({M07538:{depot:'Riverwood',fuelType:'Diesel',rego:'DEMO01'},M09104:{depot:"Hannan's",fuelType:'Diesel',rego:'DEMO02'},EV012:{depot:'Riverwood',fuelType:'Electric',rego:'DEMOEV'}}).map(([id,bus])=>['buses/'+id,{...bus,fleetNumber:id,status:'Active'}]));}
@@ -15,7 +15,7 @@ async function request(action,data={}){const r=await fetch('/__yard/'+action,{me
 export const yardAuth={currentUser:(await request('Session')).user},yardProvider={};
 const listeners=new Set();
 export function onAuthStateChanged(auth,callback){listeners.add(callback);queueMicrotask(()=>callback(auth.currentUser));return()=>listeners.delete(callback);}
-export async function signInWithPopup(){const choice=prompt('LOCAL TEST ONLY — select an employee:\\n1 = Yard Employee A\\n2 = Yard Employee B\\n3 = Fleet Manager','1');if(choice===null)return;const emails={'1':'yard1@example.test','2':'yard2@example.test','3':'manager@example.test'};const result=await request('Login',{email:emails[choice]||choice.trim()});yardAuth.currentUser=result.user;listeners.forEach(cb=>cb(result.user));return result;}
+export async function signInWithPopup(){const choice=prompt('LOCAL TEST ONLY — select an employee:\\n1 = AM Yard — K SOTHISWARAN\\n2 = PM Yard — Palad-im\\n3 = Fleet Manager','1');if(choice===null)return;const emails={'1':'yard1@example.test','2':'yard2@example.test','3':'manager@example.test'};const result=await request('Login',{email:emails[choice]||choice.trim()});yardAuth.currentUser=result.user;listeners.forEach(cb=>cb(result.user));return result;}
 export async function signOut(){await request('Logout');yardAuth.currentUser=null;listeners.forEach(cb=>cb(null));}
 export function yardCall(name,data={}){return request(name,data);}
 `;
@@ -65,4 +65,4 @@ async function start({port=5050,dataPath=dataFile}={}){
   return {server,db,port:server.address().port,today:today()};
 }
 module.exports={start};
-if(require.main===module)start().then(({port})=>console.log(`Local Yard test ready (sample data only).\nYard: http://127.0.0.1:${port}/yard.html\nManager: http://127.0.0.1:${port}/yard.html?managerView=1\nClick Sign in: 1 = Yard A, 2 = Yard B, 3 = Manager.\nUpdates saved locally. Ctrl+C stops the server.`)).catch(error=>{console.error(error.message);process.exitCode=1;});
+if(require.main===module)start().then(({port})=>console.log(`Local Yard test ready (sample data only).\nYard: http://127.0.0.1:${port}/yard.html\nManager: http://127.0.0.1:${port}/yard.html?managerView=1\nClick Sign in: 1 = AM Yard — K SOTHISWARAN, 2 = PM Yard — Palad-im, 3 = Manager.\nUpdates saved locally. Ctrl+C stops the server.`)).catch(error=>{console.error(error.message);process.exitCode=1;});

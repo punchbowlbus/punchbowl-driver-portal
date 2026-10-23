@@ -19,7 +19,7 @@ test('Node-only local server: sessions, permissions, immediate completion and pe
     assert.equal((await request('Update',{...task,action:'approve',recordId:completed.body.recordId},m)).status,400);
     await new Promise(resolve=>app.server.close(resolve));app=await start({port:0,dataPath});url=`http://127.0.0.1:${app.port}`;
     const fresh=(await request('Login',{email:'manager@example.test'})).cookie,newBoard=(await request('Board',{},fresh)).body;
-    assert.equal(newBoard.fleet.find(bus=>bus.id==='M07538').yard.exterior.lastBy.name,'Yard Employee A');
+    assert.equal(newBoard.fleet.find(bus=>bus.id==='M07538').yard.exterior.lastBy.name,'K SOTHISWARAN');
     const history=(await request('History',{busId:'M07538'},fresh)).body.records;
     assert.equal(history.length,2);assert.equal(history.some(r=>r.action==='complete'&&r.status==='Completed'),true);
     const next=await request('Update',{busId:'M07538',type:'interior',action:'start'},fresh);assert.equal(next.status,200);

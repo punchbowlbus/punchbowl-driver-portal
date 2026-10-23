@@ -54,7 +54,7 @@ No additional packages or Firebase login are required. Leave the terminal open a
 - Yard: `http://127.0.0.1:5050/yard.html`
 - Manager: `http://127.0.0.1:5050/yard.html?managerView=1`
 
-Click **Sign in**, enter **1** for Yard Employee A, **2** for Yard Employee B, or **3** for Fleet Manager. Use separate browser profiles/private windows to test employees working at the same time. Sign out to switch employees; open the Manager view when signed in as the manager. Bus cleaning needs no approval. The manager reviews completed **general yard tasks**.
+Click **Sign in**, enter **1** for AM Yard — **K SOTHISWARAN**, **2** for PM Yard — **Palad-im**, or **3** for Fleet Manager. Use separate browser profiles/private windows to test employees working at the same time. Sign out to switch employees; open the Manager view when signed in as the manager. Bus cleaning needs no approval. The manager reviews completed **general yard tasks**.
 
 This server uses the actual Yard UI and task service with sample buses and local sessions. It loads no Firebase SDK and makes no requests to the real project. Only Yard page assets are served; other portal pages are excluded. It listens on your own PC at port 5050. Updates and photo evidence persist in `tools/yard-local-data.json` (excluded from Git). Stop the server with Ctrl+C. To reset sample data, stop the server and delete that file, then restart.
 
