@@ -156,7 +156,7 @@ async function refresh(showMessage=false){
       const error=new Error("You are signed in as yard staff. Open Yard View to see your fleet and tasks.");error.yardWrongView=true;throw error;
     }
     model=result;lastUpdated=new Date().toLocaleTimeString("en-AU");if(!byId("yardContent"))shell();render();
-    if(standalone){byId("yardIdentity").textContent=result.person.name;byId("yardManagerLink").hidden=!result.person.manager;}
+    if(standalone){byId("yardIdentity").textContent=result.person.name;byId("yardDriverLink").hidden=!result.person.driver;byId("yardManagerLink").hidden=!result.person.manager;}
     if(showMessage)msg("Fleet updates refreshed.");
   }catch(error){if(version!==authVersion)return;
     const message=error.message || "Unable to load Yard Work.";
@@ -169,7 +169,7 @@ if(root){
   if(standalone){byId("yardSignIn").onclick=()=>{yardProvider.setCustomParameters?.({prompt:"select_account"});return signInWithPopup(yardAuth,yardProvider).catch((error)=>{root.textContent=error.message;});};byId("yardSignOut").onclick=()=>{if(busy)return;signOut(yardAuth).catch(error=>msg(error.message,true));};}
   onAuthStateChanged(yardAuth,async(user)=>{
     authVersion++;clearInterval(poll);poll=null;model=null;historyRecords=null;tab="fleet";lastUpdated="";byId("yardModal")?.close();
-    if(standalone){byId("yardSignIn").hidden=Boolean(user);byId("yardSignOut").hidden=!user;byId("yardManagerLink").hidden=true;byId("yardIdentity").textContent=user?"Checking employee access…":"Not signed in";}
+    if(standalone){byId("yardSignIn").hidden=Boolean(user);byId("yardSignOut").hidden=!user;byId("yardManagerLink").hidden=true;byId("yardDriverLink").hidden=true;byId("yardIdentity").textContent=user?"Checking employee access…":"Not signed in";}
     root.innerHTML=`<div class="yard-empty">${user?"Loading fleet and employee access…":"Sign in with your own employee account to use Yard Work."}</div>`;
     if(!user)return;const version=authVersion;await refresh();if(version!==authVersion)return;
     poll=setInterval(()=>{if(document.visibilityState==="visible"&&!busy&&(standalone||byId("yardView")?.classList.contains("active")))refresh();},20000);

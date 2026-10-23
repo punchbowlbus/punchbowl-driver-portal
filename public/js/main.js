@@ -23,6 +23,7 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.9.0/firebas
 import { auth, provider, db, functions, messaging, storage } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
 import { state } from "./state.js";
+import {hasYardAccess,isYardOnly} from "./yard_access.js";
 import { normalizeEmail, escapeHtml } from "./utils.js";
 import {
   listenShifts,
@@ -327,12 +328,20 @@ export async function go(pageId) {
     {
       currentUser: state.currentUser,
       isAdmin: state.isAdmin,
+      employee: state.employee,
       activePage: state.activePage
     },
     (id) => go(id)
   );
 
   showError("");
+
+  if (pageId === "yardWork") {
+    if (!state.isAdmin && !hasYardAccess(state.employee)) return showError("Yard Work access is not enabled for your account.");
+    stopAllListeners();
+    window.location.href = "./yard.html";
+    return;
+  }
 
   if (pageId === "newEnquiry") {
     if (!state.isAdmin) return showError("No admin access");
@@ -1460,8 +1469,7 @@ renderAuth(
 if (!u) return;
 
 // Yard staff enter their dedicated tablet page; existing admin/driver routes stay intact.
-if (!state.isAdmin && String(state.employee?.status || "").toLowerCase() === "active" &&
-    [state.employee?.role, state.employee?.accessLevel].some((value) => String(value || "").trim().toLowerCase() === "yard man")) {
+if (!state.isAdmin && isYardOnly(state.employee)) {
   window.location.replace("./yard.html");
   return;
 }

@@ -4,7 +4,7 @@ Development branch: `feature/yard-man-jobs`. Release preparation authorised on 2
 
 ## Staff setup and operation
 
-In Employees, give yard staff Role **Yard Man**, Access Level **Yard Man**, Department **Yard** (or Workshop), Status **Active**, and their own Google sign-in email. Their main portal login redirects to `yard.html`. All yard staff see the full active fleet, with depot/search filters; the displayed depot comes from fleet records and does not establish physical presence.
+In Employees, for staff who also drive, **keep Role Driver and Access Level Driver**, keep their existing department/compliance details, and tick **Allow Yard Work access** (`yardAccess: true`). Use Active status and their own Google sign-in email. They retain the driver portal and gain a Yard Work menu option. The Yard page offers Driver My Work to return to their duties. For dedicated yard-only staff, the existing Yard Man role/access remains supported and redirects to `yard.html`. All yard staff see the full active fleet, with depot/search filters; the displayed depot comes from fleet records and does not establish physical presence.
 
 The Fleet Manager uses Workshop Management → **Yard Work Queue**, replacing “Safety Checks Next”. A separate **Yard View** link in the left menu opens the tablet page under the current signed-in account; work is recorded under that account. Managers retain their current Admin/Workshop Manager access. Yard staff do not receive manager controls.
 
@@ -27,7 +27,7 @@ Before leaving unfinished work, tap **Hand over** and describe what is complete 
 
 ## General yard tasks
 
-In Workshop Management → Yard Work Queue, **Assign Yard Task** creates work such as yard cleaning, rubbish removal or tree trimming. Enter title, location, instructions, normal/urgent priority, due date, optional photos, and one or more active Yard Man employees from Employees. Leave employees unchecked for anyone available. A bus number is not required.
+In Workshop Management → Yard Work Queue, **Assign Yard Task** creates work such as yard cleaning, rubbish removal or tree trimming. Enter title, location, instructions, normal/urgent priority, due date, optional photos, and one or more active employees with Yard Work permission from Employees. Leave employees unchecked for anyone available. A bus number is not required.
 
 The **Yard Tasks** tab is available to manager and employees. Only an assigned employee (or a manager) can claim a restricted task. One employee owns active work at a time; multiple selected assignees support sequential shift handover. Others can see progress and ownership. Staff can start/accept, hand over with notes, report a blocking problem, or submit completion with date, notes and photos. General tasks await manager review, with approve or return-for-further-work actions. This review does not apply to bus cleaning. Full task activity loads on opening a task, including older updates beyond the board's latest 150.
 
@@ -84,7 +84,7 @@ The latest master changes have been merged into this development branch so drive
 
 ## Live release from an authorised PC
 
-The Node demo's sample employees and sample buses are never seeded into production. Production reads your existing fleet and Employees. For K SOTHISWARAN and Palad-im, use their existing employee records and actual Google sign-in emails, active status, and Yard Man role/access. Do not create duplicate employee records or use the example.test demo emails. Confirm production Firestore/Storage access rules as described above before staff use, and verify one actual sign-in and photo upload after backend deployment.
+The Node demo's sample employees and sample buses are never seeded into production. Production reads your existing fleet and Employees. For K SOTHISWARAN and Palad-im, use their existing employee records and actual Google sign-in emails, active status, and **Allow Yard Work access**, retaining their Driver role/access if they also drive. Do not create duplicate employee records or use the example.test demo emails. Confirm production Firestore/Storage access rules as described above before staff use, and verify one actual sign-in and photo upload after backend deployment.
 
 From a clean checkout of the release commit, deploy backend first:
 
@@ -100,3 +100,9 @@ firebase deploy --config firebase.json --only hosting --project punchbowl-driver
 ```
 
 Open the live Workshop page and check **Yard Work Queue** and **Yard View**. The tablet page is `/yard.html`. Each employee uses Google sign-in and must only receive yard controls. Verify the real fleet, one cleaning completion with the correct employee/date and one photo. Verify the other employee can sign out/in and receive a handover. Actual Google authentication, deployed access rules and Storage remain unverified by the local browser tests.
+
+## Additional Yard access for drivers
+
+The `yardAccess` boolean supplements primary role/access; it does not confer manager permission. Only active, non-deleted employees qualify. The employee form loads, saves and explicitly clears the flag when unchecked. The same server predicate controls callable login, the assignment list and assignment validation. Revocation is checked again on the next callable request. No existing employee records are changed automatically by deployment. Existing Yard Man roles continue to qualify independently of the additional flag.
+
+`node --test tests/yard-access.test.cjs` covers dual access, strict boolean permissions, inactive/deleted/revoked employees, assignment/claim, employee persistence and auth redirect behavior. `node tests/yard-access.browser.cjs` verifies the actual employee form and sidebar: checkbox save/reopen/revoke while Driver role and compliance details remain intact. Yard UI tests check the Driver My Work return link.

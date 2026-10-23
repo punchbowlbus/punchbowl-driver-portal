@@ -118,6 +118,7 @@ export function renderEmployeesPage() {
             <label class="employees-field"><span>Access level <b>*</b></span><select id="empAccessLevel">${options(ACCESS_LEVELS, "Select access level")}</select></label>
             <label class="employees-field"><span>Employee status <b>*</b></span><select id="empStatus">${STATUSES.map((status) => `<option value="${status}">${status}</option>`).join("")}</select></label>
           </div>
+          <label class="employees-field"><span><input id="empYardAccess" type="checkbox" style="width:20px;height:20px;min-height:20px;padding:0;vertical-align:middle;accent-color:#12364f;margin-right:8px" /> Allow Yard Work access</span><small>Additional permission. Keep Driver role and access level for employees who also drive.</small></label>
           <div id="employeeAccessHint" class="employees-access-hint"></div>
         </div>
 
@@ -245,6 +246,7 @@ export function renderEmployeesPage() {
     accessHint.textContent = dualAccess ?
       "This employee will have both Driver and Admin capabilities. Confirm this is intentional." :
       `${role} role with ${access} portal access.`;
+    if(field("empYardAccess")?.checked)accessHint.textContent += " Yard Work access is also enabled; primary role and compliance details are retained.";
     accessHint.className = `employees-access-hint ${dualAccess ? "warning" : ""}`;
   }
 
@@ -268,6 +270,7 @@ export function renderEmployeesPage() {
     ["empNo", "empDisplayName", "empFirstName", "empLastName", "empEmail", "empPhone", "empDepartment", "empRole", "empEmploymentType", "empAccessLevel"]
       .forEach((id) => { if (field(id)) field(id).value = ""; });
     if (field("empStatus")) field("empStatus").value = "Active";
+    field("empYardAccess").checked = false;
     clearDriverFields();
     clearMechanicFields();
     toggleComplianceFields();
@@ -309,6 +312,7 @@ export function renderEmployeesPage() {
     Object.entries(values).forEach(([id, value]) => {
       if (field(id)) field(id).value = value || "";
     });
+    field("empYardAccess").checked = employee.yardAccess === true;
     toggleComplianceFields();
     formDirty = false;
   }
@@ -462,6 +466,7 @@ export function renderEmployeesPage() {
       role,
       employmentType: field("empEmploymentType").value,
       accessLevel: field("empAccessLevel").value,
+      yardAccess: field("empYardAccess").checked,
       status: field("empStatus").value,
       licenceNumber: role === "Driver" ? field("empLicenceNumber").value.trim() : "",
       licenceExpiry: role === "Driver" ? field("empLicenceExpiry").value : "",
@@ -524,6 +529,7 @@ export function renderEmployeesPage() {
 
   roleEl.onchange = toggleComplianceFields;
   accessEl.onchange = updateAccessHint;
+  field("empYardAccess").onchange = updateAccessHint;
   addBtn.onclick = openAddForm;
   editBtn.onclick = openEditForm;
   cancelBtn.onclick = () => closeForm();

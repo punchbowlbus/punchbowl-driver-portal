@@ -649,6 +649,7 @@ export async function saveEmployee(employee) {
       role: String(employee.role || "").trim(),
       employmentType: String(employee.employmentType || "").trim(),
       accessLevel: String(employee.accessLevel || "").trim(),
+      yardAccess: employee.yardAccess === true,
       status: String(employee.status || "Active").trim(),
 
       // Driver fields

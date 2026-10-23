@@ -1,4 +1,4 @@
-const CACHE = "pbc-v86"; // Release Yard Work Queue and tablet view
+const CACHE = "pbc-v87"; // Keep Driver access when enabling additional Yard permission
 
 const ASSETS = [
   "/",

@@ -13,15 +13,16 @@ function dateValue(value, currentDate = today()) {
   if(!/^\d{4}-\d{2}-\d{2}$/.test(value || "") || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0,10)!==value)fail("Enter a valid completion date.","invalid-argument");
   if(value>currentDate)fail("Completion date cannot be in the future.","invalid-argument");return value;
 }
+function hasYardAccess(employee){return norm(employee?.status)==="active"&&employee?.deleted!==true&&(employee.yardAccess===true||[employee.role,employee.accessLevel].some(value=>norm(value)==="yard man"));}
 function identity(auth, employee) {
   if(!auth?.uid || auth.token?.email_verified!==true)fail("Sign in with your verified employee account.","unauthenticated");
   const email=norm(auth.token.email);
   const superAdmin=ADMIN_EMAILS.includes(email);
   const active=norm(employee?.status)==="active" && employee?.deleted!==true;
   const manager=superAdmin || (active && (["admin","super admin"].includes(norm(employee.accessLevel)) || norm(employee.role)==="admin" || (norm(employee.department)==="workshop" && ["manager","fleet manager"].includes(norm(employee.role)))));
-  const worker=active && [employee.role,employee.accessLevel].some((v)=>norm(v)==="yard man");
+  const worker=hasYardAccess(employee);
   if(!manager&&!worker)fail("An active Yard Man or Fleet Manager employee account is required.","permission-denied");
-  return {uid:auth.uid,email,manager,name:employee?.displayName || `${employee?.firstName || ""} ${employee?.lastName || ""}`.trim() || auth.token.name || email,employeeNumber:String(employee?.employeeNumber || employee?.id || "")};
+  return {uid:auth.uid,email,manager,driver:active&&[employee.role,employee.accessLevel].some(value=>norm(value)==="driver"),name:employee?.displayName || `${employee?.firstName || ""} ${employee?.lastName || ""}`.trim() || auth.token.name || email,employeeNumber:String(employee?.employeeNumber || employee?.id || "")};
 }
 function busSnapshot(bus, id) {
   return {id,fleetNumber:String(bus.fleetNumber || bus.busNumber || bus.number || id),rego:String(bus.rego || bus.registration || ""),depot:String(bus.depot || bus.homeDepot || ""),electric:/\bev\b|electric/i.test(`${bus.fuelType || ""} ${bus.fuel || ""} ${bus.serviceProgram || ""}`),oilCheckApplicable:bus.yardOilCheckApplicable!==false&&!/\bev\b|electric/i.test(`${bus.fuelType || ""} ${bus.fuel || ""} ${bus.serviceProgram || ""}`),coolantCheckApplicable:bus.yardCoolantCheckApplicable!==false};
@@ -51,4 +52,4 @@ function dueState(lastDate, currentDate=today()) {
   if(age===7)return {label:"Due today",tone:"warn",due:true};
   return {label:"Up to date",tone:"good",due:false};
 }
-module.exports={TYPES,CHECKLISTS,norm,fail,text,today,dateValue,identity,busSnapshot,validateChecks,dueState};
+module.exports={TYPES,CHECKLISTS,norm,fail,text,today,dateValue,hasYardAccess,identity,busSnapshot,validateChecks,dueState};

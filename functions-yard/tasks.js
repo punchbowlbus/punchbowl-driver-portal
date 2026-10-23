@@ -1,5 +1,5 @@
-const {fail,text,dateValue,today}=require('./domain');
-const staff=(row)=>row.deleted!==true&&String(row.status).trim().toLowerCase()==='active'&&[row.role,row.accessLevel].some(v=>String(v).trim().toLowerCase()==='yard man');
+const {fail,text,dateValue,today,hasYardAccess}=require('./domain');
+const staff=hasYardAccess;
 function createTasks({db,stamp,now,actor,activity,savePhotos,removePhotos}){
   async function update(person,input){
     const action=input.action;
@@ -24,7 +24,7 @@ function createTasks({db,stamp,now,actor,activity,savePhotos,removePhotos}){
           const assignees=[...new Set(input.assignees)];
           if(assignees.length){
             const employees=await Promise.all(assignees.map(id=>{if(!id||id.includes('/'))fail('Invalid employee.');return tx.get(db.collection('employees').doc(id));}));
-            if(employees.some(e=>!e.exists||!staff(e.data())))fail('Select active Yard Man employees.');
+            if(employees.some(e=>!e.exists||!staff(e.data())))fail('Select active employees with Yard Work access.');
             task={assignees:employees.map(e=>({id:e.id,employeeNumber:String(e.data().employeeNumber||e.id),name:e.data().displayName||`${e.data().firstName||''} ${e.data().lastName||''}`.trim()}))};
           }else task={assignees:[]};
           task={...task,title,location,instructions,priority:input.priority,dueDate,status:'Open',instructionPhotos:photos,createdAt:stamp(),createdBy:actor(person),active:null};

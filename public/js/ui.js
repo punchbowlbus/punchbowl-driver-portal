@@ -1,6 +1,7 @@
 // public/js/ui.js
 import { escapeHtml, fmtDate } from "./utils.js";
 import { state } from "./state.js";
+import {hasYardAccess} from "./yard_access.js";
 import { go } from "./main.js";
 
 /** ✅ Central DOM references (exported) */
@@ -105,7 +106,7 @@ export function renderTabs({ currentUser, isAdmin, currentTab }, onDriverTab, on
 }
 
 /** ✅ Sidebar renderer */
-export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
+export function renderSidebar({ currentUser, isAdmin, activePage, employee }, onNav) {
   if (!els.navArea || !els.adminNavArea) return;
 
   if (!currentUser) {
@@ -121,6 +122,8 @@ export function renderSidebar({ currentUser, isAdmin, activePage }, onNav) {
     { id: "lostProperty", label: "Lost Property", icon: "package" },
     { id: "incidentReport", label: "Incident Report", icon: "alert-triangle" },
   ];
+
+  if(hasYardAccess(employee))driverItems.push({id:"yardWork",label:"Yard Work",icon:"clipboard-list"});
 
   const adminQuickItems = isAdmin
     ? [

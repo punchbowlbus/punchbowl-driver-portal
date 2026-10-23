@@ -10,7 +10,7 @@ const db=memoryDb({
   "yardFleet/b1":{exterior:{lastDate:"2026-09-23"},interior:{lastDate:"2026-09-24"}},
   "yardFleet/b2":{exterior:{lastDate:"2026-09-30"},interior:{active:{uid:"other",name:"Employee B",startedAt:"2026-10-01T00:00:00Z"}}}
 });
-const worker={uid:"worker",email:"yard@example.test",name:"Employee A",employeeNumber:"101",manager:false},manager={uid:"manager",email:"manager@example.test",name:"Fleet Manager",employeeNumber:"1",manager:true};
+const worker={uid:"worker",email:"yard@example.test",name:"Employee A",employeeNumber:"101",manager:false,driver:true},manager={uid:"manager",email:"manager@example.test",name:"Fleet Manager",employeeNumber:"1",manager:true};
 let current=worker;
 const service=createService({db,stamp:()=>new Date().toISOString(),now:()=>new Date("2026-10-01T02:00:00Z")});
 const server=http.createServer(async(req,res)=>{
@@ -27,6 +27,7 @@ const server=http.createServer(async(req,res)=>{
   await page.goto(url+"/yard.html");await page.getByRole("heading",{name:"Full Fleet",exact:true}).waitFor();
   assert.equal(await page.locator("[data-yard-bus]").count(),3);
   assert.equal(await page.locator("#yardManagerLink").isVisible(),false);
+  assert.equal(await page.getByRole("link",{name:"Driver My Work",exact:true}).getAttribute("href"),"./index.html?page=myWork");
   await page.locator('[data-yard-bus="b1"]').click();await page.getByRole("button",{name:"Start Exterior Wash",exact:true}).click();await page.getByRole("button",{name:"Complete Checklist"}).waitFor();
   await page.getByRole("button",{name:"Complete Checklist"}).click();for(const box of await page.locator('[name="yardChecklist"]').all())await box.check();
   await page.locator("#yardNotes").fill("Exterior completed at Riverwood");await page.getByRole("button",{name:"Complete Cleaning"}).click();await page.locator("#yardModal").waitFor({state:"hidden"});
