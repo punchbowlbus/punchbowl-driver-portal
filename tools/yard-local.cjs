@@ -21,6 +21,7 @@ export function yardCall(name,data={}){return request(name,data);}
 `;
 async function start({port=5050,dataPath=dataFile}={}){
   let initial=seed();if(dataPath){try{initial=JSON.parse(await fs.readFile(dataPath,'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}}
+  for(const [id,employee] of Object.entries(employees))initial['employees/'+employee.employeeNumber]={...employee,email:id};
   const db=memoryDb(initial),sessions=new Map();let saving=Promise.resolve();
   const service=createService({db,stamp:()=>new Date().toISOString(),savePhotos:async(files)=>{
     if(files.length>3)throw new Error('Choose up to 3 photos.');
@@ -45,7 +46,7 @@ async function start({port=5050,dataPath=dataFile}={}){
         }
         if(action==='Logout'){sessions.delete(token);res.setHeader('Set-Cookie','yardDemo=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');return json(res,{signedOut:true});}
         if(!person)return json(res,{error:'Sign in with a sample employee.'},401);
-        const result=action==='Board'?await service.board(person):action==='History'?await service.history(person,input.busId):action==='Update'?await service.update(person,input):null;
+        const result=action==='Board'?await service.board(person):action==='History'?await service.history(person,input.busId,input.taskId):action==='Update'?await service.update(person,input):null;
         if(result===null)return json(res,{error:'Unknown action.'},404);
         if(action==='Update'&&dataPath){const contents=JSON.stringify(Object.fromEntries(db.data),null,2);saving=saving.then(async()=>{await fs.writeFile(dataPath+'.tmp',contents);await fs.rename(dataPath+'.tmp',dataPath);});await saving;}
         return json(res,result);

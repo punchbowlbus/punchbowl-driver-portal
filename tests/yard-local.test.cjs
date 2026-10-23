@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
 const {start}=require('../tools/yard-local.cjs');
-test('Node-only local server: sessions, permissions, approvals and persistent sample data',async()=>{
+test('Node-only local server: sessions, permissions, immediate completion and persistent sample data',async()=>{
   const folder=await fs.mkdtemp(path.join(os.tmpdir(),'yard-local-')),dataPath=path.join(folder,'data.json');let app=await start({port:0,dataPath});
   try{
     let url=`http://127.0.0.1:${app.port}`;
@@ -16,13 +16,13 @@ test('Node-only local server: sessions, permissions, approvals and persistent sa
     assert.equal((await request('Update',{...task,action:'start'},b)).status,400);
     const completed=await request('Update',{...task,action:'complete',checklist:board.checklists.exterior,completedDate:board.today},a);assert.equal(completed.status,200);
     assert.equal((await request('Update',{...task,action:'approve',recordId:completed.body.recordId},a)).status,400);
-    assert.equal((await request('Update',{...task,action:'approve',recordId:completed.body.recordId},m)).status,200);
+    assert.equal((await request('Update',{...task,action:'approve',recordId:completed.body.recordId},m)).status,400);
     await new Promise(resolve=>app.server.close(resolve));app=await start({port:0,dataPath});url=`http://127.0.0.1:${app.port}`;
     const fresh=(await request('Login',{email:'manager@example.test'})).cookie,newBoard=(await request('Board',{},fresh)).body;
     assert.equal(newBoard.fleet.find(bus=>bus.id==='M07538').yard.exterior.lastBy.name,'Yard Employee A');
     const history=(await request('History',{busId:'M07538'},fresh)).body.records;
-    assert.equal(history.length,3);assert.equal(history[0].action,'approve');
+    assert.equal(history.length,2);assert.equal(history.some(r=>r.action==='complete'&&r.status==='Completed'),true);
     const next=await request('Update',{busId:'M07538',type:'interior',action:'start'},fresh);assert.equal(next.status,200);
-    assert.equal((await request('History',{busId:'M07538'},fresh)).body.records.length,4);
+    assert.equal((await request('History',{busId:'M07538'},fresh)).body.records.length,3);
   }finally{await new Promise(resolve=>app.server.close(resolve));await fs.rm(folder,{recursive:true,force:true});}
 });

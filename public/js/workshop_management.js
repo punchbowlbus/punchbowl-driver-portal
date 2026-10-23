@@ -1,3 +1,4 @@
+import { renderBaseMaintenance } from "./workshop_maintenance_display.js";
 import {
   collection,
   addDoc,
@@ -323,7 +324,7 @@ function renderDashboard() {
     </div>`).join("");
   const regoHtml = regoAlerts.map(({bus,state}) => `
     <div class="list-item"><div class="list-top"><div><div class="list-title">${esc(fleetNo(bus))} · Registration</div><div class="list-meta">${esc(bus.rego || "No registration")} · Next expiry: ${esc(fmtDate(state.expiryValue))} · ${esc(state.detail)}</div></div><span class="badge ${state.kind === "expired" ? "bad" : "warn"}">${esc(state.label)}</span></div></div>`).join("");
-  els.maintenanceDueList.innerHTML = serviceHtml + airconHtml + regoHtml || `<div class="empty">No service, A/C, safety or registration items currently due.</div>`;
+  renderBaseMaintenance(els.maintenanceDueList, serviceHtml + airconHtml + regoHtml);
 
   els.dashboardJobsList.innerHTML = openJobs.length ? openJobs.map(jobCardSummary).join("") : `<div class="empty">No open workshop jobs.</div>`;
 }

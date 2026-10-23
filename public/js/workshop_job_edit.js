@@ -68,11 +68,13 @@ function enhanceRows() {
     if (!tbody) return;
     [...tbody.querySelectorAll("tr")].forEach((row) => {
       const actionCell = row.querySelector("[data-job-remove-cell]");
-      if (!actionCell || actionCell.querySelector("[data-edit-job]")) return;
+      if (!actionCell) return;
+      const existing = actionCell.querySelector("[data-edit-job]");
       const firstCell = row.querySelector("td");
       const jobNumber = String(firstCell?.querySelector("strong")?.textContent || "").trim();
       const job = jobs.find((item) => String(item.jobNumber || item.id || "").trim() === jobNumber);
-      if (!canEditJob(job)) return;
+      if (!canEditJob(job)) { existing?.remove(); return; }
+      if (existing) { existing.onclick = () => openEditDialog(jobs.find(item => item.id === job.id)); return; }
 
       actionCell.classList.add("workshop-job-actions");
       const button = document.createElement("button");
@@ -81,7 +83,7 @@ function enhanceRows() {
       button.dataset.editJob = job.id;
       button.textContent = "Edit";
       button.title = "Edit this job before mechanic work starts";
-      button.addEventListener("click", () => openEditDialog(job));
+      button.onclick = () => openEditDialog(jobs.find(item => item.id === job.id));
       actionCell.prepend(button);
     });
   } finally {

@@ -38,7 +38,7 @@ function printCurrentReview() {
     return false;
   }
 
-  const approvalBlock = (managerComments || returnToService || vehicleStatus) ? `
+  const approvalBlock = !body.querySelector(".wm-electronic-signoff") && (managerComments || returnToService || vehicleStatus) ? `
     <section class="approval">
       <h2>Fleet Manager Decision</h2>
       <div class="approval-grid">

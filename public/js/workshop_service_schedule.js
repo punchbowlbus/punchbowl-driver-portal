@@ -406,7 +406,7 @@ function enhanceFleetRows() {
       button.className = "button secondary";
       button.dataset.serviceSetup = bus.id;
       button.textContent = "Service setup";
-      button.addEventListener("click", () => openSchedule(bus));
+      button.addEventListener("click", () => openSchedule(buses.find(current => current.id === bus.id) || bus));
       actions.appendChild(button);
     });
   } finally {

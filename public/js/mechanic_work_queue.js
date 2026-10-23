@@ -1,3 +1,4 @@
+import { installStableInnerHtml } from "./workshop_display_stability.js";
 import {
   collection,
   doc,
@@ -108,6 +109,7 @@ function categoryLabel(job) {
 }
 
 function renderQueue() {
+  installStableInnerHtml("jobQueue");
   const status = els.statusFilter.value;
   let list = jobs.filter((j) => status ? j.status === status : !["Completed","Closed","Cancelled"].includes(j.status));
   list = list.sort((a,b) => String(a.dueDate || "9999").localeCompare(String(b.dueDate || "9999")) || Number(b.createdAt?.seconds || 0) - Number(a.createdAt?.seconds || 0));
@@ -141,7 +143,7 @@ function renderQueue() {
       </table>
     </div>`;
 
-  els.jobQueue.querySelectorAll("[data-open-job]").forEach((btn) => btn.addEventListener("click", () => openJob(btn.dataset.openJob)));
+  els.jobQueue.querySelectorAll("[data-open-job]").forEach((btn) => { btn.onclick = () => openJob(btn.dataset.openJob); });
 }
 
 function jobBus(job) {

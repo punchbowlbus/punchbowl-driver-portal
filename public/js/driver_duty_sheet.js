@@ -1,5 +1,7 @@
 import {
   collection,
+  doc,
+  getDoc,
   getDocs
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
@@ -87,19 +89,72 @@ function serviceType(group) {
   return "Service";
 }
 
-function assignedToDuty(block, dutySpan) {
-  const blockDutySpanId = String(block.dutySpanId || "").trim();
-  if (blockDutySpanId) return blockDutySpanId === String(dutySpan.id || "").trim();
+function recordDate(record) {
+  return String(record?.serviceDate || record?.date || "").trim();
+}
 
-  const sameDate = String(block.serviceDate || block.date || "").trim() ===
-    String(dutySpan.serviceDate || dutySpan.date || "").trim();
-  const assignedDriver = String(
-    block.assignedDriverEmployeeNumber || block.assignedDriverId || block.driverId || ""
-  ).trim();
-  const sameDriver = assignedDriver === String(dutySpan.driverEmployeeNumber || "").trim();
-  const insideDuty = blockStart(block) >= Number(dutySpan.startMin || 0) &&
-    blockEnd(block) <= Number(dutySpan.endMin || 0);
-  return sameDate && sameDriver && insideDuty;
+function blockDriver(block) {
+  return String(block.assignedDriverEmployeeNumber || block.assignedDriverId || block.driverId || "").trim();
+}
+
+function inactive(record) {
+  return record?.deleted === true || ["cancelled", "canceled"].includes(String(record?.dispatchStatus || "").trim().toLowerCase());
+}
+
+function fitsDuty(block, duty) {
+  const start = Number(block.startMin ?? block.startMinutes);
+  const end = Number(block.endMin ?? block.endMinutes);
+  const dutyStart = Number(duty.startMin);
+  const dutyEnd = Number(duty.endMin);
+  return [start, end, dutyStart, dutyEnd].every(Number.isFinite) &&
+    end > start && start >= dutyStart && end <= dutyEnd;
+}
+
+function sameDriverAndDate(block, duty) {
+  return Boolean(blockDriver(block) && recordDate(block)) &&
+    blockDriver(block) === String(duty.driverEmployeeNumber || "").trim() &&
+    recordDate(block) === recordDate(duty);
+}
+
+function assignedToDuty(block, dutySpan, knownDuties, linkedDuties) {
+  if (inactive(block) || inactive(dutySpan)) return false;
+  const owner = blockDriver(block);
+  if (owner && owner !== String(dutySpan.driverEmployeeNumber || "").trim()) return false;
+  if (recordDate(block) && recordDate(block) !== recordDate(dutySpan)) return false;
+  const link = String(block.dutySpanId || "").trim();
+  if (link === String(dutySpan.id || "").trim() && link) return true;
+
+  if (link) {
+    // Do not mistake an unknown/inaccessible reference for a deleted duty.
+    if (!linkedDuties.has(link) || linkedDuties.get(link) === undefined) return false;
+    const linked = linkedDuties.get(link);
+    // Preserve an explicit link to another current duty for this driver/date.
+    if (linked && !inactive(linked) && sameDriverAndDate(block, linked)) return false;
+  }
+
+  // Legacy/unlinked assignments can follow the driver's replacement duty only
+  // when date, employee and times agree, with a single matching current duty.
+  if (!sameDriverAndDate(block, dutySpan) || !fitsDuty(block, dutySpan)) return false;
+  const matches = knownDuties.filter(duty => !inactive(duty) && sameDriverAndDate(block, duty) && fitsDuty(block, duty));
+  return matches.length === 1 && String(matches[0].id) === String(dutySpan.id);
+}
+
+async function loadLinkedDuties(blocks, dutySpan, knownDuties) {
+  const linkedDuties = new Map(knownDuties.map(duty => [String(duty.id || "").trim(), duty]));
+  let failed = false;
+  const references = [...new Set(blocks.filter(block => !inactive(block) && sameDriverAndDate(block, dutySpan) && fitsDuty(block, dutySpan))
+    .map(block => String(block.dutySpanId || "").trim()).filter(id => id && !linkedDuties.has(id)))];
+  await Promise.all(references.map(async id => {
+    try {
+      const snapshot = await getDoc(doc(db, "dutySpans", id));
+      linkedDuties.set(id, snapshot.exists() ? {...snapshot.data(), id:snapshot.id || id} : null);
+    } catch (error) {
+      console.warn("Unable to verify an assigned job's duty link", error);
+      linkedDuties.set(id, undefined);
+      failed = true;
+    }
+  }));
+  return {linkedDuties, failed};
 }
 
 async function loadJobGroups() {
@@ -266,9 +321,13 @@ function breakCardHtml(breakItem) {
   `;
 }
 
-export async function renderDriverDutySheet({dutySpan, blocks, isAdmin, onYes, onNo, onBack}) {
-  const jobGroups = await loadJobGroups();
-  const assignedBlocks = (blocks || []).filter((block) => assignedToDuty(block, dutySpan));
+export async function renderDriverDutySheet({dutySpan, blocks, dutySpans = [dutySpan], isAdmin, onYes, onNo, onBack, isCurrent = () => true}) {
+  const knownDuties = [...dutySpans.filter(duty => String(duty.id) !== String(dutySpan.id)), dutySpan];
+  const [jobGroups, {linkedDuties, failed}] = await Promise.all([
+    loadJobGroups(), loadLinkedDuties(blocks || [], dutySpan, knownDuties)
+  ]);
+  if (!isCurrent()) return;
+  const assignedBlocks = (blocks || []).filter((block) => assignedToDuty(block, dutySpan, knownDuties, linkedDuties));
   const groupedJobs = groupAssignedBlocks(assignedBlocks);
   const breaks = Array.isArray(dutySpan.breaks)
     ? dutySpan.breaks.slice().sort((a, b) => Number(a.startMin) - Number(b.startMin))
@@ -327,6 +386,8 @@ export async function renderDriverDutySheet({dutySpan, blocks, isAdmin, onYes, o
         </div>
       </section>
 
+      ${failed ? `<div class="card" role="alert">Some assigned jobs could not be verified. Refresh this duty sheet or contact Dispatch to confirm your complete work.</div>` : ""}
+
       ${isRailReplacement && !groupedJobs.length ? "" : `
       <section class="driver-duty-jobs-heading">
         <div>
@@ -337,6 +398,7 @@ export async function renderDriverDutySheet({dutySpan, blocks, isAdmin, onYes, o
         <span>${formatDuration(Number(dutySpan.endMin || 0) - Number(dutySpan.startMin || 0))} shift</span>
       </section>
 
+      <p class="driver-duty-safety-note">These are scheduled times. Take required rest and contact Dispatch if you are fatigued or cannot complete this duty safely.</p>
       <div class="driver-duty-job-list">
         ${groupedJobs.length
           ? groupedJobs.map((group, index) => {

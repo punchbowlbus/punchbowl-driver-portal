@@ -28,6 +28,8 @@ let unsubscribeDefects = null;
 let unsubscribeWorkshopJobs = null;
 let busy = false;
 let yardNoteDirty = false;
+// A print-only preference; never saved to duty spans or allocations.
+let printJobTypes = null;
 
 const clean = (value) => String(value ?? "").trim();
 const norm = (value) => clean(value).toLowerCase();
@@ -265,11 +267,61 @@ function statusFor(duty) {
   return {cls:"ready", label:"READY"};
 }
 
-function sectionName(duty) {
-  if (isRelief(duty)) return "RELIEF CHANGEOVERS";
+function departureMinute(duty) {
+  const value = clean(duty.yardDepartureMin) !== "" ? duty.yardDepartureMin : duty.startMin;
+  if (clean(value) === "" || !Number.isFinite(Number(value))) return null;
+  return Number(value) + (clean(duty.yardDepartureMin) !== "" ? 0 : 5);
+}
+
+function sortDepartures(list) {
+  // Extended minutes (24:00+) stay on the following day; missing times go last.
+  return [...list].sort((a, b) => (departureMinute(a) ?? Infinity) - (departureMinute(b) ?? Infinity));
+}
+
+function printJobType(duty) {
   const type = norm(duty.dutyType);
-  if (type.includes("charter")) return "CHARTER BUSES";
-  return minutes(duty.startMin) < 720 ? "MORNING DEPARTURES" : "AFTERNOON / EVENING DEPARTURES";
+  if (type.includes("charter")) return {key:"charter", label:"Charter"};
+  if (type.includes("rail")) return {key:"rail", label:"Rail Replacement"};
+  if (type.includes("yard")) return {key:"yard", label:"Yard"};
+  return {key:type || "unspecified", label:clean(duty.dutyType) || "Unspecified"};
+}
+
+function selectedPrintDuties(list) {
+  return sortDepartures(list).filter((duty) => printJobTypes === null || printJobTypes.has(printJobType(duty).key));
+}
+
+function renderPrintSelection(list) {
+  const options = document.getElementById("baPrintTypeOptions");
+  if (!options) return;
+  const types = new Map([["charter", "Charter"], ["rail", "Rail Replacement"], ["yard", "Yard"]]);
+  list.forEach((duty) => { const type = printJobType(duty); types.set(type.key, type.label); });
+  options.innerHTML = `<label><input type="checkbox" data-print-all> Select all</label><hr>${[...types].map(([key, label]) => `<label><input type="checkbox" data-print-type="${esc(key)}" ${printJobTypes === null || printJobTypes.has(key) ? "checked" : ""}> ${esc(label)}</label>`).join("")}`;
+  const checks = [...options.querySelectorAll("[data-print-type]")];
+  const all = options.querySelector("[data-print-all]");
+  const update = () => {
+    const selected = checks.filter((check) => check.checked);
+    all.checked = selected.length === checks.length;
+    all.indeterminate = selected.length > 0 && !all.checked;
+    document.getElementById("baPrintTypeSummary").textContent = all.checked ? "All job types" : selected.length ? `${selected.length} job type${selected.length === 1 ? "" : "s"} selected` : "Select job types";
+    renderPrintTable(list);
+  };
+  options.onchange = (event) => {
+    if (event.target === all) checks.forEach((check) => { check.checked = all.checked; });
+    const selected = checks.filter((check) => check.checked);
+    printJobTypes = selected.length === checks.length ? null : new Set(selected.map((check) => check.dataset.printType));
+    update();
+  };
+  update();
+}
+
+function renderPrintTable(list) {
+  const selected = selectedPrintDuties(list);
+  const printBody = document.getElementById("baPrintRows");
+  if (printBody) printBody.innerHTML = selected.map(printRowHtml).join("") || `<tr><td colspan="7"></td></tr>`;
+  const count = document.getElementById("baPrintCount");
+  if (count) count.textContent = `${selected.length} duties selected for printing`;
+  const button = document.getElementById("baPrint");
+  if (button) button.disabled = selected.length === 0;
 }
 
 function dutyLocationHtml(duty) {
@@ -295,11 +347,11 @@ function rowHtml(duty) {
   const conflicts = dutyConflicts(duty);
   const status = statusFor(duty);
   const actual = clean(duty.actualBus);
-  const depart = clean(duty.yardDepartureMin) ? minutes(duty.yardDepartureMin) : minutes(duty.startMin) + 5;
+  const depart = departureMinute(duty);
   return `<tr class="ba-row ba-${status.cls}" data-duty-id="${esc(duty.id)}">
     <td><strong>${esc(duty.dutyNumber || "—")}</strong><small>${esc(duty.dutyType || "")}</small></td>
     <td><strong>${esc(duty.driverName || "Unassigned")}</strong><small>${esc(duty.driverEmployeeNumber || "")}</small></td>
-    <td>${formatTime(duty.startMin)}</td><td>${formatTime(depart)}</td>
+    <td>${formatTime(duty.startMin)}</td><td>${depart == null ? "" : formatTime(depart)}</td>
     <td><select class="ba-small" data-field="yardMovementType"><option ${relief ? "" : "selected"}>Bus Departure</option><option ${relief ? "selected" : ""}>Relief Changeover</option></select></td>
     ${relief ? `
       <td><input class="ba-input" data-field="supportVehicle" value="${esc(duty.supportVehicle || "")}" placeholder="Car / support vehicle"></td>
@@ -333,9 +385,7 @@ function printVehicle(duty) {
 function printRowHtml(duty) {
   const hasStart = clean(duty.startMin) !== "";
   const hasEnd = clean(duty.endMin) !== "";
-  const depart = clean(duty.yardDepartureMin) !== ""
-    ? minutes(duty.yardDepartureMin)
-    : (hasStart ? minutes(duty.startMin) + 5 : null);
+  const depart = departureMinute(duty);
   return `<tr>
     <td><strong>${esc(duty.dutyNumber)}</strong><small>${esc(duty.dutyType)}</small></td>
     <td><strong>${esc(duty.driverName)}</strong><small>${esc(duty.driverEmployeeNumber)}</small></td>
@@ -350,21 +400,10 @@ function printRowHtml(duty) {
 function renderTable() {
   const body = document.getElementById("baRows");
   if (!body) return;
-  const list = visibleDuties().sort((a, b) => minutes(a.startMin) - minutes(b.startMin));
-  const grouped = new Map();
-  list.forEach((duty) => {
-    const section = sectionName(duty);
-    if (!grouped.has(section)) grouped.set(section, []);
-    grouped.get(section).push(duty);
-  });
-  const order = ["MORNING DEPARTURES", "RELIEF CHANGEOVERS", "AFTERNOON / EVENING DEPARTURES", "CHARTER BUSES"];
-  body.innerHTML = order.filter((section) => grouped.has(section)).map((section) => `<tr class="ba-section"><td colspan="11">${section}</td></tr>${grouped.get(section).map(rowHtml).join("")}`).join("")
+  const list = sortDepartures(visibleDuties());
+  body.innerHTML = list.map(rowHtml).join("")
     || `<tr><td colspan="11"><div class="ba-empty">No active duties found for this date and depot.</div></td></tr>`;
-  const printBody = document.getElementById("baPrintRows");
-  if (printBody) {
-    printBody.innerHTML = order.filter((section) => grouped.has(section)).map((section) => `<tr class="ba-section"><td colspan="7">${section}</td></tr>${grouped.get(section).map(printRowHtml).join("")}`).join("")
-      || `<tr><td colspan="7"></td></tr>`;
-  }
+  renderPrintSelection(list);
   wireRows();
   renderMetrics();
   renderAlerts();
@@ -579,6 +618,8 @@ function injectStyles() {
     .ba-page{display:grid;gap:14px}.ba-head{display:flex;align-items:center;gap:16px;padding:20px;border-radius:18px;background:linear-gradient(120deg,#ad191f,#cf252b);color:#fff}.ba-head h1{margin:0;font-size:28px}.ba-head p{margin:3px 0 0;opacity:.9}.ba-head-actions{margin-left:auto;display:flex;gap:8px}.ba-btn{border:1px solid #d0d5dd;border-radius:9px;background:#fff;color:#344054;padding:10px 14px;font-weight:850;cursor:pointer}.ba-btn.primary{border-color:#c82127;background:#c82127;color:#fff}.ba-btn.light{border:0;color:#b42318}.ba-controls{display:grid;grid-template-columns:180px minmax(170px,1fr) auto auto;gap:10px;align-items:end;padding:14px;border:1px solid #dfe5ec;border-radius:14px;background:#fff}.ba-field{display:grid;gap:5px}.ba-field span{font-size:10px;font-weight:900;letter-spacing:.07em;text-transform:uppercase;color:#667085}.ba-field input,.ba-field select{height:40px;border:1px solid #cfd6df;border-radius:8px;background:#fff;padding:0 10px;font-weight:700}.ba-yard-note{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end;padding:14px;border:1px solid #dfe5ec;border-radius:14px;background:#fff}.ba-yard-note textarea{width:100%;min-height:74px;resize:vertical;box-sizing:border-box;border:1px solid #cfd6df;border-radius:9px;padding:10px 12px;font:inherit}.ba-yard-note small{color:#667085}.ba-print-yard-note{display:none}.ba-metrics{display:grid;grid-template-columns:repeat(7,minmax(105px,1fr));gap:9px}.ba-metric{border:1px solid #dfe5ec;border-left:4px solid #98a2b3;border-radius:13px;background:#fff;padding:12px;min-height:78px}.ba-metric span{display:block;font-size:9px;font-weight:900;letter-spacing:.05em;color:#667085;text-transform:uppercase}.ba-metric strong{display:block;margin-top:5px;font-size:23px}.ba-metric.green{border-left-color:#12b76a}.ba-metric.amber{border-left-color:#f79009}.ba-metric.red{border-left-color:#f04438}.ba-metric.blue{border-left-color:#2e90fa}.ba-metric.purple{border-left-color:#7f56d9}.ba-layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:13px}.ba-panel{overflow:hidden;border:1px solid #dfe5ec;border-radius:14px;background:#fff}.ba-panel-head{display:flex;align-items:center;gap:10px;padding:14px 15px;border-bottom:1px solid #e4e7ec}.ba-panel-head h2{margin:0;font-size:17px}.ba-panel-head small{color:#667085}.ba-table-wrap{max-height:640px;overflow:auto}.ba-table{width:100%;min-width:1180px;border-collapse:separate;border-spacing:0}.ba-table th{position:sticky;top:0;z-index:3;background:#f7f9fc;color:#475467;padding:9px;font-size:9px;text-align:left;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #dfe5ec}.ba-table td{padding:9px;border-bottom:1px solid #edf0f4;vertical-align:middle}.ba-table td>small{display:block;margin-top:3px;color:#667085}.ba-location span{display:block;white-space:nowrap}.ba-location b{color:#475467}.ba-section td{background:#17324d!important;color:#fff!important;padding:7px 10px!important;font-size:10px;font-weight:900;letter-spacing:.08em}.ba-row.ba-conflict{background:#fff7f6}.ba-row.ba-pending{background:#fffcf5}.ba-input,.ba-bus,.ba-small{width:100%;min-width:105px;height:34px;border:1px solid #cfd6df;border-radius:7px;background:#fff;padding:0 7px;font-size:11px;font-weight:700}.ba-small{min-width:135px}.ba-type{font-size:10px;font-weight:900}.ba-type.ev{color:#6941c6}.ba-status{display:inline-flex;border-radius:999px;padding:4px 7px;font-size:9px;font-weight:900}.ba-status.ready{background:#ecfdf3;color:#067647}.ba-status.pending{background:#fff7e8;color:#b54708}.ba-status.conflict{background:#fff1f0;color:#b42318}.ba-status.departed{background:#eff8ff;color:#175cd3}.ba-alert{display:block;max-width:150px;margin-top:4px;color:#b42318;font-size:9px}.ba-check{width:31px;height:31px;border:1px solid #b2ddff;border-radius:7px;background:#eff8ff;color:#175cd3;font-weight:900;cursor:pointer}.ba-alerts{max-height:640px;overflow:auto}.ba-notice{display:grid;gap:2px;padding:12px 13px;border-bottom:1px solid #edf0f4;border-left:4px solid #98a2b3}.ba-notice strong{font-size:12px}.ba-notice span{font-size:11px;color:#667085}.ba-notice.bad{border-left-color:#f04438}.ba-notice.warn{border-left-color:#f79009}.ba-notice.good{border-left-color:#12b76a}.ba-empty{padding:40px;text-align:center;color:#667085}.ba-toast{position:fixed;right:20px;bottom:20px;z-index:9999;max-width:420px;padding:12px 16px;border-radius:10px;background:#102a43;color:#fff;box-shadow:0 12px 30px #10182844;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.ba-toast.error{background:#b42318}.ba-toast.show{opacity:1;transform:none}.ba-print-title,.ba-print-only{display:none}
     @media(max-width:1200px){.ba-metrics{grid-template-columns:repeat(4,1fr)}.ba-layout{grid-template-columns:1fr}.ba-alerts{max-height:260px}}
     @media(max-width:700px){.ba-head{align-items:flex-start;flex-direction:column}.ba-head-actions{margin:0}.ba-controls{grid-template-columns:1fr 1fr}.ba-yard-note{grid-template-columns:1fr}.ba-metrics{grid-template-columns:repeat(2,1fr)}}
+    .ba-print-controls{display:flex;flex-wrap:wrap;align-items:center;gap:16px;padding:14px;border:1px solid #dfe5ec;border-radius:14px;background:#fff}.ba-print-label{display:block;margin-bottom:5px;font-size:10px;font-weight:900;text-transform:uppercase;color:#667085}.ba-print-controls small{color:#667085}.ba-print-controls details{position:relative;min-width:230px;max-width:100%}.ba-print-controls summary{padding:10px 12px;border:1px solid #cfd6df;border-radius:8px;cursor:pointer;font-weight:700}.ba-print-controls details>div{position:absolute;top:calc(100% + 5px);left:0;z-index:10;width:100%;box-sizing:border-box;padding:8px;border:1px solid #cfd6df;border-radius:9px;background:#fff;box-shadow:0 8px 20px #10182822}.ba-print-controls label{display:flex;align-items:center;gap:9px;min-height:44px;padding:0 8px;cursor:pointer}.ba-print-controls input{width:18px;height:18px;accent-color:#c82127}.ba-print-controls hr{border:0;border-top:1px solid #e4e7ec;margin:5px 0}.ba-btn:disabled{opacity:.5;cursor:not-allowed}
+    @media print{.ba-print-controls{display:none!important}}
     @media print{@page{size:210mm 297mm;margin:8mm}html,body{width:194mm!important;min-width:0!important;margin:0!important;background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.app-shell,.main-content,#contentArea{display:block!important;width:100%!important;max-width:none!important;margin:0!important;padding:0!important}.sidebar,.topbar,.ba-head,.ba-controls,.ba-yard-note,.ba-metrics,.ba-alerts,.ba-screen,.ba-screen-table{display:none!important}.ba-page,.ba-layout{display:block!important;width:100%!important;margin:0!important;padding:0!important}.ba-panel{width:100%!important;overflow:visible!important;border:0!important;border-radius:0!important;box-shadow:none!important}.ba-panel-head{display:none!important}.ba-print-title{display:block!important;width:100%;box-sizing:border-box;text-align:center;border:2px solid #000;margin:0 0 7px;break-after:avoid}.ba-print-title h1{margin:0;padding:7px;background:#000!important;color:#fff!important;font-size:20px;font-weight:900;line-height:1.15}.ba-print-title h2{margin:0;padding:6px;font-size:16px;font-weight:900;line-height:1.1}.ba-print-only{display:table!important;width:100%!important;max-width:100%!important;table-layout:fixed;border-collapse:collapse;font-size:12px}.ba-print-only th,.ba-print-only td{border:1px solid #000;padding:7px;vertical-align:middle;text-align:left;overflow-wrap:anywhere}.ba-print-only th{font-size:11px;font-weight:900;text-transform:uppercase}.ba-print-only td>small{display:block;margin-top:2px;font-size:9px}.ba-print-only .ba-print-bus{font-size:20px;font-weight:900}.ba-print-only .ba-section td{background:#000!important;color:#fff!important;padding:5px 7px!important;font-size:11px;font-weight:900}.ba-print-only thead{display:table-header-group}.ba-print-only tr{break-inside:avoid;page-break-inside:avoid}.ba-print-yard-note:not([hidden]){display:block!important;margin-top:10px;border:2px solid #000;padding:10px 12px;break-inside:avoid;page-break-inside:avoid}.ba-print-yard-note h3{margin:0 0 6px;font-size:16px;text-transform:uppercase}.ba-print-yard-note p{margin:0;white-space:pre-wrap;font-size:16px;font-weight:700;line-height:1.4}.ba-toast{display:none!important}}
   `;
   document.head.appendChild(style);
@@ -589,6 +630,7 @@ export function renderBusAllocationPage() {
   els.contentArea.innerHTML = `<div class="ba-page">
     <section class="ba-head"><div><h1>Daily Bus Allocation</h1><p>Plan vehicles, manage roadside relief changeovers and prepare the yard departure sheet.</p></div><div class="ba-head-actions"><button class="ba-btn light" id="baAuto">Auto Plan Buses</button><button class="ba-btn light" id="baPrint">Print / PDF</button></div></section>
     <section class="ba-controls"><label class="ba-field"><span>Operating date</span><input id="baDate" type="date" value="${esc(selectedDate)}"></label><label class="ba-field"><span>Depot</span><select id="baDepot"><option value="">All depots</option></select></label><button class="ba-btn" id="baRefresh">Refresh</button><button class="ba-btn primary" id="baPublish">Publish to Yard</button></section>
+    <section class="ba-print-controls"><div><span class="ba-print-label">Print job types</span><details id="baPrintTypes"><summary id="baPrintTypeSummary">All job types</summary><div id="baPrintTypeOptions"></div></details></div><small id="baPrintCount" aria-live="polite"></small></section>
     <section class="ba-yard-note"><label class="ba-field"><span>Note</span><textarea id="baYardNote" maxlength="1000" placeholder="Type a note for the printed departure sheet."></textarea><small>Saved for the selected date and depot. This prints after the final bus row.</small></label><button class="ba-btn primary" id="baSaveYardNote" type="button">Save Note</button></section>
     <section class="ba-metrics"><article class="ba-metric blue"><span>Bus duties</span><strong id="baMetricDuties">0</strong></article><article class="ba-metric green"><span>Planned buses</span><strong id="baMetricPlanned">0</strong></article><article class="ba-metric amber"><span>Awaiting bus</span><strong id="baMetricAwaiting">0</strong></article><article class="ba-metric purple"><span>Relief changeovers</span><strong id="baMetricRelief">0</strong></article><article class="ba-metric blue"><span>Buses reused</span><strong id="baMetricReuse">0</strong></article><article class="ba-metric red"><span>Conflicts</span><strong id="baMetricConflicts">0</strong></article><article class="ba-metric"><span>Fleet available</span><strong id="baMetricAvailable">0</strong></article></section>
     <div class="ba-layout"><section class="ba-panel"><div class="ba-print-title"><h1>PUNCHBOWL BUS COMPANY — DAILY DEPARTURE SHEET</h1><h2 id="baPrintDate"></h2></div><div class="ba-panel-head"><div><h2>Departure and Changeover Plan</h2><small>Workshop and Out-of-Service buses are excluded automatically · ${TURNAROUND_MINUTES}-minute reuse buffer</small></div></div><div class="ba-table-wrap ba-screen-table"><table class="ba-table"><thead><tr><th>Duty</th><th>Driver</th><th>Start</th><th>Depart</th><th>Movement</th><th>Planned bus / Support car</th><th>Actual bus / Bus on road</th><th>Vehicle / Location</th><th>Return</th><th>Status</th><th class="ba-screen">Confirm</th></tr></thead><tbody id="baRows"></tbody></table></div><table class="ba-print-only"><colgroup><col style="width:12%"><col style="width:18%"><col style="width:8%"><col style="width:8%"><col style="width:17%"><col style="width:27%"><col style="width:10%"></colgroup><thead><tr><th>Duty</th><th>Driver</th><th>Start</th><th>Depart</th><th>Allocated Bus</th><th>Location</th><th>Return</th></tr></thead><tbody id="baPrintRows"></tbody></table><section class="ba-print-yard-note" id="baPrintYardNote" hidden><h3>Note</h3><p></p></section></section><aside class="ba-panel ba-alerts"><div class="ba-panel-head"><h2>Planning alerts</h2></div><div id="baAlerts"></div></aside></div>
@@ -600,7 +642,13 @@ export function renderBusAllocationPage() {
   document.getElementById("baPublish").addEventListener("click", publishToYard);
   document.getElementById("baSaveYardNote").addEventListener("click", saveYardNote);
   document.getElementById("baYardNote").addEventListener("input", (event) => { yardNoteDirty = true; updatePrintedYardNote(event.target.value); });
-  document.getElementById("baPrint").addEventListener("click", () => window.print());
+  document.getElementById("baPrintTypes").addEventListener("keydown", (event) => { if (event.key === "Escape") event.currentTarget.open = false; });
+  document.getElementById("baPrint").addEventListener("click", () => {
+    if (!selectedPrintDuties(visibleDuties()).length) return toast("Select at least one job type with duties to print", true);
+    document.getElementById("baPrintTypes").open = false;
+    renderPrintTable(visibleDuties());
+    window.print();
+  });
   document.getElementById("baPrintDate").textContent = selectedDate;
   startListeners();
 }

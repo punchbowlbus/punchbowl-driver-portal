@@ -6,11 +6,15 @@ import {
   query,
   limit,
   runTransaction,
-  serverTimestamp
+  serverTimestamp,
+  getDocs,
+  where
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
 import { auth, db } from "./firebase.js";
 import { DEFECT_STATUS } from "./workshop_status.js";
+import { ADMIN_EMAILS } from "./config.js";
+import { WORKSHOP_SIGNOFF_DECLARATION, resolveWorkshopApprover, workshopJobRevision, approvalHash, createWorkshopElectronicApproval, workshopApprovalHtml } from "./workshop_signoff.js";
 
 let jobs = [];
 let buses = [];
@@ -18,6 +22,9 @@ let readings = [];
 let selectedJob = null;
 let selectedBus = null;
 let observer = null;
+let preparedApprover = null;
+let signoffSession = 0;
+let signingJob = false;
 
 const ACTIVE_WORKSHOP_JOB_STATUSES = new Set(["New","Assigned","In Progress","Waiting Parts","Waiting Approval"]);
 
@@ -35,6 +42,58 @@ function fmtDateTime(v) {
   return new Intl.DateTimeFormat("en-AU", {
     day:"2-digit", month:"short", year:"numeric", hour:"numeric", minute:"2-digit"
   }).format(d);
+}
+
+// Employee formalisation may leave inactive historical records for the same
+// email. Only active, non-deleted matches can identify a current signatory.
+export function selectActiveWorkshopEmployee(records, email) {
+  const loginEmail=norm(email);
+  const matching=records.filter(record=>norm(record.data.email)===loginEmail);
+  const active=matching.filter(record=>norm(record.data.status)==="active" && record.data.deleted!==true);
+  if(active.length>1)throw new Error("Multiple active employee records match this signed-in account. An administrator must resolve the duplicate active records before signing.");
+  if(active.length===1)return active[0];
+  if(matching.length)throw new Error("Only inactive or deleted employee records match this signed-in account. Check the saved active employee email.");
+  throw new Error(`No active employee record matches the signed-in email (${loginEmail}). Check the saved employee email and Google sign-in account.`);
+}
+async function loadApprover(user = auth.currentUser) {
+  const superAdmin=ADMIN_EMAILS.some(email=>norm(email)===norm(user?.email));
+  if(superAdmin)return {approver:resolveWorkshopApprover(user,null,true),employeeRef:null};
+  if(!user?.uid || !user.email)throw new Error("Sign in before approving a job card.");
+  const toRecords=snapshot=>snapshot.docs.map(record=>({id:record.id,data:record.data()}));
+  let records=toRecords(await getDocs(query(collection(db,"employees"),where("email","==",norm(user.email)))));
+  // Firestore equality is exact: older saved emails may have different case
+  // or whitespace. Fall back to a read-only directory check only if no active
+  // exact match exists. The same canonical email is still required.
+  if(!records.some(record=>norm(record.data.email)===norm(user.email) && norm(record.data.status)==="active" && record.data.deleted!==true)) {
+    try { records=toRecords(await getDocs(collection(db,"employees"))); }
+    catch(error) { throw new Error("The email lookup returned no active match and the employee directory could not be verified. Check the saved employee email and employee-read permissions."); }
+  }
+  const record=selectActiveWorkshopEmployee(records,user.email);
+  return {approver:resolveWorkshopApprover(user,record.data),employeeRef:doc(db,"employees",record.id)};
+}
+
+function updateSignatureButton() {
+  const button=$("wmApproveClose");
+  if(button)button.disabled=signingJob || !$("wmSignoffConsent")?.checked || $("wmSignoffIdentity")?.dataset.verified!=="true";
+}
+async function prepareSignoff(job) {
+  const identity=$("wmSignoffIdentity"),consent=$("wmSignoffConsent");
+  const session=++signoffSession;preparedApprover=null;
+  consent.checked=false;identity.dataset.verified="false";$("wmSignoffDeclaration").textContent=WORKSHOP_SIGNOFF_DECLARATION;
+  const waiting=job.status==="Waiting Approval";
+  $("wmElectronicSignoff").hidden=!waiting;updateSignatureButton();
+  if(!waiting)return;
+  identity.textContent="Verifying the approving account…";
+  const uid=auth.currentUser?.uid;
+  try {
+    const {approver}=await loadApprover();
+    if(selectedJob?.id!==job.id || auth.currentUser?.uid!==uid || signoffSession!==session)return;
+    preparedApprover={jobId:job.id,identity:approver};
+    identity.innerHTML=`<strong>${esc(approver.name)}</strong><div>${esc(approver.role)}${approver.employeeNumber ? ` · Employee ${esc(approver.employeeNumber)}` : ""}</div><div class="list-meta">${esc(approver.email)}</div>`;
+    identity.dataset.verified="true";updateSignatureButton();
+  } catch(error) {
+    if(selectedJob?.id===job.id && signoffSession===session)identity.textContent=error.message || "Unable to verify the approving officer.";
+  }
 }
 
 function todayStr() {
@@ -166,14 +225,20 @@ function ensureDialogs() {
             <span class="wm-inspection-date-note">Only the Fleet Manager can correct this date during review. The next 90-day due date will be calculated from this date.</span>
           </label>
         </div>
+        <section id="wmElectronicSignoff" style="margin:16px 0;padding:14px;border:1px solid #cfd7e2;border-radius:7px" hidden>
+          <div class="section-title">Electronic manager approval</div>
+          <div id="wmSignoffIdentity" data-verified="false"></div>
+          <label style="display:flex;gap:10px;align-items:flex-start;margin-top:12px"><input type="checkbox" id="wmSignoffConsent" style="width:18px;margin-top:3px"><span id="wmSignoffDeclaration"></span></label>
+        </section>
         <div id="wmReviewMessage" class="status"></div>
         <div class="dialog-actions">
           <button type="button" class="button secondary" id="wmPrintJob">Print Job Card</button>
           <button type="button" class="button secondary" id="wmReturnMechanic">Return to Mechanic</button>
-          <button type="button" class="button primary" id="wmApproveClose">Acknowledge & Close</button>
+          <button type="button" class="button primary" id="wmApproveClose" disabled>Sign &amp; Close Job Card</button>
         </div>
       </form>`;
     document.body.appendChild(d);
+    $("wmSignoffConsent").onchange = updateSignatureButton;
     $("wmReviewClose").onclick = () => d.close();
     $("wmPrintJob").onclick = () => selectedJob && printJobCard(selectedJob);
     $("wmEditJob").onclick = () => {
@@ -255,7 +320,7 @@ function approvalDisplay(job) {
       <div class="wm-review-box wm-full"><div class="wm-review-label">Parts used</div><div class="wm-review-value">${partsHtml}</div></div>
       <div class="wm-review-box wm-full"><div class="wm-review-label">Checklist</div><div class="wm-review-value">${checklistHtml}</div></div>
       <div class="wm-review-box wm-full"><div class="wm-review-label">Mechanic notes</div><div class="wm-review-value">${esc(card.mechanicNotes || "—")}</div></div>
-    </div>`;
+    </div>${workshopApprovalHtml(job)}`;
 }
 
 function openReview(jobId) {
@@ -271,7 +336,7 @@ function openReview(jobId) {
   $("wmReviewSubtitle").textContent = `${job.jobNumber || job.id} · ${job.fleetNumber || ""} · ${job.status || ""}`;
   $("wmReviewBody").innerHTML = approvalDisplay(job);
   $("wmVehicleStatus").value = bus?.status && ["Active","Restricted","Workshop","Out of Service"].includes(bus.status) ? bus.status : "Active";
-  $("wmReturnToService").value = job.jobCard?.safeToReturn === "No" ? "No" : "Yes";
+  $("wmReturnToService").value = job.status==="Closed" ? job.fleetManagerApproval?.returnToService===true ? "Yes" : job.fleetManagerApproval?.returnToService===false ? "No" : "" : job.jobCard?.safeToReturn === "No" ? "No" : "Yes";
   $("wmManagerComments").value = job.fleetManagerApproval?.comments || "";
   const inspection = is90DayInspection(job);
   $("wmInspectionDateWrap").hidden = !inspection;
@@ -280,8 +345,12 @@ function openReview(jobId) {
   $("wmReviewMessage").className = "status";
   $("wmReviewMessage").textContent = "";
   const waiting = job.status === "Waiting Approval";
+  $("wmVehicleStatus").disabled=!waiting;
+  $("wmReturnToService").disabled=!waiting;
+  $("wmManagerComments").readOnly=!waiting;
   $("wmReturnMechanic").hidden = !waiting;
   $("wmApproveClose").hidden = !waiting;
+  prepareSignoff(job);
   $("fleetManagerReviewDialog").showModal();
 }
 window.openFleetManagerJobReview = openReview;
@@ -350,17 +419,21 @@ async function returnToMechanic() {
 }
 
 async function approveAndClose() {
-  if (!selectedJob || selectedJob.status !== "Waiting Approval") return;
+  if (!selectedJob || selectedJob.status !== "Waiting Approval" || signingJob) return;
+  const jobToClose=selectedJob;
+  const user=auth.currentUser;
+  const consent=$("wmSignoffConsent")?.checked===true;
+  if(!consent)return toast("Confirm the electronic approval declaration before signing.","error");
   const returnToService = $("wmReturnToService").value;
   const vehicleStatus = $("wmVehicleStatus").value;
   const comments = $("wmManagerComments").value.trim();
-  const card = selectedJob.jobCard || {};
-  const inspection = is90DayInspection(selectedJob);
+  const card = jobToClose.jobCard || {};
+  const inspection = is90DayInspection(jobToClose);
   const inspectionDate = inspection ? $("wmInspectionCompletedDate").value : "";
-  const aircon = isAirConditioningService(selectedJob);
-  const airconServiceDate = selectedJob.airConditioningServiceDate || selectedJob.jobCard?.airConditioningServiceDate || "";
-  const specialKind = specialServiceKind(selectedJob);
-  const specialServiceDate = selectedJob.specialServiceCompletedDate || selectedJob.jobCard?.specialServiceCompletedDate || "";
+  const aircon = isAirConditioningService(jobToClose);
+  const airconServiceDate = jobToClose.airConditioningServiceDate || jobToClose.jobCard?.airConditioningServiceDate || "";
+  const specialKind = specialServiceKind(jobToClose);
+  const specialServiceDate = jobToClose.specialServiceCompletedDate || jobToClose.jobCard?.specialServiceCompletedDate || "";
 
   if (returnToService === "Yes" && card.safeToReturn === "No") {
     $("wmReviewMessage").className = "status error";
@@ -382,31 +455,43 @@ async function approveAndClose() {
     $("wmReviewMessage").textContent = "The mechanic must record the actual service completed date before approval.";
     return;
   }
-  const recordedInspectionDate = selectedJob.inspectionCompletedDate || selectedJob.jobCard?.inspectionCompletedDate || "";
+  const recordedInspectionDate = jobToClose.inspectionCompletedDate || jobToClose.jobCard?.inspectionCompletedDate || "";
   if (inspection && recordedInspectionDate && recordedInspectionDate !== inspectionDate && !comments) {
     $("wmReviewMessage").className = "status error";
     $("wmReviewMessage").textContent = "Enter the reason for changing the mechanic's inspection completed date in Fleet Manager comments.";
     return;
   }
 
-  const confirmText = `Acknowledge and permanently close ${selectedJob.jobNumber || selectedJob.id}? Type CLOSE to confirm.`;
-  const typed = window.prompt(confirmText, "");
-  if (typed !== "CLOSE") return;
-
   const btn = $("wmApproveClose");
+  signingJob=true;
   btn.disabled = true;
-  btn.textContent = "Closing...";
+  btn.textContent = "Signing and closing…";
 
   try {
+    if(!user?.uid)throw new Error("Sign in before approving.");
+    await user.getIdToken(true);
+    const {approver,employeeRef}=await loadApprover(user);
+    if(preparedApprover?.jobId!==jobToClose.id || JSON.stringify(preparedApprover.identity)!==JSON.stringify(approver))throw new Error("The approving identity changed. Reopen the job card and confirm the displayed signer.");
+    const displayedRevision=await approvalHash(workshopJobRevision(jobToClose));
+    const approvalId=globalThis.crypto.randomUUID();
     await runTransaction(db, async (tx) => {
-      const jobRef = doc(db, "workshopJobs", selectedJob.id);
+      const jobRef = doc(db, "workshopJobs", jobToClose.id);
       const jobSnap = await tx.get(jobRef);
       if (!jobSnap.exists()) throw new Error("Workshop job no longer exists.");
-      const latestJob = jobSnap.data();
+      const latestJob = {...jobSnap.data(),id:jobToClose.id};
       if (latestJob.status !== "Waiting Approval") throw new Error("This job is no longer waiting for approval.");
 
-      const bus = busForJob(selectedJob);
-      const otherActiveJobs = otherActiveJobsForBus(selectedJob, bus);
+      if(auth.currentUser?.uid!==user.uid)throw new Error("The signed-in account changed. Reopen the job card and sign again.");
+      let verifiedApprover=approver;
+      if(employeeRef) {
+        const employeeSnap=await tx.get(employeeRef);
+        if(!employeeSnap.exists())throw new Error("The approver employee record no longer exists.");
+        verifiedApprover=resolveWorkshopApprover(user,employeeSnap.data());
+        if(JSON.stringify(verifiedApprover)!==JSON.stringify(approver))throw new Error("Approver details changed. Reopen the job card to review the signing identity.");
+      }
+      if(await approvalHash(workshopJobRevision(latestJob))!==displayedRevision)throw new Error("This job card changed after you opened it. Reopen it, review the latest work and sign again.");
+      const bus = busForJob(jobToClose);
+      const otherActiveJobs = otherActiveJobsForBus(jobToClose, bus);
       let busData = null;
       let busRef = null;
       if (bus?.id) {
@@ -422,17 +507,8 @@ async function approveAndClose() {
       const effectiveVehicleStatus = otherActiveJobs.length
         ? (vehicleStatus === "Out of Service" || norm(busData?.status) === "out of service" ? "Out of Service" : "Workshop")
         : vehicleStatus;
-      const approval = {
-        approved:true,
-        approvedByName:auth.currentUser?.displayName || auth.currentUser?.email || "Fleet Manager",
-        approvedByEmail:norm(auth.currentUser?.email),
-        comments,
-        returnToService:returnToService === "Yes",
-        vehicleStatus:effectiveVehicleStatus,
-        requestedVehicleStatus:vehicleStatus,
-        heldInWorkshopForOtherActiveJobs:otherActiveJobs.map((job) => job.jobNumber || job.id),
-        approvedAt:serverTimestamp()
-      };
+      const decision={comments,returnToService:returnToService==="Yes",vehicleStatus:effectiveVehicleStatus,requestedVehicleStatus:vehicleStatus,heldInWorkshopForOtherActiveJobs:otherActiveJobs.map(job=>job.jobNumber || job.id),inspectionCompletedDate:inspection ? inspectionDate : latestJob.inspectionCompletedDate || ""};
+      const approval=await createWorkshopElectronicApproval({job:{...latestJob,inspectionCompletedDate:decision.inspectionCompletedDate},approver:verifiedApprover,decision,consent,approvalId,timestamp:serverTimestamp()});
 
       const previousInspectionDate = latestJob.inspectionCompletedDate || latestJob.jobCard?.inspectionCompletedDate || "";
       const inspectionDateAudit = Array.isArray(latestJob.inspectionDateAudit) ? [...latestJob.inspectionDateAudit] : [];
@@ -453,7 +529,8 @@ async function approveAndClose() {
         returnToServiceApproved:returnToService === "Yes",
         closedByEmail:norm(auth.currentUser?.email),
         closedAt:serverTimestamp(),
-        updatedAt:serverTimestamp()
+        updatedAt:serverTimestamp(),
+        [`approvalAudit.${approvalId}`]:{event:"Electronic manager approval",approvedByUid:verifiedApprover.uid,approvedByName:verifiedApprover.name,approvedByRole:verifiedApprover.role,approvedByEmployeeNumber:verifiedApprover.employeeNumber,signedRecordHash:approval.signedRecordHash,declaration:WORKSHOP_SIGNOFF_DECLARATION,signedAt:serverTimestamp()}
       };
       if (inspection) {
         jobUpdate.inspectionCompletedDate = inspectionDate;
@@ -483,8 +560,8 @@ async function approveAndClose() {
       if (busRef && busData) {
         const busUpdate = {
           status:effectiveVehicleStatus,
-          lastWorkshopJobId:selectedJob.id,
-          lastWorkshopJobNumber:selectedJob.jobNumber || "",
+          lastWorkshopJobId:jobToClose.id,
+          lastWorkshopJobNumber:jobToClose.jobNumber || "",
           lastWorkshopClosedAt:serverTimestamp(),
           lastWorkshopClosedBy:norm(auth.currentUser?.email),
           workshopStatusReason:otherActiveJobs.length ? "Other active workshop jobs remain" : "Fleet Manager closure",
@@ -506,15 +583,15 @@ async function approveAndClose() {
             currentOdometer:currentJobOdo,
             readingDate:todayStr(),
             source:"Workshop Job",
-            sourceJobId:selectedJob.id,
-            sourceJobNumber:selectedJob.jobNumber || "",
-            notes:`Recorded on Fleet Manager approval of ${selectedJob.jobNumber || selectedJob.id}`,
+            sourceJobId:jobToClose.id,
+            sourceJobNumber:jobToClose.jobNumber || "",
+            notes:`Recorded on Fleet Manager approval of ${jobToClose.jobNumber || jobToClose.id}`,
             enteredByEmail:norm(auth.currentUser?.email),
             createdAt:serverTimestamp()
           });
         }
 
-        if (selectedJob.jobType === "Scheduled Service" && currentJobOdo != null) {
+        if (jobToClose.jobType === "Scheduled Service" && currentJobOdo != null) {
           const intervalKm = num(busData.serviceIntervalKm);
           const intervalMonths = num(busData.serviceIntervalMonths) || 0;
           busUpdate.lastServiceOdometer = currentJobOdo;
@@ -526,8 +603,8 @@ async function approveAndClose() {
         if (inspection) {
           busUpdate.last90DaySafetyCheckDate = inspectionDate;
           busUpdate.next90DaySafetyCheckDate = addDays(inspectionDate, 90);
-          busUpdate.last90DaySafetyCheckJobId = selectedJob.id;
-          busUpdate.last90DaySafetyCheckJobNumber = selectedJob.jobNumber || "";
+          busUpdate.last90DaySafetyCheckJobId = jobToClose.id;
+          busUpdate.last90DaySafetyCheckJobNumber = jobToClose.jobNumber || "";
           busUpdate.safety90TrackingUpdatedAt = serverTimestamp();
           busUpdate.safety90TrackingUpdatedBy = norm(auth.currentUser?.email);
         }
@@ -535,8 +612,8 @@ async function approveAndClose() {
         if (aircon) {
           busUpdate.lastAirConditioningServiceDate = airconServiceDate;
           busUpdate.nextAirConditioningServiceDate = addMonths(airconServiceDate, 12);
-          busUpdate.lastAirConditioningServiceJobId = selectedJob.id;
-          busUpdate.lastAirConditioningServiceJobNumber = selectedJob.jobNumber || "";
+          busUpdate.lastAirConditioningServiceJobId = jobToClose.id;
+          busUpdate.lastAirConditioningServiceJobNumber = jobToClose.jobNumber || "";
           busUpdate.airConditioningTrackingUpdatedAt = serverTimestamp();
           busUpdate.airConditioningTrackingUpdatedBy = norm(auth.currentUser?.email);
         }
@@ -544,8 +621,8 @@ async function approveAndClose() {
         if (specialKind === "fire") {
           busUpdate.lastFireSuppressionCheckDate = specialServiceDate;
           busUpdate.nextFireSuppressionCheckDate = addMonths(specialServiceDate, 12);
-          busUpdate.lastFireSuppressionCheckJobId = selectedJob.id;
-          busUpdate.lastFireSuppressionCheckJobNumber = selectedJob.jobNumber || "";
+          busUpdate.lastFireSuppressionCheckJobId = jobToClose.id;
+          busUpdate.lastFireSuppressionCheckJobNumber = jobToClose.jobNumber || "";
           busUpdate.fireSuppressionTrackingUpdatedAt = serverTimestamp();
           busUpdate.fireSuppressionTrackingUpdatedBy = norm(auth.currentUser?.email);
         }
@@ -553,8 +630,8 @@ async function approveAndClose() {
         if (specialKind === "radiator") {
           busUpdate.lastRadiatorWashDate = specialServiceDate;
           busUpdate.nextRadiatorWashDate = addMonths(specialServiceDate, 6);
-          busUpdate.lastRadiatorWashJobId = selectedJob.id;
-          busUpdate.lastRadiatorWashJobNumber = selectedJob.jobNumber || "";
+          busUpdate.lastRadiatorWashJobId = jobToClose.id;
+          busUpdate.lastRadiatorWashJobNumber = jobToClose.jobNumber || "";
           busUpdate.radiatorWashTrackingUpdatedAt = serverTimestamp();
           busUpdate.radiatorWashTrackingUpdatedBy = norm(auth.currentUser?.email);
         }
@@ -563,14 +640,15 @@ async function approveAndClose() {
       }
     });
 
-    $("fleetManagerReviewDialog").close();
-    toast(`${selectedJob.jobNumber || selectedJob.id} acknowledged and closed. Fleet Manager approval date/time and vehicle history were saved.`);
+    if(selectedJob?.id===jobToClose.id)$("fleetManagerReviewDialog").close();
+    toast(`${jobToClose.jobNumber || jobToClose.id} electronically signed and closed. Approver identity, decision and signed job record were saved.`);
   } catch (e) {
     $("wmReviewMessage").className = "status error";
     $("wmReviewMessage").textContent = e?.message || "Unable to close workshop job.";
   } finally {
-    btn.disabled = false;
-    btn.textContent = "Acknowledge & Close";
+    signingJob=false;
+    updateSignatureButton();
+    btn.textContent = "Sign & Close Job Card";
   }
 }
 
@@ -604,7 +682,8 @@ function printJobCard(job) {
     <table><thead><tr><th>Part No.</th><th>Description</th><th>Qty</th><th>Supplier / Ref</th></tr></thead><tbody>${parts.length ? parts.map((p)=>`<tr><td>${esc(p.partNumber||"")}</td><td>${esc(p.description||"")}</td><td>${esc(p.quantity??"")}</td><td>${esc(p.supplierRef||"")}</td></tr>`).join("") : `<tr><td colspan="4">No parts recorded</td></tr>`}</tbody></table>
     <h2 style="margin-top:18px">Checklist</h2>
     <table><thead><tr><th>Inspection item</th><th>Action / Description of Work</th><th>Result / Details</th></tr></thead><tbody>${Object.keys(checklist).length ? Object.entries(checklist).map(([k,v])=>{const item=evidence[k]||{};return `<tr><td>${esc(item.item||k)}</td><td><strong>${esc(item.action||"—")}</strong><br>${esc(item.description||"")}</td><td><strong>${esc(v||"—")}</strong>${item.note?`<br>${esc(item.note)}`:""}</td></tr>`;}).join("") : `<tr><td colspan="3">No checklist recorded</td></tr>`}</tbody></table>
-    <div class="approval"><h2>Fleet Manager Approval</h2><div><strong>Status:</strong> ${esc(job.status || "—")}</div><div><strong>Approved by:</strong> ${esc(approval.approvedByName || approval.approvedByEmail || "Not yet approved")}</div><div><strong>Approval date/time:</strong> ${esc(fmtDateTime(approval.approvedAt || job.closedAt))}</div>${is90DayInspection(job)?`<div><strong>Inspection date used for next due calculation:</strong> ${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div>`:""}${isAirConditioningService(job)?`<div><strong>A/C service date used for next annual due date:</strong> ${esc(job.airConditioningServiceDate || card.airConditioningServiceDate || "—")}</div>`:""}${specialServiceKind(job)?`<div><strong>Service date used for next due calculation:</strong> ${esc(job.specialServiceCompletedDate || card.specialServiceCompletedDate || "—")}</div>`:""}<div><strong>Return to service:</strong> ${approval.returnToService === true ? "YES" : approval.returnToService === false ? "NO" : "—"}</div><div><strong>Comments:</strong> ${esc(approval.comments || "—")}</div></div>
+    ${workshopApprovalHtml(job)}
+    <div class="approval"><h2>Fleet Manager Decision</h2><div><strong>Status:</strong> ${esc(job.status || "—")}</div>${is90DayInspection(job)?`<div><strong>Inspection date used for next due calculation:</strong> ${esc(job.inspectionCompletedDate || card.inspectionCompletedDate || "—")}</div>`:""}${isAirConditioningService(job)?`<div><strong>A/C service date used for next annual due date:</strong> ${esc(job.airConditioningServiceDate || card.airConditioningServiceDate || "—")}</div>`:""}${specialServiceKind(job)?`<div><strong>Service date used for next due calculation:</strong> ${esc(job.specialServiceCompletedDate || card.specialServiceCompletedDate || "—")}</div>`:""}<div><strong>Return to service:</strong> ${approval.returnToService === true ? "YES" : approval.returnToService === false ? "NO" : "—"}</div><div><strong>Comments:</strong> ${esc(approval.comments || "—")}</div></div>
     <script>window.onload=()=>window.print();</script></body></html>`;
   const w = window.open("", "_blank", "noopener,noreferrer");
   if (!w) return toast("Pop-up blocked. Allow pop-ups to print the Job Card.", "error");
@@ -692,7 +771,7 @@ function enhanceHistory() {
     const row = document.createElement("div"); row.className = "wm-action-row";
     row.innerHTML = `<button type="button" class="button secondary" data-view>View Job Card</button><button type="button" class="button secondary" data-print>Print Job Card</button>`;
     row.querySelector("[data-view]").onclick = () => openReview(job.id);
-    row.querySelector("[data-print]").onclick = () => printJobCard(job);
+    row.querySelector("[data-print]").onclick = () => printJobCard(jobs.find(current => current.id === job.id) || job);
     item.appendChild(row);
   });
 }

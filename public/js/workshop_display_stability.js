@@ -4,13 +4,22 @@
 // identical dashboard markup can produce a visible flash on large screens.
 
 const stableIds = [
+  "fleetTableBody",
+  "jobsTableBody",
+  "jobQueue",
+  "odometerBus",
+  "jobBus",
+  "mechanicTodayDefects",
+  "workshopDefectList",
+  "workshopDefectSummary",
+  "workshopDefectCategory",
   "maintenanceDueList",
   "dashboardJobsList",
   "historyList",
   "odometerHistory"
 ];
 
-function installStableInnerHtml(id) {
+export function installStableInnerHtml(id) {
   const el = document.getElementById(id);
   if (!el || el.dataset.stableHtml === "1") return;
 
@@ -23,6 +32,7 @@ function installStableInnerHtml(id) {
   }
   if (!descriptor?.get || !descriptor?.set) return;
 
+  let lastRequested;
   Object.defineProperty(el, "innerHTML", {
     configurable: true,
     enumerable: descriptor.enumerable,
@@ -31,8 +41,11 @@ function installStableInnerHtml(id) {
     },
     set(value) {
       const next = String(value ?? "");
-      const current = descriptor.get.call(this);
-      if (current === next) return;
+      // Row decorators add buttons and columns after the source render.
+      // Compare source markup so identical snapshots preserve those additions.
+      if (lastRequested === next) return;
+      lastRequested = next;
+      if (descriptor.get.call(this) === next) return;
       descriptor.set.call(this, next);
     }
   });
@@ -49,7 +62,11 @@ stableIds.forEach(installStableInnerHtml);
   "metricOut",
   "metricOpenJobs",
   "metricDueSoon",
-  "metricOverdue"
+  "metricOverdue",
+  "metricAssigned",
+  "metricProgress",
+  "metricUrgent",
+  "metricApproval"
 ].forEach((id) => {
   const el = document.getElementById(id);
   if (!el) return;
@@ -72,3 +89,19 @@ stableIds.forEach(installStableInnerHtml);
     }
   });
 });
+
+// For individual cells, compare both requested and rendered HTML: an external
+// replacement must still be repaired, while browser HTML normalisation is safe.
+const htmlValues = new WeakMap();
+export function setHtmlIfChanged(el, value) {
+  if (!el) return false;
+  const next = String(value ?? "");
+  const previous = htmlValues.get(el);
+  if (previous?.input === next && previous.output === el.innerHTML) return false;
+  if (el.innerHTML !== next) el.innerHTML = next;
+  htmlValues.set(el, {input:next, output:el.innerHTML});
+  return true;
+}
+export function setTextIfChanged(el, value) {
+  if (el && el.textContent !== String(value ?? "")) el.textContent = String(value ?? "");
+}

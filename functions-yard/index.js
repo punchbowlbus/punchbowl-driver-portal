@@ -48,5 +48,5 @@ function endpoint(handler){return onCall({region:"australia-southeast1",maxInsta
   catch(error){if(error instanceof HttpsError)throw error;if(["permission-denied","unauthenticated","invalid-argument","failed-precondition"].includes(error.code))throw new HttpsError(error.code,error.message);console.error("Yard operation failed",error);throw new HttpsError("internal","Unable to save or load Yard Work. Try again.");}
 });}
 exports.pbcYardBoard=endpoint((who)=>service.board(who));
-exports.pbcYardHistory=endpoint((who,data)=>service.history(who,data.busId));
+exports.pbcYardHistory=endpoint((who,data)=>service.history(who,data.busId,data.taskId));
 exports.pbcYardUpdate=endpoint((who,data)=>service.update(who,data));

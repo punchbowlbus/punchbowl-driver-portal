@@ -3,7 +3,7 @@ export const clean=(value)=>String(value || "").trim();
 export function dateAdd(date,days){const value=new Date(`${date}T12:00:00Z`);value.setUTCDate(value.getUTCDate()+days);return value.toISOString().slice(0,10);}
 export function cleaningState(state={},today){
   if(state.active)return {label:"In progress",tone:"info",due:false};
-  if(state.pending)return {label:"Waiting approval",tone:"warn",due:false};
+  if(state.handover)return {label:"Handed over",tone:"warn",due:true};
   if(state.priority)return {label:"Priority",tone:"bad",due:true};
   if(!state.lastDate)return {label:"Not recorded",tone:"warn",due:true};
   const due=dateAdd(state.lastDate,7);
@@ -19,7 +19,6 @@ export function fleetFilter(fleet,{search="",depot="",show="all",today}){
   return fleet.filter((bus)=>!depot||bus.depot===depot).filter((bus)=>[bus.fleetNumber,bus.rego,bus.depot].join(" ").toLowerCase().includes(search.toLowerCase())).filter((bus)=>{
     if(show==="all")return true;
     if(show==="problems")return bus.yard.checks?.problem===true;
-    if(show==="approval")return bus.yard.exterior?.pending||bus.yard.interior?.pending;
     return cleaningState(bus.yard.exterior,today).due||cleaningState(bus.yard.interior,today).due||checkState(bus.yard.checks,today).due;
   }).sort((a,b)=>a.fleetNumber.localeCompare(b.fleetNumber,undefined,{numeric:true}));
 }

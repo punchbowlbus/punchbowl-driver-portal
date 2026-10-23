@@ -1,10 +1,11 @@
+import { setTextIfChanged } from "./workshop_display_stability.js";
+import { syncMaintenanceEmpty } from "./workshop_maintenance_display.js";
 import {
   collection,
   doc,
   onSnapshot,
   serverTimestamp,
-  setDoc,
-  updateDoc
+  setDoc
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 import { auth, db } from "./firebase.js";
 
@@ -13,7 +14,6 @@ const norm = (v) => String(v || "").trim().toLowerCase();
 const esc = (v) => String(v ?? "").replace(/[&<>'\"]/g, (m) => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'\"':"&quot;"}[m]));
 
 let buses = [];
-let jobs = [];
 let pendingFleetSave = null;
 let maintenanceObserver = null;
 let fleetObserver = null;
@@ -41,19 +41,6 @@ function fmtDate(dateString) {
   const d = new Date(`${dateString}T00:00:00`);
   if (Number.isNaN(d.getTime())) return String(dateString);
   return new Intl.DateTimeFormat("en-AU", { day:"2-digit", month:"short", year:"numeric" }).format(d);
-}
-
-function dateFromTimestamp(value) {
-  const d = value?.toDate?.() || (value ? new Date(value) : null);
-  return d && !Number.isNaN(d.getTime()) ? localDateString(d) : "";
-}
-
-function is90DayInspection(job) {
-  const key = norm(job?.serviceTemplateKey);
-  const category = norm(job?.serviceType || job?.inspectionType || job?.jobCategory);
-  return /-(90day|rms)$/.test(key)
-    || norm(job?.jobType) === "90 day safety check"
-    || (norm(job?.jobType).includes("safety inspection") && (category.includes("90") || category.includes("rms")));
 }
 
 function daysUntil(dateString) {
@@ -100,9 +87,6 @@ function ensureDashboardUi() {
 
   // 90 Day warnings now live inside the main Maintenance Due panel.
   $("safety90Panel")?.remove();
-  const maintenance = $("maintenanceDueList")?.closest(".panel");
-  const hint = maintenance?.querySelector(".panel-head .hint");
-  if (hint) hint.textContent = "Service, Annual A/C, 90 Day Safety and Registration due";
 }
 
 function dueSafetyBuses() {
@@ -118,17 +102,17 @@ function augmentMaintenanceDue() {
   if (!wrap) return;
 
   const due = dueSafetyBuses();
-  const signature = due.map(({bus,state}) => `${bus.id}:${state.kind}:${bus.next90DaySafetyCheckDate || ""}`).join("|");
+  const signature = due.map(({bus,state}) => `${bus.id}:${fleetNo(bus)}:${state.kind}:${state.days}:${bus.last90DaySafetyCheckDate || ""}:${bus.next90DaySafetyCheckDate || ""}`).join("|");
   const existing = [...wrap.querySelectorAll("[data-safety90-dashboard]")];
   if (wrap.dataset.safety90Signature === signature && existing.length === due.length) return;
 
   existing.forEach((el) => el.remove());
   wrap.dataset.safety90Signature = signature;
 
-  if (!due.length) return;
+  if (!due.length) { syncMaintenanceEmpty(wrap); return; }
 
   [...wrap.querySelectorAll(".empty")].forEach((el) => {
-    if (/no buses currently due based on recorded schedules/i.test(el.textContent || "")) el.remove();
+    if (/no .* currently due/i.test(el.textContent || "")) el.remove();
   });
 
   due.forEach(({bus,state}) => {
@@ -146,6 +130,7 @@ function augmentMaintenanceDue() {
       <div class="list-meta">${esc(state.detail)}</div>`;
     wrap.appendChild(item);
   });
+  syncMaintenanceEmpty(wrap);
 }
 
 function renderDashboardSafety() {
@@ -154,8 +139,8 @@ function renderDashboardSafety() {
   const overdue = list.filter((x) => x.state.kind === "overdue");
   const soon = list.filter((x) => ["urgent", "soon", "book", "plan"].includes(x.state.kind));
 
-  if ($("metric90DayDueSoon")) $("metric90DayDueSoon").textContent = String(soon.length);
-  if ($("metric90DayOverdue")) $("metric90DayOverdue").textContent = String(overdue.length);
+  setTextIfChanged($("metric90DayDueSoon"), String(soon.length));
+  setTextIfChanged($("metric90DayOverdue"), String(overdue.length));
   augmentMaintenanceDue();
 }
 
@@ -328,32 +313,9 @@ function wireFleetEditor() {
   }, true);
 }
 
-async function applyClosed90DayJobs() {
-  for (const job of jobs) {
-    if (!is90DayInspection(job) || String(job.status || "") !== "Closed") continue;
-    const bus = buses.find((b) => b.id === job.busId || norm(fleetNo(b)) === norm(job.fleetNumber));
-    if (!bus?.id || bus.last90DaySafetyCheckJobId === job.id) continue;
-
-    // New records use the physical inspection completion date. The close date
-    // remains only as a backward-compatible fallback for older job cards.
-    const lastDate = String(job.inspectionCompletedDate || job.jobCard?.inspectionCompletedDate || "").trim()
-      || dateFromTimestamp(job.mechanicCompletedAt || job.completedAt || job.closedAt)
-      || localDateString();
-    try {
-      await updateDoc(doc(db, "buses", bus.id), {
-        last90DaySafetyCheckDate:lastDate,
-        next90DaySafetyCheckDate:addDays(lastDate, 90),
-        last90DaySafetyCheckJobId:job.id,
-        last90DaySafetyCheckJobNumber:job.jobNumber || "",
-        safety90TrackingUpdatedAt:serverTimestamp(),
-        safety90TrackingUpdatedBy:norm(job.closedByEmail || auth.currentUser?.email)
-      });
-    } catch (error) {
-      console.error("Unable to advance 90 Day Safety Check due date", error);
-    }
-  }
-}
-
+// Viewing the fleet is read-only. Completed inspections update the bus inside
+// the Fleet Manager approval transaction; legacy corrections are explicit.
+// Replaying closed job history here caused older jobs to overwrite newer dates.
 onSnapshot(collection(db, "buses"), (snap) => {
   buses = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
   renderDashboardSafety();
@@ -363,12 +325,6 @@ onSnapshot(collection(db, "buses"), (snap) => {
     enhanceFleetRows();
     observeRenderedAreas();
   }, 30);
-  applyClosed90DayJobs();
-});
-
-onSnapshot(collection(db, "workshopJobs"), (snap) => {
-  jobs = snap.docs.map((d) => ({ id:d.id, ...d.data() }));
-  applyClosed90DayJobs();
 });
 
 wireFleetEditor();

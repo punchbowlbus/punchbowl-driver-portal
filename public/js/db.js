@@ -15,6 +15,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
 import { db } from "./firebase.js";
+import { calculateFatigue } from "./dispatch_fatigue.js";
 
 /* =========================================================
    SHIFTS
@@ -162,6 +163,9 @@ function normalizeDriverAcknowledgment(value) {
 }
 
 export async function addDutySpan(data) {
+  if(data.startMin == null || data.endMin == null || String(data.startMin).trim() === "" || String(data.endMin).trim() === "" || !Number.isFinite(Number(data.startMin)) || !Number.isFinite(Number(data.endMin)) || Number(data.endMin) <= Number(data.startMin))throw new Error("Duty start/end times are missing or invalid.");
+  // Legacy/automatic entry must never default to an unchecked green result.
+  if (!data.fatigueStatus) data = {...data, ...calculateFatigue({...data, fatigueCategory:data.fatigueCategory || "Unknown"})};
   return await addDoc(collection(db, "dutySpans"), {
     deleted: false,
 
@@ -279,7 +283,9 @@ export async function transferDutySpanWithBlocks({
   dutySpanId,
   blockIds = [],
   driverEmployeeNumber,
-  driverName
+  driverName,
+  fatigueStatus,
+  fatigueWarning
 }) {
   if (!dutySpanId) throw new Error("Duty span id is required.");
   if (!driverEmployeeNumber) throw new Error("Target driver is required.");
@@ -290,6 +296,7 @@ export async function transferDutySpanWithBlocks({
   batch.update(doc(db, "dutySpans", dutySpanId), {
     driverEmployeeNumber: String(driverEmployeeNumber).trim(),
     driverName: String(driverName || "").trim(),
+    ...(fatigueStatus ? {fatigueStatus: String(fatigueStatus), fatigueWarning: String(fatigueWarning || "")} : {}),
     driverAcknowledgment: "Pending",
     dispatchStatus: "Pending",
     reassignedAt: now,
@@ -428,7 +435,7 @@ export async function getDutySpansByDriverAndDate(driverEmployeeNumber, date) {
     orderBy("startMin", "asc")
   );
   const snap = await getDocs(qy);
-  return snap.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.deleted !== true && !["cancelled", "canceled"].includes(String(item.dispatchStatus || "").toLowerCase()));
+  return snap.docs.map((item) => ({ id: item.id, ...item.data() })).filter((item) => item.deleted !== true && !["cancelled", "canceled"].includes(String(item.dispatchStatus || "").trim().toLowerCase()));
 }
 
 export function listenDutySpansByDriverAndDateRange(driverEmployeeNumber, startDate, endDate, onData, onErr) {

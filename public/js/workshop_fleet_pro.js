@@ -333,8 +333,8 @@ function enhanceRows() {
     if(row.dataset.wfReady) return;
     const fn=String(row.cells?.[0]?.textContent||"").trim(); const bus=buses.find((b)=>norm(fleetNo(b))===norm(fn)); if(!bus) return;
     row.dataset.wfReady="1"; row.classList.add("wf-openable"); row.title="Double-click to open full vehicle record";
-    row.addEventListener("dblclick",(e)=>{if(e.target.closest("button,a,input,select")) return; openBus(bus);});
-    const actions=row.cells?.[row.cells.length - 1]; if(actions&&!actions.querySelector("[data-wf-open]")){ const btn=document.createElement("button"); btn.type="button"; btn.className="button secondary"; btn.dataset.wfOpen="1"; btn.textContent="Open"; btn.onclick=()=>openBus(bus); actions.appendChild(btn); }
+    row.addEventListener("dblclick",(e)=>{if(e.target.closest("button,a,input,select")) return; openBus(buses.find((current) => current.id === bus.id) || bus);});
+    const actions=row.cells?.[row.cells.length - 1]; if(actions&&!actions.querySelector("[data-wf-open]")){ const btn=document.createElement("button"); btn.type="button"; btn.className="button secondary"; btn.dataset.wfOpen="1"; btn.textContent="Open"; btn.onclick=()=>openBus(buses.find((current) => current.id === bus.id) || bus); actions.appendChild(btn); }
   });
 }
 

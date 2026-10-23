@@ -135,29 +135,40 @@ function enhanceRows() {
     if (!tbody) return;
 
     [...tbody.querySelectorAll("tr")].forEach((row) => {
-      if (row.querySelector("[data-job-remove-cell]")) return;
       const firstCell = row.querySelector("td");
       if (!firstCell) return;
-
       const jobNumber = String(firstCell.querySelector("strong")?.textContent || firstCell.textContent || "").trim();
       const job = jobs.find((item) => String(item.jobNumber || item.id || "").trim() === jobNumber);
-
-      const td = document.createElement("td");
-      td.dataset.jobRemoveCell = "1";
-
-      if (canRemoveJob(job)) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "job-remove-button";
-        button.textContent = "Remove";
-        button.title = "Remove this job before mechanic work starts";
-        button.addEventListener("click", () => openRemoveDialog(job));
-        td.appendChild(button);
-      } else if (job) {
-        td.innerHTML = `<span class="list-meta">${job.startedAt || !["New", "Assigned"].includes(job.status) ? "Locked" : ""}</span>`;
+      if (!job) return;
+      let td = row.querySelector("[data-job-remove-cell]");
+      if (!td) {
+        td = document.createElement("td");
+        td.dataset.jobRemoveCell = "1";
+        row.appendChild(td);
       }
-
-      row.appendChild(td);
+      let button = td.querySelector(".job-remove-button");
+      const locked = td.querySelector("[data-job-locked]");
+      if (canRemoveJob(job)) {
+        locked?.remove();
+        if (!button) {
+          button = document.createElement("button");
+          button.type = "button";
+          button.className = "job-remove-button";
+          button.textContent = "Remove";
+          button.title = "Remove this job before mechanic work starts";
+          td.appendChild(button);
+        }
+        button.onclick = () => openRemoveDialog(jobs.find(item => item.id === job.id));
+      } else {
+        button?.remove();
+        if (!locked) {
+          const label = document.createElement("span");
+          label.className = "list-meta";
+          label.dataset.jobLocked = "1";
+          label.textContent = "Locked";
+          td.appendChild(label);
+        }
+      }
     });
   } finally {
     rendering = false;

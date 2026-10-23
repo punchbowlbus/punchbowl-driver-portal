@@ -59,6 +59,8 @@ function isAdminEmail(email) {
       state.unsubscribeJobDetailsBlocks();
       state.unsubscribeJobDetailsBlocks = null;
     }
+    state.blocks = null;
+    state.blocksDate = "";
 
     if (state.unsubscribeDriverMonitor) {
       state.unsubscribeDriverMonitor();
@@ -367,7 +369,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=16");
+    const mod = await import("./dispatch_board.js?v=18");
     mod.renderDispatchBoardPage();
     return;
   }
@@ -375,7 +377,7 @@ export async function go(pageId) {
   if (pageId === "adminBusAllocation") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./bus_allocation.js?v=20260924-local-1");
+    const mod = await import("./bus_allocation.js?v=20261013-departure-print-types");
     mod.renderBusAllocationPage();
     return;
   }
@@ -436,7 +438,7 @@ export async function go(pageId) {
     }
 
     if (pageId === "adminBulkDutySpans") {
-      const bulkModule = await import("./bulk_duty_spans.js?v=2");
+      const bulkModule = await import("./bulk_duty_spans.js?v=4");
       await bulkModule.renderBulkDutySpansPage();
       return;
     }
@@ -607,7 +609,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "driverMonitor") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./driver_monitor.js?v=1");
+    const mod = await import("./driver_monitor.js?v=3");
     mod.renderDriverMonitorPage();
     return;
   }
@@ -615,7 +617,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "fatigueTracking") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./fatigue_tracking.js?v=1");
+    const mod = await import("./fatigue_tracking.js?v=4");
     mod.renderFatigueTrackingPage();
     return;
   }
@@ -623,7 +625,7 @@ if (pageId === "adminAllJobs") {
   if (pageId === "operationsDashboard") {
     if (!state.isAdmin) return showError("No admin access");
     stopAllListeners();
-    const mod = await import("./operations_dashboard.js?v=1");
+    const mod = await import("./operations_dashboard.js?v=3");
     mod.renderOperationsDashboardPage({ onNavigate: go });
     return;
   }
@@ -640,11 +642,13 @@ if (pageId === "adminAllJobs") {
 
           const dutyDate = String(dutySpan.serviceDate || dutySpan.date || "").trim();
           if (String(state.blocksDate || "") !== dutyDate) {
+            state.unsubscribeJobDetailsBlocks?.();
+            state.unsubscribeJobDetailsBlocks = null;
             state.blocks = null;
             state.blocksDate = dutyDate;
           }
 
-          if (!state.blocks && dutyDate) {
+          if ((!state.blocks || !state.unsubscribeJobDetailsBlocks) && dutyDate) {
             els.contentArea.innerHTML = `
               <div class="driver-duty-loading card">
                 <div class="driver-duty-loading-spinner"></div>
@@ -658,15 +662,14 @@ if (pageId === "adminAllJobs") {
               state.unsubscribeJobDetailsBlocks = null;
             }
 
-            const currentDutySpanId = String(dutySpan.id || "");
             state.unsubscribeJobDetailsBlocks = listenBlocksByDate(
               dutyDate,
               (blocks) => {
+                // Ignore late snapshots from a stopped subscription. The date
+                // listener also serves another duty opened on this same date.
+                if (String(state.blocksDate || "") !== dutyDate) return;
                 state.blocks = blocks || [];
-                if (
-                  state.activePage === "jobDetails" &&
-                  String(state.selectedJobId || "") === currentDutySpanId
-                ) {
+                if (state.activePage === "jobDetails") {
                   go("jobDetails");
                 }
               },
@@ -675,10 +678,15 @@ if (pageId === "adminAllJobs") {
             return;
           }
 
-          const dutySheetModule = await import("./driver_duty_sheet.js?v=6");
+          const displayedBlocks = state.blocks || [];
+          const dutySheetModule = await import("./driver_duty_sheet.js?v=7");
           await dutySheetModule.renderDriverDutySheet({
             dutySpan,
-            blocks: state.blocks || [],
+            blocks: displayedBlocks,
+            isCurrent: () => state.activePage === "jobDetails" &&
+              String(state.selectedJobId || "") === String(dutySpan.id || "") &&
+              state.blocks === displayedBlocks,
+            dutySpans: state.driverDutySpans || [dutySpan],
             isAdmin: state.isAdmin,
             onYes: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "Yes"),
             onNo: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "No"),
