@@ -70,3 +70,4 @@ node_modules/
 
 # Local Firebase Functions emulator parameters
 **/.env.local
+tools/yard-local-data.json*

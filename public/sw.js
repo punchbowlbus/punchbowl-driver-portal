@@ -1,4 +1,4 @@
-const CACHE = "pbc-v85"; // Add filtered Fleet Register printing
+const CACHE = "pbc-v86"; // Release Yard Work Queue and tablet view
 
 const ASSETS = [
   "/",
