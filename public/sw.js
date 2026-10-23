@@ -1,4 +1,4 @@
-const CACHE = "pbc-v87"; // Keep Driver access when enabling additional Yard permission
+const CACHE = "pbc-v88"; // Shared company tablet with employee PIN switching
 
 const ASSETS = [
   "/",

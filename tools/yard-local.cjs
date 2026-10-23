@@ -53,7 +53,7 @@ async function start({port=5050,dataPath=dataFile}={}){
       }
       if(req.method!=='GET')return json(res,{error:'Method not allowed.'},405);
       if(route==='/__yard/auth.js'||route==='/js/yard_api.js'){res.setHeader('Content-Type','text/javascript');return res.end(authModule);}
-      const allowed=['/yard.html','/js/yard.js','/js/yard_model.js','/js/utils.js','/styles/yard.css','/styles/workshop.css','/styles/workshop_ui_polish.css','/styles/workshop_design_system.css','/icons/icon-192.png'];
+      const allowed=['/yard.html','/js/yard.js','/js/yard_model.js','/js/yard_access.js','/js/utils.js','/styles/yard.css','/styles/workshop.css','/styles/workshop_ui_polish.css','/styles/workshop_design_system.css','/icons/icon-192.png'];
       const pathname=route==='/'?'/yard.html':route;if(!allowed.includes(pathname))return json(res,{error:'Open the local Yard test page. Other portal pages are excluded.'},404);
       let content=await fs.readFile(path.join(publicDir,pathname));
       if(pathname==='/js/yard.js')content=content.toString().replace('https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js','/__yard/auth.js');

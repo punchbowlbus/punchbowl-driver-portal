@@ -1,6 +1,7 @@
 import {onAuthStateChanged,signInWithPopup,signOut} from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
 import {yardAuth,yardProvider,yardCall} from "./yard_api.js";
 import {escapeHtml as esc} from "./utils.js";
+import {isYardTabletAccount} from "./yard_access.js";
 import {TASK_LABELS,cleaningState,checkState,fleetFilter,dateAdd} from "./yard_model.js";
 const root=document.getElementById("yardRoot"),standalone=Boolean(document.getElementById("yardIdentity"));
 if(standalone&&new URLSearchParams(location.search).get("managerView")==="1")root.dataset.mode="manager";
@@ -16,12 +17,13 @@ function dialog(title,html){
   if(!modal){modal=document.createElement("dialog");modal.id="yardModal";modal.className="yard-dialog";modal.setAttribute("aria-labelledby","yardModalTitle");modal.innerHTML='<div class="yard-dialog-head"><h2 id="yardModalTitle"></h2><button id="yardModalClose" type="button" class="button secondary">Close</button></div><div class="yard-dialog-body"><div id="yardModalMessage" role="alert" class="status" hidden></div><div id="yardModalContent"></div></div>';document.body.appendChild(modal);byId("yardModalClose").onclick=()=>{if(!busy)modal.close();};modal.addEventListener("cancel",(event)=>{if(busy)event.preventDefault();});}
   byId("yardModalTitle").textContent=title;byId("yardModalContent").innerHTML=html;msg("",false,true);if(!modal.open)modal.showModal();
 }
-function setBusy(value){busy=value;if(byId("yardSignOut"))byId("yardSignOut").disabled=value;byId("yardModal")?.querySelectorAll("button,input,textarea,select").forEach((node)=>node.disabled=value);}
+function setBusy(value){busy=value;if(byId("yardSignOut"))byId("yardSignOut").disabled=value;if(byId("yardTabletSignOut"))byId("yardTabletSignOut").disabled=value;byId("yardModal")?.querySelectorAll("button,input,textarea,select").forEach((node)=>node.disabled=value);}
 function shell(){
   const manager=root.dataset.mode==="manager";
-  root.innerHTML=`<div class="yard-page"><div class="page-head"><div><h1>${manager?"Yard Work Queue":"Full Fleet"}</h1><p>${manager?"Fleet cleaning, daily checks and general yard tasks.":"Choose a bus available in your yard. Your name is recorded when you start work."}</p></div><div class="yard-actions">${manager?'<button id="yardAssignTask" type="button" class="button primary">Assign Yard Task</button>':""}<button id="yardRefresh" type="button" class="button secondary">Refresh</button></div></div><div id="yardMessage" class="status" role="status" hidden></div><div id="yardMetrics" class="metrics-grid"></div><nav id="yardTabs" class="yard-tabs" aria-label="Yard views"></nav><section class="panel table-panel"><div class="yard-filters"><label><span id="yardSearchLabel">Search bus / rego</span><input id="yardSearch" type="search" placeholder="Search bus, rego or depot" /></label><label>Depot<select id="yardDepot"><option value="">All depots</option></select></label><label>Show<select id="yardShow"><option value="all">Full fleet</option><option value="due">Due &amp; overdue</option><option value="problems">Reported check problems</option></select></label></div><p class="yard-hint strip">Depot is the fleet record location. Confirm the bus is physically in your yard before starting. Wash the exterior whenever needed, at least once every 7 days. Interior cleaning and mopping are required every 7 days. Cleaning completes immediately without approval.</p><div id="yardContent" class="table-wrap"></div></section><div id="yardRecent"></div><div id="yardUpdated" class="yard-live"></div></div>`;
+  root.innerHTML=`<div class="yard-page"><div class="page-head"><div><h1>${manager?"Yard Work Queue":"Full Fleet"}</h1><p>${manager?"Fleet cleaning, daily checks and general yard tasks.":"Choose a bus available in your yard. Your name is recorded when you start work."}</p></div><div class="yard-actions">${manager?'<button id="yardManagePins" type="button" class="button secondary">Manage Yard PINs</button><button id="yardAssignTask" type="button" class="button primary">Assign Yard Task</button>':""}<button id="yardRefresh" type="button" class="button secondary">Refresh</button></div></div><div id="yardMessage" class="status" role="status" hidden></div><div id="yardMetrics" class="metrics-grid"></div><nav id="yardTabs" class="yard-tabs" aria-label="Yard views"></nav><section class="panel table-panel"><div class="yard-filters"><label><span id="yardSearchLabel">Search bus / rego</span><input id="yardSearch" type="search" placeholder="Search bus, rego or depot" /></label><label>Depot<select id="yardDepot"><option value="">All depots</option></select></label><label>Show<select id="yardShow"><option value="all">Full fleet</option><option value="due">Due &amp; overdue</option><option value="problems">Reported check problems</option></select></label></div><p class="yard-hint strip">Depot is the fleet record location. Confirm the bus is physically in your yard before starting. Wash the exterior whenever needed, at least once every 7 days. Interior cleaning and mopping are required every 7 days. Cleaning completes immediately without approval.</p><div id="yardContent" class="table-wrap"></div></section><div id="yardRecent"></div><div id="yardUpdated" class="yard-live"></div></div>`;
   ["yardSearch","yardDepot","yardShow"].forEach((id)=>byId(id).addEventListener(id==="yardSearch"?"input":"change",()=>{historyRecords=null;render();}));
   byId("yardRefresh").onclick=()=>refresh(true);
+  if(byId("yardManagePins"))byId("yardManagePins").onclick=manageYardPins;
   if(byId("yardAssignTask"))byId("yardAssignTask").onclick=assignTask;
 }
 function render(){
@@ -156,24 +158,67 @@ async function refresh(showMessage=false){
       const error=new Error("You are signed in as yard staff. Open Yard View to see your fleet and tasks.");error.yardWrongView=true;throw error;
     }
     model=result;lastUpdated=new Date().toLocaleTimeString("en-AU");if(!byId("yardContent"))shell();render();
-    if(standalone){byId("yardIdentity").textContent=result.person.name;byId("yardDriverLink").hidden=!result.person.driver;byId("yardManagerLink").hidden=!result.person.manager;}
+    if(standalone){byId("yardIdentity").textContent=result.person.name;byId("yardDriverLink").hidden=!result.person.driver||isYardTabletAccount(yardAuth.currentUser);byId("yardManagerLink").hidden=!result.person.manager;}
     if(showMessage)msg("Fleet updates refreshed.");
   }catch(error){if(version!==authVersion)return;
+    if(standalone&&isYardTabletAccount(yardAuth.currentUser)&&/^(functions\/unauthenticated|auth\/(user-token-expired|invalid-user-token|user-disabled))$/.test(error.code||"")){
+      await yardCall("PinSignOut");await tabletEmployeePicker();return;
+    }
     const message=error.message || "Unable to load Yard Work.";
     if(model){msg(`${message} Displayed data may be out of date.`,true);byId("yardUpdated").textContent=`Refresh failed · Last successful refresh ${lastUpdated}`;}
     else root.innerHTML=`<div class="yard-error"><strong>Yard Work is unavailable</strong><p>${esc(message)}</p>${error.yardWrongView?'<a class="button primary" href="./yard.html">Open Yard View</a>':'<p>Check your connection and try again. If this continues, ask the Fleet Manager to check your employee access.</p>'}<button id="yardRetry" class="button secondary" type="button">Try Again</button></div>`;
     if(byId("yardRetry"))byId("yardRetry").onclick=()=>refresh(true);
   }finally{if(loadingVersion===version)loadingVersion=null;finishLoading();}
 }
+function startYardPolling(){clearInterval(poll);poll=setInterval(()=>{if(document.visibilityState==='visible'&&!busy&&(standalone||byId('yardView')?.classList.contains('active')))refresh();},20000);}
+async function tabletEmployeePicker(){
+ clearInterval(poll);poll=null;model=null;historyRecords=null;tab='fleet';byId('yardModal')?.close();
+ byId('yardIdentity').textContent='Company tablet · Select employee';byId('yardManagerLink').hidden=true;byId('yardDriverLink').hidden=true;
+ root.innerHTML='<div class="yard-empty">Loading yard employees…</div>';
+ const version=authVersion;
+ try{
+  const result=await yardCall('TabletRoster');if(version!==authVersion)return;
+  root.innerHTML=`<section class="panel yard-form" style="max-width:520px;margin:30px auto;padding:24px"><h1>Start Yard Work</h1><p>Company tablet signed in. Select your name and enter your own six-digit PIN.</p><div id="yardMessage" class="status" role="alert" hidden></div><form id="yardPinLoginForm" class="yard-form"><label>Your name<select id="yardPinEmployee" required><option value="">Select employee</option>${result.employees.map(employee=>`<option value="${esc(employee.id)}" ${employee.pinConfigured?'':'disabled'}>${esc(employee.name)} (${esc(employee.employeeNumber)})${employee.pinConfigured?'':' — Ask manager to set PIN'}</option>`).join('')}</select></label><label>Your PIN<input id="yardLoginPin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="off" required /></label><button id="yardPinLoginButton" class="button primary" type="submit">Start My Yard Work</button></form>${result.employees.length?'':'<p>No active employees have Yard Work access. Ask the Fleet Manager to enable it in Employees.</p>'}<p class="yard-hint">The Fleet Manager sets and resets PINs in Yard Work Queue → Manage Yard PINs.</p></section>`;
+  byId('yardPinLoginForm').onsubmit=async event=>{
+   event.preventDefault();if(busy)return;const employee=result.employees.find(row=>row.id===val('yardPinEmployee'));if(!employee)return;
+   const pin=val('yardLoginPin');byId('yardLoginPin').value='';setBusy(true);byId('yardPinLoginButton').disabled=true;
+   try{await yardCall('PinSignIn',{email:employee.loginEmail,pin});if(version!==authVersion)return;authVersion++;await refresh();if(model)startYardPolling();}
+   catch(error){if(version===authVersion){msg(error.message,true);byId('yardPinLoginButton').disabled=false;byId('yardLoginPin')?.focus();}}
+   finally{setBusy(false);}
+  };
+ }catch(error){if(version!==authVersion)return;root.innerHTML=`<div class="yard-error">${esc(error.message)} <button id="yardPinRetry" class="button secondary">Try Again</button></div>`;byId('yardPinRetry').onclick=tabletEmployeePicker;}
+}
+function manageYardPins(){
+ const employees=model.employees||[];
+ dialog('Manage Yard PINs',`<form id="yardSetPinForm" class="yard-form"><p>Set or reset a six-digit PIN for employees using the shared company tablet. Tell each employee their PIN privately.</p><label>Employee<select id="yardSetPinEmployee" required><option value="">Select employee</option>${employees.map(employee=>`<option value="${esc(employee.id)}">${esc(employee.name)} (${esc(employee.employeeNumber)})</option>`).join('')}</select></label><label>New six-digit PIN<input id="yardSetPin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="new-password" required /></label><label>Confirm PIN<input id="yardConfirmPin" type="password" inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6" autocomplete="new-password" required /></label><button class="button primary" type="submit">Save Employee PIN</button><p class="yard-hint">Resetting a PIN ends that employee’s current tablet session. Their personal Driver Google login stays unchanged.</p></form>`);
+ byId('yardSetPinForm').onsubmit=async event=>{
+  event.preventDefault();if(busy)return;const pin=val('yardSetPin');if(pin!==val('yardConfirmPin'))return msg('The PINs do not match.',true,true);
+  const employeeId=val('yardSetPinEmployee');byId('yardSetPin').value='';byId('yardConfirmPin').value='';setBusy(true);
+  try{await yardCall('SetPin',{employeeId,pin});byId('yardModal').close();msg('Employee PIN saved.');}catch(error){msg(error.message,true,true);}finally{setBusy(false);}
+ };
+}
+
 if(root){
-  if(standalone){byId("yardSignIn").onclick=()=>{yardProvider.setCustomParameters?.({prompt:"select_account"});return signInWithPopup(yardAuth,yardProvider).catch((error)=>{root.textContent=error.message;});};byId("yardSignOut").onclick=()=>{if(busy)return;signOut(yardAuth).catch(error=>msg(error.message,true));};}
+  if(standalone){byId("yardSignIn").onclick=()=>{yardProvider.setCustomParameters?.({prompt:"select_account"});return signInWithPopup(yardAuth,yardProvider).catch((error)=>{root.textContent=error.message;});};byId("yardSignOut").onclick=async()=>{if(busy)return;
+      if(isYardTabletAccount(yardAuth.currentUser)){
+        authVersion++;clearInterval(poll);model=null;root.textContent="Locking tablet…";setBusy(true);
+        try{await yardCall("PinSignOut");await tabletEmployeePicker();}catch(error){root.textContent=error.message;}finally{setBusy(false);}
+      }
+      else signOut(yardAuth).catch(error=>msg(error.message,true));
+    };
+    byId("yardTabletSignOut").onclick=async()=>{if(busy)return;authVersion++;clearInterval(poll);model=null;root.textContent="Signing out company account…";setBusy(true);try{await yardCall("PinSignOut");await signOut(yardAuth);}catch(error){root.textContent=error.message;}finally{setBusy(false);}};}
   onAuthStateChanged(yardAuth,async(user)=>{
-    authVersion++;clearInterval(poll);poll=null;model=null;historyRecords=null;tab="fleet";lastUpdated="";byId("yardModal")?.close();
-    if(standalone){byId("yardSignIn").hidden=Boolean(user);byId("yardSignOut").hidden=!user;byId("yardManagerLink").hidden=true;byId("yardDriverLink").hidden=true;byId("yardIdentity").textContent=user?"Checking employee access…":"Not signed in";}
+    authVersion++;const bootVersion=authVersion;clearInterval(poll);poll=null;model=null;historyRecords=null;tab="fleet";lastUpdated="";byId("yardModal")?.close();
+    if(standalone){root.dataset.mode=isYardTabletAccount(user)?"worker":new URLSearchParams(location.search).get("managerView")==="1"?"manager":"worker";byId("yardSignIn").hidden=Boolean(user);byId("yardSignOut").hidden=!user;byId("yardSignOut").textContent=isYardTabletAccount(user)?"Change employee / Lock tablet":"Sign out / Change employee";byId("yardTabletSignOut").hidden=!isYardTabletAccount(user);byId("yardManagerLink").hidden=true;byId("yardDriverLink").hidden=true;byId("yardIdentity").textContent=user?"Checking employee access…":"Not signed in";}
     root.innerHTML=`<div class="yard-empty">${user?"Loading fleet and employee access…":"Sign in with your own employee account to use Yard Work."}</div>`;
-    if(!user)return;const version=authVersion;await refresh();if(version!==authVersion)return;
-    poll=setInterval(()=>{if(document.visibilityState==="visible"&&!busy&&(standalone||byId("yardView")?.classList.contains("active")))refresh();},20000);
+    if(!user)return;
+    if(standalone&&isYardTabletAccount(user)){
+      root.dataset.mode="worker";
+      try{const pinStatus=await yardCall("PinStatus");if(bootVersion!==authVersion)return;if(!pinStatus.ready){await tabletEmployeePicker();return;}}catch(error){root.textContent=error.message;return;}
+    }
+    const version=authVersion;await refresh();if(version!==authVersion)return;
+    if(model)startYardPolling();
   });
-  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&yardAuth.currentUser&&!busy)refresh();});
+  document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&yardAuth.currentUser&&!busy&&model)refresh();});
   window.addEventListener("pagehide",()=>clearInterval(poll));
 }

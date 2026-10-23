@@ -23,7 +23,7 @@ import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.9.0/firebas
 import { auth, provider, db, functions, messaging, storage } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
 import { state } from "./state.js";
-import {hasYardAccess,isYardOnly} from "./yard_access.js";
+import {hasYardAccess,isYardOnly,isYardTabletAccount} from "./yard_access.js";
 import { normalizeEmail, escapeHtml } from "./utils.js";
 import {
   listenShifts,
@@ -1467,6 +1467,8 @@ renderAuth(
   stopAllListeners();
 
 if (!u) return;
+
+if(isYardTabletAccount(u)){window.location.replace("./yard.html");return;}
 
 // Yard staff enter their dedicated tablet page; existing admin/driver routes stay intact.
 if (!state.isAdmin && isYardOnly(state.employee)) {

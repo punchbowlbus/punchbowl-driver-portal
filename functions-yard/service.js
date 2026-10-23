@@ -2,7 +2,7 @@ const {TYPES,CHECKLISTS,fail,text,today,dateValue,busSnapshot,validateChecks}=re
 const {createTasks,staff}=require('./tasks');
 const recordTime=(value)=>value?.toMillis?.() || Date.parse(value) || 0;
 function createService({db,stamp,now=()=>new Date(),savePhotos=async()=>[],removePhotos=async()=>{}}) {
-  const actor=(person)=>({uid:person.uid,name:person.name,email:person.email,employeeNumber:person.employeeNumber});
+  const actor=(person)=>({uid:person.uid,name:person.name,email:person.email,employeeNumber:person.employeeNumber,...(person.tablet?{signInMethod:"yard-pin",companyAccount:person.companyAccount}:{})});
   const activity=(person,action,busId,details={})=>({busId,action,actor:actor(person),createdAt:stamp(),...details});
   const tasks=createTasks({db,stamp,now,actor,activity,savePhotos,removePhotos});
   async function board(person){

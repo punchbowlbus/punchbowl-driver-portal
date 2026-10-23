@@ -4,11 +4,16 @@ const {getFirestore,FieldValue}=require("firebase-admin/firestore");
 const {randomUUID}=require("node:crypto");
 const {identity,fail}=require("./domain");
 const {createService}=require("./service");
+const {createTabletAccess,isTabletAccount}=require("./tablet");
 admin.initializeApp();
 const db=getFirestore();
+const tablet=createTabletAccess({db,auth:admin.auth()});
 const storageBucket=()=>admin.storage().bucket();
 async function person(request){
   if(!request.auth?.uid)throw new HttpsError("unauthenticated","Sign in to use Yard Work.");
+  if(request.auth.token?.yardEmployeeId)return tablet.person(request);
+  if(request.data?.companyIdToken)fail("A Yard employee PIN sign-in is required on the shared tablet.","unauthenticated");
+  if(isTabletAccount(request.auth))fail("Select your name and enter your Yard PIN.","unauthenticated");
   const email=String(request.auth.token?.email || "").trim().toLowerCase();
   const matches=await db.collection("employees").where("email","==",email).limit(2).get();
   if(matches.size>1)throw new HttpsError("permission-denied","More than one employee record uses this email. Ask the Fleet Manager to correct it.");
@@ -43,10 +48,13 @@ function serialise(value){
   if(value&&typeof value==="object")return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,serialise(item)]));
   return value;
 }
-function endpoint(handler){return onCall({region:"australia-southeast1",maxInstances:10,memory:"256MiB",timeoutSeconds:60},async(request)=>{
-  try{return serialise(await handler(await person(request),request.data || {}));}
+function endpoint(handler,resolvePerson=person){return onCall({region:"australia-southeast1",maxInstances:10,memory:"256MiB",timeoutSeconds:60},async(request)=>{
+  try{return serialise(await handler(await resolvePerson(request),request.data || {}));}
   catch(error){if(error instanceof HttpsError)throw error;if(["permission-denied","unauthenticated","invalid-argument","failed-precondition"].includes(error.code))throw new HttpsError(error.code,error.message);console.error("Yard operation failed",error);throw new HttpsError("internal","Unable to save or load Yard Work. Try again.");}
 });}
 exports.pbcYardBoard=endpoint((who)=>service.board(who));
 exports.pbcYardHistory=endpoint((who,data)=>service.history(who,data.busId,data.taskId));
 exports.pbcYardUpdate=endpoint((who,data)=>service.update(who,data));
+
+exports.pbcYardTabletRoster=endpoint((request)=>tablet.roster(request),async request=>request);
+exports.pbcYardSetPin=endpoint((who,data)=>tablet.setPin(who,data));
