@@ -1,4 +1,4 @@
-const CACHE = "pbc-v88"; // Shared company tablet with employee PIN switching
+const CACHE = "pbc-v89"; // Precache shared Driver/Yard access helper
 
 const ASSETS = [
   "/",
@@ -14,6 +14,7 @@ const ASSETS = [
   // app modules (keep this list updated)
   "/js/main.js",
   "/js/ui.js",
+  "/js/yard_access.js",
   "/js/utils.js",
   "/js/firebase.js",
   "/js/config.js",
