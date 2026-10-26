@@ -6,7 +6,9 @@ function createTasks({db,stamp,now,actor,activity,savePhotos,removePhotos}){
     if(!['create','start','block','handover','complete','approve','return'].includes(action))fail('Invalid yard task action.');
     if(['create','approve','return'].includes(action)&&!person.manager)fail('Fleet Manager access is required.','permission-denied');
     if(action!=='create'&&(typeof input.taskId!=='string'||!input.taskId||input.taskId.includes('/')))fail('Select a valid yard task.');
-    const ref=db.collection('yardTasks').doc(action==='create'?undefined:input.taskId),recordRef=db.collection('yardRecords').doc();
+    const tasks=db.collection('yardTasks');
+    // Firestore generates an ID only when doc() is called without an argument.
+    const ref=action==='create'?tasks.doc():tasks.doc(input.taskId),recordRef=db.collection('yardRecords').doc();
     const notes=text(input.notes),files=Array.isArray(input.photos)?input.photos:[];
     if(files.length&&!['complete','create'].includes(action))fail('Photos can only accompany task completion.');
     let photos=[];
