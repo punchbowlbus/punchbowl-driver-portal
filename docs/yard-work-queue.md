@@ -134,3 +134,11 @@ Driver work rendering, job visibility, acknowledgment, dispatch assignment, shar
 ## Release preparation — 26 October 2026
 
 The reviewed Driver compatibility/cache fix is included. Yard functions now target Node.js 22 in the isolated Yard Firebase config, package engines and lockfile metadata, ahead of the Node.js 20 retirement on 30 October. Dependency versions are unchanged; the other portal/notification function codebases and Driver application code are unchanged by this runtime update. Deploy only `functions:yard` with `firebase.yard.json`, then Hosting with `firebase.json`, stopping if backend deployment fails. Enable Email/Password alongside Google before using employee PIN login.
+
+## Dependency audit fix — 26 October 2026
+
+The previous lockfile reported a high-severity `body-parser` request-parser advisory and transitive moderate findings. Yard-only dependencies are now pinned to `firebase-admin` 14.5.0 and `firebase-functions` 7.4.0 with a regenerated lockfile. The Admin SDK integration and emulator seed script use modular App/Auth/Firestore/Storage imports, required by Admin 14. No Driver/browser modules or other Firebase function codebases are changed by this fix.
+
+`npm --prefix functions-yard audit --omit=dev` reports zero vulnerabilities in the updated production dependency tree. The 135 automated tests pass. After dependency installation, `node tests/yard-sdk.smoke.cjs` loads the real locked SDKs, validates all five Gen 2 callable definitions and checks unauthenticated requests are denied without contacting live Firebase. This complements the mocked workflow tests; it does not substitute for deployed authentication/photo-upload checks.
+
+For deployment use the new security-fix commit, run `npm --prefix functions-yard ci`, then deploy `functions:yard` with the Yard config before Hosting. Do not run `npm audit fix --force` on the release checkout. A local Node 24 versus server Node 22 engine warning is non-fatal when npm completes successfully; Firebase uses the configured Node 22 runtime for Yard.

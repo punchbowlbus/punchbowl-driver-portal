@@ -1,14 +1,16 @@
 const {onCall,HttpsError}=require("firebase-functions/v2/https");
-const admin=require("firebase-admin");
+const {initializeApp}=require("firebase-admin/app");
+const {getAuth}=require("firebase-admin/auth");
+const {getStorage}=require("firebase-admin/storage");
 const {getFirestore,FieldValue}=require("firebase-admin/firestore");
 const {randomUUID}=require("node:crypto");
 const {identity,fail}=require("./domain");
 const {createService}=require("./service");
 const {createTabletAccess,isTabletAccount}=require("./tablet");
-admin.initializeApp();
+initializeApp();
 const db=getFirestore();
-const tablet=createTabletAccess({db,auth:admin.auth()});
-const storageBucket=()=>admin.storage().bucket();
+const tablet=createTabletAccess({db,auth:getAuth()});
+const storageBucket=()=>getStorage().bucket();
 async function person(request){
   if(!request.auth?.uid)throw new HttpsError("unauthenticated","Sign in to use Yard Work.");
   if(request.auth.token?.yardEmployeeId)return tablet.person(request);
