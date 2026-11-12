@@ -60,7 +60,7 @@
           <h1>Workshop Jobs</h1>
           <p id="mechanicIdentity">Loading shared workshop queue...</p>
         </div>
-        <button id="refreshBtn" class="button secondary" type="button">Refresh</button>
+        <div class="mechanic-queue-actions"><button id="reportDefectBtn" class="button primary" type="button" hidden>Report Defect</button><button id="refreshBtn" class="button secondary" type="button">Refresh</button></div>
       </div>
 
       <div class="metrics-grid mechanic-metrics">
@@ -73,11 +73,11 @@
       <section class="panel mechanic-defects-panel">
         <div class="panel-head">
           <div>
-            <h2>Open Driver Defects <span id="mechanicTodayDefectCount" class="badge info">0</span></h2>
-            <span class="hint">Open driver defects are shown live. Create a job card and assign it to yourself when action is required.</span>
+            <h2>Open Defect Reports <span id="mechanicTodayDefectCount" class="badge info">0</span></h2>
+            <span class="hint">Open driver and mechanic defects are shown live. Create a job card when action is required. Mechanic-reported defects carry the selected mechanic into the job card.</span>
           </div>
         </div>
-        <div id="mechanicTodayDefects" class="mechanic-defect-list"><div class="empty">Loading open driver defect reports...</div></div>
+        <div id="mechanicTodayDefects" class="mechanic-defect-list"><div class="empty">Loading open defect reports...</div></div>
       </section>
 
       <section class="panel">
@@ -229,7 +229,8 @@
 
   <script type="module" src="./js/mechanic_work_queue.js?v=20261007-stable-queue"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
-  <script type="module" src="./js/mechanic_driver_defects_today.js?v=20261007-stable-defects"></script>
+  <script type="module" src="./js/mechanic_driver_defects_today.js?v=20261112-shared-mechanic"></script>
+  <script type="module" src="./js/mechanic_defect_report.js?v=20261112-shared-mechanic"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>
   <script type="module" src="./js/mechanic_status_sync.js"></script>
   <script type="module" src="./js/mechanic_pre_rms.js"></script>

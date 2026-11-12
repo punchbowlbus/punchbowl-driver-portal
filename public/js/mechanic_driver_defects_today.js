@@ -40,7 +40,7 @@ function ensureJobDialog() {
   dialog.id = "mechanicDefectJobDialog";
   dialog.className = "dialog";
   dialog.innerHTML = `<form id="mechanicDefectJobForm" method="dialog">
-    <div class="dialog-head"><div><h2>Create Job Card</h2><p id="mechanicDefectJobHelp">Create from driver defect and assign to yourself.</p></div><button id="mechanicDefectJobClose" class="icon-button" type="button">×</button></div>
+    <div class="dialog-head"><div><h2>Create Job Card</h2><p id="mechanicDefectJobHelp">Create from a defect report and assign to yourself.</p></div><button id="mechanicDefectJobClose" class="icon-button" type="button">×</button></div>
     <div class="form-grid">
       <label>Bus<input id="mechanicDefectJobBus" readonly></label>
       <label>Job type<select id="mechanicDefectJobType"><option>Defect Repair</option><option>Breakdown Repair</option><option>Electrical</option><option>Tyres</option><option>Body Repair</option><option>Other</option></select></label>
@@ -73,12 +73,13 @@ function openJobCreation(report) {
   }
   ensureJobDialog();
   selectedDefect = report;
-  document.getElementById("mechanicDefectJobHelp").textContent = `${report.reportNumber || "Driver defect"} · Confirm details before creating the job.`;
+  document.getElementById("mechanicDefectJobHelp").textContent = `${report.reportNumber || "Defect report"} · Confirm details before creating the job.`;
   document.getElementById("mechanicDefectJobBus").value = busLabel(report);
   document.getElementById("mechanicDefectJobType").value = "Defect Repair";
   document.getElementById("mechanicDefectJobPriority").value = report.safeToDrive === "No" ? "Safety Critical" : "Normal";
   document.getElementById("mechanicDefectJobDue").value = String(report.defectDate || "") >= todayString() ? report.defectDate : todayString();
-  document.getElementById("mechanicDefectJobAssignee").value = mechanic.name;
+  document.getElementById("mechanicDefectJobAssignee").value = report.source === "Mechanic" && report.reportedByEmployeeId ? report.reportedByName : mechanic.name;
+  document.getElementById("mechanicDefectJobSubmit").textContent = report.source === "Mechanic" && report.reportedByEmployeeId ? "Create Job Card" : "Create & Assign to Me";
   document.getElementById("mechanicDefectJobFault").value = report.description || "";
   document.getElementById("mechanicDefectJobNotes").value = report.adminNotes || "";
   const message = document.getElementById("mechanicDefectJobMessage");
@@ -107,11 +108,24 @@ async function createAndAssignJob(event) {
       const current = snap.data();
       if (current.workshopJobId || current.workshopJobNumber) throw new Error(`A job card already exists: ${current.workshopJobNumber || current.workshopJobId}`);
       if (isDone(current)) throw new Error("This defect report has already been completed.");
+      let assignee = mechanic;
+      if (current.source === "Mechanic" && current.reportedByEmployeeId) {
+        const employeeSnapshot = await tx.get(doc(db,"employees",current.reportedByEmployeeId));
+        if (!employeeSnapshot.exists()) throw new Error("The reporting mechanic no longer exists. Contact your Fleet Manager.");
+        const employee = employeeSnapshot.data();
+        const normalise = value => String(value || "").trim().toLowerCase();
+        if (normalise(employee.status) !== "active" || normalise(employee.department) !== "workshop" || normalise(employee.role) !== "mechanic") throw new Error("The reporting mechanic is no longer an active workshop mechanic. Contact your Fleet Manager.");
+        assignee = {
+          name:String(employee.displayName || employee.name || employee.fullName || [employee.firstName,employee.lastName].filter(Boolean).join(" ") || employee.email || "Mechanic").trim(),
+          employeeNumber:String(employee.employeeNumber || employee.employeeNo || employee.empNo || employee.number || current.reportedByEmployeeId),
+          email:normalise(employee.email)
+        };
+      }
       tx.set(jobRef, {
         jobNumber, busId:current.busId || report.busId || "", fleetNumber:current.fleetNumber || current.busNumber || report.fleetNumber || report.busNumber || "", rego:current.rego || report.rego || "",
         jobType:document.getElementById("mechanicDefectJobType").value || "Defect Repair", priority:document.getElementById("mechanicDefectJobPriority").value || "Normal",
-        status:"Assigned", assignedMechanic:mechanic.name, assignedMechanicName:mechanic.name, assignedMechanicEmployeeNumber:mechanic.employeeNumber, assignedMechanicEmail:mechanic.email,
-        dueDate:document.getElementById("mechanicDefectJobDue").value || "", source:"Driver Defect", sourceDefectId:report.id, sourceDefectNumber:current.reportNumber || report.reportNumber || "",
+        status:"Assigned", assignedMechanic:assignee.name, assignedMechanicName:assignee.name, assignedMechanicEmployeeNumber:assignee.employeeNumber, assignedMechanicEmail:assignee.email,
+        dueDate:document.getElementById("mechanicDefectJobDue").value || "", source:current.source === "Mechanic" ? "Mechanic Defect" : "Driver Defect", sourceDefectId:report.id, sourceDefectNumber:current.reportNumber || report.reportNumber || "",
         defectCategory:current.category || report.category || "", defectPhotos:Array.isArray(current.photos) ? current.photos : [], reportedFault:fault,
         managerNotes:document.getElementById("mechanicDefectJobNotes").value.trim(), diagnosis:"", workCompleted:"", partsUsed:[], labourEntries:[], returnToServiceApproved:false,
         createdByUid:mechanic.uid, createdByEmail:mechanic.email, createdAt:serverTimestamp(), updatedAt:serverTimestamp(), schemaVersion:1
@@ -123,7 +137,7 @@ async function createAndAssignJob(event) {
     window.pendingMechanicJobToOpen = null;
     message.className = "status error"; message.textContent = error?.message || "Unable to create the workshop job.";
   } finally {
-    submit.disabled = false; submit.textContent = "Create & Assign to Me";
+    submit.disabled = false; submit.textContent = report.source === "Mechanic" && report.reportedByEmployeeId ? "Create Job Card" : "Create & Assign to Me";
   }
 }
 
@@ -152,7 +166,7 @@ function render(reports) {
   if (count) count.textContent = String(list.length);
 
   if (!list.length) {
-    wrap.innerHTML = `<div class="empty">No open driver defect reports.</div>`;
+    wrap.innerHTML = `<div class="empty">No open defect reports.</div>`;
     return;
   }
 
@@ -161,7 +175,7 @@ function render(reports) {
     const linkedJob = r.workshopJobId || r.workshopJobNumber;
     const action = linkedJob
       ? `<button class="button secondary mechanic-open-linked-job" type="button" data-linked-job="${esc(r.workshopJobId || "")}" ${r.workshopJobId ? "" : "disabled"}>${r.workshopJobId ? "Open Job Card" : `Job ${esc(r.workshopJobNumber)}`}</button>`
-      : `<button class="button primary mechanic-create-defect-job" type="button" data-create-defect-job="${esc(r.id)}">Create &amp; Assign to Me</button>`;
+      : `<button class="button primary mechanic-create-defect-job" type="button" data-create-defect-job="${esc(r.id)}">${r.source === "Mechanic" && r.reportedByEmployeeId ? "Create Job Card" : "Create &amp; Assign to Me"}</button>`;
     return `<article class="mechanic-defect-card ${unsafe ? "unsafe" : ""}">
       <div class="mechanic-defect-head">
         <div>
@@ -175,7 +189,7 @@ function render(reports) {
       </div>
       <div class="mechanic-defect-meta">
         <div><span>Category</span><strong>${esc(r.category || "Other")}</strong></div>
-        <div><span>Driver</span><strong>${esc(r.reportedByName || "Unknown")}</strong></div>
+        <div><span>Reported by</span><strong>${esc(r.reportedByName || "Unknown")}</strong></div>
       </div>
       <div class="mechanic-defect-description">${esc(r.description || "No description provided")}</div>
       <div class="mechanic-defect-actions">${action}</div>
@@ -191,11 +205,15 @@ function render(reports) {
   }; });
 }
 
+window.addEventListener("mechanic-create-job-from-defect", (event) => {
+  if (event.detail?.id) openJobCreation(event.detail);
+});
+
 onSnapshot(collection(db, "defectReports"), (snap) => {
   render(snap.docs.map((d) => ({ id:d.id, ...d.data() })));
 }, (error) => {
-  console.error("Unable to load recent driver defects", error);
+  console.error("Unable to load recent defects", error);
   installStableInnerHtml("mechanicTodayDefects");
   const wrap = document.getElementById("mechanicTodayDefects");
-  if (wrap) wrap.innerHTML = `<div class="empty">Unable to load recent driver defect reports.</div>`;
+  if (wrap) wrap.innerHTML = `<div class="empty">Unable to load recent defect reports.</div>`;
 });
