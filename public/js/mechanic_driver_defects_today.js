@@ -78,7 +78,8 @@ function openJobCreation(report) {
   document.getElementById("mechanicDefectJobType").value = "Defect Repair";
   document.getElementById("mechanicDefectJobPriority").value = report.safeToDrive === "No" ? "Safety Critical" : "Normal";
   document.getElementById("mechanicDefectJobDue").value = String(report.defectDate || "") >= todayString() ? report.defectDate : todayString();
-  document.getElementById("mechanicDefectJobAssignee").value = mechanic.name;
+  document.getElementById("mechanicDefectJobAssignee").value = report.source === "Mechanic" && report.reportedByEmployeeId ? report.reportedByName : mechanic.name;
+  document.getElementById("mechanicDefectJobSubmit").textContent = report.source === "Mechanic" && report.reportedByEmployeeId ? "Create Job Card" : "Create & Assign to Me";
   document.getElementById("mechanicDefectJobFault").value = report.description || "";
   document.getElementById("mechanicDefectJobNotes").value = report.adminNotes || "";
   const message = document.getElementById("mechanicDefectJobMessage");
@@ -107,10 +108,23 @@ async function createAndAssignJob(event) {
       const current = snap.data();
       if (current.workshopJobId || current.workshopJobNumber) throw new Error(`A job card already exists: ${current.workshopJobNumber || current.workshopJobId}`);
       if (isDone(current)) throw new Error("This defect report has already been completed.");
+      let assignee = mechanic;
+      if (current.source === "Mechanic" && current.reportedByEmployeeId) {
+        const employeeSnapshot = await tx.get(doc(db,"employees",current.reportedByEmployeeId));
+        if (!employeeSnapshot.exists()) throw new Error("The reporting mechanic no longer exists. Contact your Fleet Manager.");
+        const employee = employeeSnapshot.data();
+        const normalise = value => String(value || "").trim().toLowerCase();
+        if (normalise(employee.status) !== "active" || normalise(employee.department) !== "workshop" || normalise(employee.role) !== "mechanic") throw new Error("The reporting mechanic is no longer an active workshop mechanic. Contact your Fleet Manager.");
+        assignee = {
+          name:String(employee.displayName || employee.name || employee.fullName || [employee.firstName,employee.lastName].filter(Boolean).join(" ") || employee.email || "Mechanic").trim(),
+          employeeNumber:String(employee.employeeNumber || employee.employeeNo || employee.empNo || employee.number || current.reportedByEmployeeId),
+          email:normalise(employee.email)
+        };
+      }
       tx.set(jobRef, {
         jobNumber, busId:current.busId || report.busId || "", fleetNumber:current.fleetNumber || current.busNumber || report.fleetNumber || report.busNumber || "", rego:current.rego || report.rego || "",
         jobType:document.getElementById("mechanicDefectJobType").value || "Defect Repair", priority:document.getElementById("mechanicDefectJobPriority").value || "Normal",
-        status:"Assigned", assignedMechanic:mechanic.name, assignedMechanicName:mechanic.name, assignedMechanicEmployeeNumber:mechanic.employeeNumber, assignedMechanicEmail:mechanic.email,
+        status:"Assigned", assignedMechanic:assignee.name, assignedMechanicName:assignee.name, assignedMechanicEmployeeNumber:assignee.employeeNumber, assignedMechanicEmail:assignee.email,
         dueDate:document.getElementById("mechanicDefectJobDue").value || "", source:current.source === "Mechanic" ? "Mechanic Defect" : "Driver Defect", sourceDefectId:report.id, sourceDefectNumber:current.reportNumber || report.reportNumber || "",
         defectCategory:current.category || report.category || "", defectPhotos:Array.isArray(current.photos) ? current.photos : [], reportedFault:fault,
         managerNotes:document.getElementById("mechanicDefectJobNotes").value.trim(), diagnosis:"", workCompleted:"", partsUsed:[], labourEntries:[], returnToServiceApproved:false,
@@ -123,7 +137,7 @@ async function createAndAssignJob(event) {
     window.pendingMechanicJobToOpen = null;
     message.className = "status error"; message.textContent = error?.message || "Unable to create the workshop job.";
   } finally {
-    submit.disabled = false; submit.textContent = "Create & Assign to Me";
+    submit.disabled = false; submit.textContent = report.source === "Mechanic" && report.reportedByEmployeeId ? "Create Job Card" : "Create & Assign to Me";
   }
 }
 
@@ -161,7 +175,7 @@ function render(reports) {
     const linkedJob = r.workshopJobId || r.workshopJobNumber;
     const action = linkedJob
       ? `<button class="button secondary mechanic-open-linked-job" type="button" data-linked-job="${esc(r.workshopJobId || "")}" ${r.workshopJobId ? "" : "disabled"}>${r.workshopJobId ? "Open Job Card" : `Job ${esc(r.workshopJobNumber)}`}</button>`
-      : `<button class="button primary mechanic-create-defect-job" type="button" data-create-defect-job="${esc(r.id)}">Create &amp; Assign to Me</button>`;
+      : `<button class="button primary mechanic-create-defect-job" type="button" data-create-defect-job="${esc(r.id)}">${r.source === "Mechanic" && r.reportedByEmployeeId ? "Create Job Card" : "Create &amp; Assign to Me"}</button>`;
     return `<article class="mechanic-defect-card ${unsafe ? "unsafe" : ""}">
       <div class="mechanic-defect-head">
         <div>

@@ -7,8 +7,17 @@ const categories = ["Accessibility Equipment", "Air Conditioning", "Body / Glass
 const byId = (id) => document.getElementById(id);
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 let fleet = [];
+let reportingMechanics = [];
 let busy = false;
 let dialogActor = null;
+
+const normalise = value => String(value || "").trim().toLowerCase();
+function reportingMechanicName(employee) {
+  return String(employee.displayName || employee.name || employee.fullName || [employee.firstName,employee.lastName].filter(Boolean).join(" ") || employee.email || "Mechanic").trim();
+}
+function reportingMechanicNumber(employee) {
+  return String(employee.employeeNumber || employee.employeeNo || employee.empNo || employee.number || employee.id || "").trim();
+}
 
 function currentMechanic() {
   const actor = window.currentWorkshopMechanic;
@@ -38,9 +47,10 @@ function ensureDialog() {
   dialog.id = "mechanicReportDialog";
   dialog.className = "dialog";
   dialog.innerHTML = `<form id="mechanicReportForm">
-    <div class="dialog-head"><div><h2>Report Defect</h2><p>Report a workshop fault and optionally create a job card for yourself.</p></div><button id="mechanicReportClose" type="button" class="icon-button" aria-label="Close report">×</button></div>
+    <div class="dialog-head"><div><h2>Report Defect</h2><p>Report a workshop fault and optionally create a job card for the selected mechanic.</p></div><button id="mechanicReportClose" type="button" class="icon-button" aria-label="Close report">×</button></div>
     <p id="mechanicReportActor" class="hint"></p>
     <div class="form-grid">
+      <label class="full">Reported by — mechanic<select id="mechanicReportReporter" required><option value="">Select mechanic</option></select><span class="hint">Select the person reporting this defect on the shared tablet.</span></label>
       <label>Defect date<input id="mechanicReportDate" type="date" required></label>
       <label>Bus<select id="mechanicReportBus" required><option value="">Select bus</option></select></label>
       <label>Category<select id="mechanicReportCategory" required><option value="">Select category</option>${categories.map(c=>`<option>${c}</option>`).join("")}</select></label>
@@ -66,19 +76,24 @@ async function openReport() {
   byId("mechanicReportForm").reset();
   byId("mechanicReportDate").value = byId("mechanicReportDate").max = today();
   byId("mechanicReportWarning").hidden = true;
-  byId("mechanicReportActor").textContent = `Reported by: ${actor.name} · ${actor.email}`;
+  byId("mechanicReportActor").textContent = `Signed-in account: ${actor.name} · ${actor.email}`;
   byId("mechanicReportBus").replaceChildren(new Option("Loading fleet…", ""));
+  byId("mechanicReportReporter").replaceChildren(new Option("Loading mechanics…", ""));
+  reportingMechanics = [];
   byId("mechanicReportDialog").showModal();
-  message("Loading fleet…");
+  message("Loading fleet and mechanics…");
   setBusy(true);
   try {
-    const snap = await getDocs(collection(db, "buses"));
+    const [snap, employees] = await Promise.all([getDocs(collection(db, "buses")), getDocs(collection(db, "employees"))]);
     requireActor(actor);
     fleet = snap.docs.map(d => ({ ...d.data(), id: d.id })).filter(b => String(b.status || "").trim().toLowerCase() !== "inactive");
     fleet.sort((a,b) => String(a.fleetNumber || a.id).localeCompare(String(b.fleetNumber || b.id), undefined, {numeric:true}));
     byId("mechanicReportBus").replaceChildren(new Option("Select bus", ""), ...fleet.map(b => new Option([b.fleetNumber || b.id, b.rego, b.depot].filter(Boolean).join(" · "), b.id)));
-    message(fleet.length ? "" : "No active buses found. Contact your Fleet Manager.");
-  } catch (error) { fleet = []; message(error.message || "Unable to load fleet. Close and try again.", true); }
+    reportingMechanics = employees.docs.map(d => ({...d.data(), id:d.id})).filter(e => normalise(e.status) === "active" && normalise(e.department) === "workshop" && normalise(e.role) === "mechanic");
+    reportingMechanics.sort((a,b) => reportingMechanicName(a).localeCompare(reportingMechanicName(b)) || reportingMechanicNumber(a).localeCompare(reportingMechanicNumber(b)));
+    byId("mechanicReportReporter").replaceChildren(new Option("Select mechanic", ""), ...reportingMechanics.map(e => new Option(`${reportingMechanicName(e)} · ${reportingMechanicNumber(e)}`, e.id)));
+    message(!fleet.length ? "No active buses found. Contact your Fleet Manager." : !reportingMechanics.length ? "No active workshop mechanics found. Contact your Fleet Manager." : "");
+  } catch (error) { fleet = []; reportingMechanics = []; message(error.message || "Unable to load fleet and mechanics. Close and try again.", true); }
   finally { setBusy(false); syncAccess(); }
 }
 
@@ -91,6 +106,8 @@ async function submitReport(event) {
   let saved = false;
   try {
     requireActor(actor);
+    const reporter = reportingMechanics.find(e => e.id === byId("mechanicReportReporter").value);
+    if (!reporter) throw new Error("Select the mechanic who is reporting this defect.");
     const bus = fleet.find(b => b.id === byId("mechanicReportBus").value);
     const date = byId("mechanicReportDate").value;
     const category = byId("mechanicReportCategory").value;
@@ -116,8 +133,11 @@ async function submitReport(event) {
       reportNumber:`DR-${date.replaceAll("-", "")}-${reportRef.id.slice(0,6).toUpperCase()}`,
       status:"New", priority:safeToDrive === "No" ? "Critical" : "Medium", defectDate:date, category, safeToDrive, description,
       busId:bus.id, fleetNumber:String(bus.fleetNumber || bus.id), rego:String(bus.rego || ""), depot:String(bus.depot || ""),
-      photos, photoCount:photos.length, source:"Mechanic", reportedByRole:"Workshop",
-      reportedByUid:actor.uid, reportedByEmail:actor.email, reportedByName:actor.name, reportedByEmployeeNumber:actor.employeeNumber || "",
+      photos, photoCount:photos.length, source:"Mechanic", reportedByRole:"Mechanic",
+      reportedByUid:actor.uid, reportedByEmail:actor.email, reportedByName:reportingMechanicName(reporter), reportedByEmployeeNumber:reportingMechanicNumber(reporter),
+      reportedByEmployeeId:reporter.id, reportedByEmployeeEmail:normalise(reporter.email),
+      reportedByIdentityMethod:"Selected on shared workshop account",
+      submittedByUid:actor.uid, submittedByEmail:actor.email, submittedByName:actor.name,
       reportedAtIso:new Date().toISOString(), adminNotes:"", deleted:false, createdAt:serverTimestamp(), updatedAt:serverTimestamp()
     };
     await setDoc(reportRef, report);
@@ -125,7 +145,7 @@ async function submitReport(event) {
     byId("mechanicReportDialog").close();
     const status = byId("status");
     status.className = "status success";
-    status.textContent = `Defect ${report.reportNumber} saved. ${createJob ? "Confirm the job card details to assign it to yourself." : "You can create its job card from Open Defect Reports."}`;
+    status.textContent = `Defect ${report.reportNumber} saved. ${createJob ? "Confirm the job card details for the selected mechanic." : "You can create its job card from Open Defect Reports."}`;
     if (createJob && currentMechanic()?.uid === actor.uid) window.dispatchEvent(new CustomEvent("mechanic-create-job-from-defect", {detail:{...report,id:reportRef.id}}));
   } catch (error) {
     if (!saved) await Promise.allSettled(uploaded.map(fileRef => deleteObject(fileRef)));

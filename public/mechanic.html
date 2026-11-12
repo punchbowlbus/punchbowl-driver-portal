@@ -74,7 +74,7 @@
         <div class="panel-head">
           <div>
             <h2>Open Defect Reports <span id="mechanicTodayDefectCount" class="badge info">0</span></h2>
-            <span class="hint">Open driver and mechanic defects are shown live. Create a job card and assign it to yourself when action is required.</span>
+            <span class="hint">Open driver and mechanic defects are shown live. Create a job card when action is required. Mechanic-reported defects carry the selected mechanic into the job card.</span>
           </div>
         </div>
         <div id="mechanicTodayDefects" class="mechanic-defect-list"><div class="empty">Loading open defect reports...</div></div>
@@ -229,8 +229,8 @@
 
   <script type="module" src="./js/mechanic_work_queue.js?v=20261007-stable-queue"></script>
   <script type="module" src="./js/mechanic_manager_return.js"></script>
-  <script type="module" src="./js/mechanic_driver_defects_today.js?v=20261112-mechanic-reports"></script>
-  <script type="module" src="./js/mechanic_defect_report.js?v=20261112"></script>
+  <script type="module" src="./js/mechanic_driver_defects_today.js?v=20261112-shared-mechanic"></script>
+  <script type="module" src="./js/mechanic_defect_report.js?v=20261112-shared-mechanic"></script>
   <script type="module" src="./js/mechanic_action_messages.js"></script>
   <script type="module" src="./js/mechanic_status_sync.js"></script>
   <script type="module" src="./js/mechanic_pre_rms.js"></script>
