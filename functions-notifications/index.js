@@ -258,12 +258,14 @@ function dutyChanged(before, after) {
 
 function classifyDutyNotifications(before, after) {
   const notifications = [];
+  // Deleted records are not visible work. Restoration is a fresh publication.
+  if (before?.deleted === true) before = null;
   const beforeDriver = String(before?.driverEmployeeNumber || "").trim();
   const afterDriver = String(after?.driverEmployeeNumber || "").trim();
   const beforeStatus = normalizedDutyStatus(before?.dispatchStatus);
   const afterStatus = normalizedDutyStatus(after?.dispatchStatus);
 
-  if (!after) {
+  if (!after || after.deleted === true) {
     if (beforeDriver && beforeStatus === "assigned") {
       notifications.push({
         employeeNumber: beforeDriver,
@@ -277,7 +279,6 @@ function classifyDutyNotifications(before, after) {
   }
 
   const driverChanged = Boolean(beforeDriver && beforeDriver !== afterDriver);
-  const removed = before?.deleted !== true && after?.deleted === true;
 
   if (driverChanged && beforeStatus === "assigned") {
     notifications.push({
@@ -291,18 +292,10 @@ function classifyDutyNotifications(before, after) {
 
   if (!afterDriver) return notifications;
 
-  if (removed && beforeStatus === "assigned") {
-    notifications.push({
-      employeeNumber: afterDriver,
-      eventType: "removed",
-      title: "Duty removed",
-      body: "This duty has been removed from your work.",
-      linkToDuty: false
-    });
-    return notifications;
-  }
-
-  if (afterStatus === "cancelled" && beforeStatus !== "cancelled") {
+  if (afterStatus === "cancelled") {
+    // A draft cancellation must not notify a driver who never received it.
+    // On simultaneous reassignment/cancellation only the old driver's removal applies.
+    if (beforeStatus !== "assigned" || driverChanged) return notifications;
     notifications.push({
       employeeNumber: afterDriver,
       eventType: "cancelled",
