@@ -61,3 +61,12 @@ test('retry classification excludes permanent invalid token and invalid payload 
  for(const code of ['messaging/server-unavailable','messaging/internal-error','messaging/quota-exceeded','app/network-error'])assert.equal(isRetryableMessagingError(code),true);
  for(const code of ['messaging/registration-token-not-registered','messaging/invalid-registration-token','messaging/invalid-argument','messaging/authentication-error'])assert.equal(isRetryableMessagingError(code),false);
 });
+test('retry exhaustion preserves partial device acceptance with accurate failure counts',async()=>{
+ const h=harness({send:async()=>({status:'retryable',employeeNumber:'963',acceptedDeviceCount:1,failedDeviceCount:0,deviceResults:[{deviceId:'1',status:'accepted'},{deviceId:'2',status:'retryable'}]})});
+ for(let i=0;i<5;i++){if(i)h.advance(1000000);if(i===4)await h.run();else await assert.rejects(h.run());}
+ const result=h.recipient()[0];assert.equal(result.status,'accepted');assert.equal(result.acceptedDeviceCount,1);assert.equal(result.failedDeviceCount,1);assert.equal(result.reason,'retry-limit');
+});
+test('stale retry preserves previously accepted devices while skipping remaining devices',async()=>{
+ const h=harness({send:async()=>({status:'retryable',employeeNumber:'963',acceptedDeviceCount:1,deviceResults:[{deviceId:'1',status:'accepted'},{deviceId:'2',status:'retryable'}]})});
+ await assert.rejects(h.run());h.advance(1000000);h.records.set('dutySpans/duty-1',{...duty,dispatchStatus:'Cancelled'});await h.run();const result=h.recipient()[0];assert.equal(result.status,'accepted');assert.equal(result.acceptedDeviceCount,1);assert.equal(result.skippedDeviceCount,1);assert.equal(h.calls.length,1);
+});

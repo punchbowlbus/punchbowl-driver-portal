@@ -2,7 +2,7 @@ const configs={duty:{collection:'dutyNotificationDeliveries',times:['updatedAt',
 const number=v=>Number.isFinite(Number(v))?Math.max(0,Number(v)):0;
 function millis(v){if(v?.toMillis)return v.toMillis();if(v?.toDate)return v.toDate().getTime();const n=typeof v==='number'?v:Date.parse(v);return Number.isFinite(n)?n:0;}
 function resultStatus(result,parent){
- if(['accepted','sent'].includes(result.status))return number(result.failedDeviceCount)>0?'partial':'accepted';
+ if(['accepted','sent'].includes(result.status))return (number(result.failedDeviceCount)>0||number(result.skippedDeviceCount)>0)?'partial':'accepted';
  if(parent.status==='expired')return 'expired';
  return {retryable:'retrying',processing:'processing',failed:'failed',skipped:'skipped'}[result.status]||(parent.status==='pending-retry'?'retrying':parent.status==='processing'?'processing':'unknown');
 }

@@ -71,7 +71,7 @@ function createDutyDeliveryHandler({db, FieldValue, classify, send, isRelevant =
         const attempts = (previous.attempts || 0) + 1;
         if (!parent.exists) tx.set(logRef, {createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),eventId:event.id,dutySpanId:event.params.dutySpanId,dutyNumber:String(duty.dutyNumber||''),serviceDate:String(duty.serviceDate||duty.date||''),eventTypes:notifications.map(n=>n.eventType),recipientEmployeeNumbers:notifications.map(n=>n.employeeNumber),status:'processing'}, {merge:true});
         tx.set(recipientRef, {status:'processing', attempts, firstAttemptAt:previous.firstAttemptAt ?? currentTime, leaseUntil:currentTime + LEASE_MS, owner, employeeNumber:notification.employeeNumber, eventType:notification.eventType});
-        return {attempts};
+        return {attempts, previousDevices:previous.deviceResults || []};
       });
       if (claim.result) { results.push(claim.result); continue; }
       if (claim.busy) { pending = true; continue; }
@@ -87,7 +87,14 @@ function createDutyDeliveryHandler({db, FieldValue, classify, send, isRelevant =
         result = {status:'retryable', errorCode:String(error?.code || 'delivery-check-failed'), employeeNumber:notification.employeeNumber};
       }
       result = {...result, eventType:notification.eventType};
-      if (result.status === 'retryable' && claim.attempts >= MAX_ATTEMPTS) result = {...result,status:'failed',reason:'retry-limit'};
+      if (result.status === 'skipped' && claim.previousDevices.some(device=>device.status==='accepted')) {
+        const deviceResults=claim.previousDevices.map(device=>device.status==='retryable'?{...device,status:'skipped',reason:result.reason}:device);
+        result={...result,status:'accepted',deviceResults,acceptedDeviceCount:deviceResults.filter(d=>d.status==='accepted').length,failedDeviceCount:deviceResults.filter(d=>d.status==='failed').length,skippedDeviceCount:deviceResults.filter(d=>d.status==='skipped').length};
+      }
+      if (result.status === 'retryable' && claim.attempts >= MAX_ATTEMPTS) {
+        const deviceResults=result.deviceResults?.map(device=>device.status==='retryable'?{...device,status:'failed',reason:'retry-limit'}:device);
+        result={...result,status:result.acceptedDeviceCount>0?'accepted':'failed',reason:'retry-limit',...(deviceResults?{deviceResults,failedDeviceCount:deviceResults.filter(d=>d.status==='failed').length}:{})};
+      }
       const finalized = await db.runTransaction(async tx => {
         const snapshot = await tx.get(recipientRef);
         if (!snapshot.exists || snapshot.data().owner !== owner) return false;
