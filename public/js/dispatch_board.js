@@ -34,7 +34,13 @@ export function renderDispatchBoardPage() {
     return `${y}-${m}-${d}`;
   }
 
-  const today = state.dispatchDate || getLocalTodayStr();
+  let dispatchPreferences = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem("dispatch-preferences") || "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) dispatchPreferences = saved;
+  } catch {}
+  const savedDate = /^\d{4}-\d{2}-\d{2}$/.test(dispatchPreferences.date || "") ? dispatchPreferences.date : "";
+  const today = state.dispatchDate || savedDate || getLocalTodayStr();
   state.dispatchDate = null; // consume it
 
 els.contentArea.innerHTML = `
@@ -183,6 +189,8 @@ function setDetailPanelCollapsed(collapsed) {
   rightPanel.classList.toggle("collapsed", collapsed);
   mainWorkArea.classList.toggle("details-collapsed", collapsed);
   detailPanelEl.hidden = collapsed;
+  dispatchPreferences.detailsCollapsed = collapsed;
+  saveDispatchPreferences();
   const label = collapsed ? "Open duty details" : "Close duty details";
   toggleDetailPanelBtn.title = label;
   toggleDetailPanelBtn.setAttribute("aria-label", label);
@@ -227,7 +235,20 @@ let selectedBlockId = "";
 let unassignedDensity = "compact";
 let lastOpenUnassignedDensity = "compact";
 let messageTimer = null;
-const selectedDriverEmpNos = new Set();
+const selectedDriverEmpNos = new Set(Array.isArray(dispatchPreferences.drivers) ? dispatchPreferences.drivers.filter(value => typeof value === "string") : []);
+if (["name", "empno", "type_name", "start_time"].includes(dispatchPreferences.sort)) driverSortByEl.value = dispatchPreferences.sort;
+if (["all", "working", "on_leave", "no_jobs"].includes(dispatchPreferences.view)) driverViewFilterEl.value = dispatchPreferences.view;
+
+function saveDispatchPreferences() {
+  dispatchPreferences = {
+    ...dispatchPreferences,
+    date: getSelectedDate(),
+    sort: driverSortByEl.value,
+    view: driverViewFilterEl.value,
+    drivers: [...selectedDriverEmpNos]
+  };
+  try { localStorage.setItem("dispatch-preferences", JSON.stringify(dispatchPreferences)); } catch {}
+}
 
   const SLOT_MINUTES = 15;
   const TOTAL_SLOTS = 144;
@@ -1994,6 +2015,7 @@ function renderNowLine() {
     return "#3b82f6"; // pending = blue
   }
 function renderDrivers() {
+  saveDispatchPreferences();
   const activeDrivers = getActiveDrivers();
 
   driversListEl.innerHTML = activeDrivers
@@ -3359,7 +3381,8 @@ function loadDispatchForDate(selectedDate, { openPanel = false } = {}) {
     return;
   }
 
-  sessionStorage.setItem("dispatchDate", selectedDate);
+  try { sessionStorage.setItem("dispatchDate", selectedDate); } catch {}
+  saveDispatchPreferences();
   showError("");
 
   if (unassignedJobsDateLabelEl) {
@@ -3500,6 +3523,8 @@ if (nowLineTimer) {
 nowLineTimer = setInterval(() => {
   renderNowLine();
 }, 60000);
+
+setDetailPanelCollapsed(dispatchPreferences.detailsCollapsed === true);
 
 const savedBoardView = localStorage.getItem("dispatch-board-view") || "standard";
 boardViewModeEl.value = savedBoardView === "fullscreen" ? "standard" : savedBoardView;
