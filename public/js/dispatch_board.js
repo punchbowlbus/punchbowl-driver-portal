@@ -134,7 +134,7 @@ els.contentArea.innerHTML = `
 
       <aside id="dispatchRightPanel" class="dispatch-detail-panel">
         <div class="dispatch-panel-heading dispatch-detail-heading">
-          <button id="toggleDetailPanelBtn" type="button" class="dispatch-icon-btn" title="Hide details">›</button>
+          <button id="toggleDetailPanelBtn" type="button" class="dispatch-detail-toggle" title="Close duty details" aria-label="Close duty details" aria-expanded="true" aria-controls="dispatchDetailPanel"><span class="dispatch-detail-toggle-arrow" aria-hidden="true">›</span><span class="dispatch-detail-toggle-label" aria-hidden="true">Duty details</span></button>
           <span id="dispatchRightPanelTitle">Driver / Duty Details</span>
         </div>
         <div id="dispatchDetailPanel"><div class="dispatch-empty-state">Select a driver or numbered job to view details.</div></div>
@@ -176,25 +176,23 @@ const pageMessageEl = document.getElementById("dispatchPageMessage");
 const visibleDriverCountEl = document.getElementById("visibleDriverCount");
 const toggleDetailPanelBtn = document.getElementById("toggleDetailPanelBtn");
 
-toggleDetailPanelBtn.onclick = () => {
+function setDetailPanelCollapsed(collapsed) {
   const mainWorkArea = document.getElementById("dispatchMainWorkArea");
-  const rightPanel = detailPanelEl.parentElement;
+  const rightPanel = document.getElementById("dispatchRightPanel");
+  if (!mainWorkArea || !rightPanel || !detailPanelEl) return;
+  rightPanel.classList.toggle("collapsed", collapsed);
+  mainWorkArea.classList.toggle("details-collapsed", collapsed);
+  detailPanelEl.hidden = collapsed;
+  const label = collapsed ? "Open duty details" : "Close duty details";
+  toggleDetailPanelBtn.title = label;
+  toggleDetailPanelBtn.setAttribute("aria-label", label);
+  toggleDetailPanelBtn.setAttribute("aria-expanded", String(!collapsed));
+  toggleDetailPanelBtn.querySelector(".dispatch-detail-toggle-arrow").textContent = collapsed ? "‹" : "›";
+}
 
-  if (!mainWorkArea || !rightPanel) return;
-
-  if (detailPanelEl.style.display === "none") {
-    detailPanelEl.style.display = "block";
-    rightPanel.classList.remove("collapsed");
-    mainWorkArea.classList.remove("details-collapsed");
-    toggleDetailPanelBtn.textContent = "›";
-    toggleDetailPanelBtn.title = "Hide details";
-  } else {
-    detailPanelEl.style.display = "none";
-    rightPanel.classList.add("collapsed");
-    mainWorkArea.classList.add("details-collapsed");
-    toggleDetailPanelBtn.textContent = "‹";
-    toggleDetailPanelBtn.title = "Show details";
-  }
+toggleDetailPanelBtn.onclick = () => {
+  const rightPanel = document.getElementById("dispatchRightPanel");
+  setDetailPanelCollapsed(!rightPanel?.classList.contains("collapsed"));
 };
 
 const unassignedJobsPanelEl = document.getElementById("unassignedJobsPanel");

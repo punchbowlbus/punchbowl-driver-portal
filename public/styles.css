@@ -5624,7 +5624,15 @@ button.btn.danger[data-remove-multi-return]:hover {
 #dispatchTimelineHeader { position:sticky; top:0; z-index:30; height:30px; background:#fff; border-bottom:1px solid #cbd5e1; }
 #dispatchTimelineOuter.is-panning { cursor: grabbing; user-select: none; }
 .dispatch-detail-panel.collapsed #dispatchRightPanelTitle { display: none; }
-.dispatch-detail-panel.collapsed .dispatch-detail-heading { justify-content: center; padding: 0; }
+.dispatch-detail-panel.collapsed .dispatch-detail-heading { justify-content:center; align-items:flex-start; height:auto; flex:1 1 auto; padding:5px 3px; border-bottom:0; }
+.dispatch-detail-toggle { display:inline-flex; align-items:center; justify-content:center; gap:10px; min-width:44px; min-height:44px; padding:6px; border:1px solid #cbd5e1; border-radius:9px; background:#fff; color:#334155; cursor:pointer; flex-shrink:0; }
+.dispatch-detail-toggle:hover { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; }
+.dispatch-detail-toggle:focus-visible { outline:3px solid #60a5fa; outline-offset:2px; }
+.dispatch-detail-toggle-arrow { font-size:24px; line-height:1; }
+.dispatch-detail-toggle-label { display:none; }
+.dispatch-detail-panel.collapsed .dispatch-detail-toggle { flex-direction:column; padding:10px 6px; }
+.dispatch-detail-panel.collapsed .dispatch-detail-toggle-label { display:block; writing-mode:vertical-rl; font-size:12px; font-weight:700; letter-spacing:.03em; }
+.dispatch-detail-heading { min-height:54px; flex-basis:54px; }
 .dispatch-detail-panel.collapsed #dispatchDetailPanel { display: none !important; }
 .dispatch-numbered-job { cursor: pointer; }
 .dispatch-numbered-job.selected { outline: 3px solid #111827; outline-offset: 2px; z-index: 9 !important; }
