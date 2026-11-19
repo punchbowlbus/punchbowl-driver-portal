@@ -11,6 +11,7 @@ import {
   transferDutySpanWithBlocks,
   deleteDutySpan,
   updateDutySpanDispatchStatus,
+  updateDutySpanStatusesBulk,
   updateBlock
 } from "./db.js";
 
@@ -20,6 +21,10 @@ import { calculateFatigue, fatigueStatusLabel } from "./dispatch_fatigue.js";
 import { scheduleCoverage, refreshRosterFatigue } from "./fatigue_schedule.js";
 import { assignBlockToDriver } from "./dispatch_assignments.js";
 import { unassignBlockFromDriver } from "./dispatch_assignments.js";
+
+import { buildBulkStatusPlan, bulkStatusFingerprint } from "./dispatch_bulk_status.js";
+
+import { dutyCopyPayload, dutyCopyRosterFingerprint, dutyCopyOverlaps } from "./dispatch_duty_copy.js";
 
 let nowLineTimer = null;
 
@@ -89,6 +94,15 @@ els.contentArea.innerHTML = `
     <div id="dispatchOperationalSummary" class="dispatch-summary-grid" aria-live="polite"></div>
     <div id="dispatchPageMessage" class="dispatch-page-message" hidden role="status"></div>
 
+    <section class="dispatch-bulk-bar" aria-label="Bulk duty status">
+      <label class="dispatch-bulk-select"><input id="bulkSelectAll" type="checkbox" /> Select all shown</label>
+      <strong id="bulkStatusCount" role="status">No drivers selected</strong>
+      <button id="bulkStatusClear" type="button" class="dispatch-quiet-btn">Clear</button>
+      <label>Change status <select id="bulkStatusTarget"><option value="Assigned">Assigned</option><option value="Pending">Pending</option><option value="Cancelled">Cancelled</option></select></label>
+      <button id="bulkStatusReview" type="button" class="dispatch-primary-btn" disabled>Review changes</button>
+      <small>Selected date only · all duty spans for selected drivers · no jobs or buses are allocated</small>
+    </section>
+
     <section id="unassignedJobsPanel" class="dispatch-unassigned-panel compact">
       <div class="dispatch-unassigned-head">
         <button id="toggleUnassignedJobsBtn" class="dispatch-unassigned-title" type="button" aria-expanded="true" aria-controls="unassignedJobsAxisRow">
@@ -129,7 +143,7 @@ els.contentArea.innerHTML = `
       </section>
 
       <section class="dispatch-timeline-panel">
-        <div class="dispatch-panel-heading"><span>Timeline</span><small>Drag empty space to move the board</small></div>
+        <div class="dispatch-panel-heading"><span>Timeline</span><small>Drag duty to transfer · Ctrl + drag to copy</small></div>
         <div id="dispatchTimelineOuter">
           <div id="dispatchTimelineInner">
             <div id="dispatchTimelineHeader"></div>
@@ -225,12 +239,17 @@ let dutySpansCache = [];
 let fatigueRosterCache = [];
 let jobGroupsCache = [];
 let selectedDriverEmpNo = "";
+const bulkSelectedDrivers = new Set();
+let bulkStatusBusy = false;
+let bulkFilterSignature = "";
+let bulkReviewVersion = 0;
 let slotWidth = 10;
 let unsubscribeDutySpans = null;
 let unsubscribeBlocks = null;
 let blocksCache = [];
 let draggedBlockId = "";
 let draggedDutySpanId = "";
+let dutyCopyBusy = false;
 let selectedBlockId = "";
 let unassignedDensity = "compact";
 let lastOpenUnassignedDensity = "compact";
@@ -2017,6 +2036,14 @@ function renderNowLine() {
 function renderDrivers() {
   saveDispatchPreferences();
   const activeDrivers = getActiveDrivers();
+  const filterSignature = JSON.stringify([getSelectedDate(), driverViewFilterEl.value, [...selectedDriverEmpNos].sort()]);
+  if (bulkFilterSignature !== filterSignature) {
+    bulkSelectedDrivers.clear();
+    bulkReviewVersion++;
+    bulkFilterSignature = filterSignature;
+  }
+  const eligible = new Set(activeDrivers.filter(d => getDriverDutySpans(d.employeeNumber).some(s => !s.deleted)).map(d => String(d.employeeNumber)));
+  for (const empNo of bulkSelectedDrivers) if (!eligible.has(empNo)) bulkSelectedDrivers.delete(empNo);
 
   driversListEl.innerHTML = activeDrivers
     .map((d) => {
@@ -2043,6 +2070,7 @@ function renderDrivers() {
             overflow:hidden;
           "
         >
+          <input type="checkbox" class="dispatch-bulk-row-check" data-bulk-driver="${escapeHtml(d.employeeNumber || "")}" aria-label="Select duties for ${escapeHtml(d.displayName || d.employeeNumber || "Driver")}" ${bulkSelectedDrivers.has(String(d.employeeNumber)) ? "checked" : ""} ${!hasSpan || bulkStatusBusy ? "disabled" : ""} />
           <div style="width:100%; min-width:0; overflow:hidden;">
             <div style="
               font-weight:700;
@@ -2065,7 +2093,7 @@ function renderDrivers() {
             ">
               <select
                 data-dispatch-status="${escapeHtml(d.employeeNumber || "")}"
-                ${hasSpan ? "" : "disabled"}
+                ${hasSpan && !bulkStatusBusy ? "" : "disabled"}
                 style="
                   height:16px;
                   width:52px;
@@ -2111,6 +2139,7 @@ function renderDrivers() {
   setupDutySpanDragEvents();
   attachNumberedJobEvents(activeDrivers);
   attachDispatchStatusEvents();
+  attachBulkStatusControls(activeDrivers);
   if (visibleDriverCountEl) visibleDriverCountEl.textContent = `${activeDrivers.length} shown`;
   renderOperationalSummary();
   renderNowLine();
@@ -2191,12 +2220,81 @@ function renderTimelineRows(drivers) {
     .join("");
 }
 
+function currentBulkPlan() {
+  return buildBulkStatusPlan(getActiveDrivers(), dutySpansCache, bulkSelectedDrivers, getSelectedDate(), document.getElementById("bulkStatusTarget").value);
+}
+function attachBulkStatusControls(drivers) {
+  const all = document.getElementById("bulkSelectAll");
+  const target = document.getElementById("bulkStatusTarget");
+  const review = document.getElementById("bulkStatusReview");
+  const clear = document.getElementById("bulkStatusClear");
+  const eligible = drivers.filter(d => getDriverDutySpans(d.employeeNumber).some(s => !s.deleted));
+  const plan = currentBulkPlan();
+  all.checked = eligible.length > 0 && eligible.every(d => bulkSelectedDrivers.has(String(d.employeeNumber)));
+  all.indeterminate = bulkSelectedDrivers.size > 0 && !all.checked;
+  all.disabled = bulkStatusBusy || !eligible.length;
+  target.disabled = bulkStatusBusy;
+  clear.disabled = bulkStatusBusy || !bulkSelectedDrivers.size;
+  review.disabled = bulkStatusBusy || !plan.changes.length || plan.changes.length > 400;
+  document.getElementById("bulkStatusCount").textContent = bulkStatusBusy ? "Updating duty statuses…" : `${bulkSelectedDrivers.size} drivers selected · ${plan.entries.length} duty spans · ${plan.changes.length} to change`;
+  driversListEl.querySelectorAll("[data-bulk-driver]").forEach(input => {
+    input.onclick = event => event.stopPropagation();
+    input.onchange = () => {
+      if (input.checked) bulkSelectedDrivers.add(input.dataset.bulkDriver); else bulkSelectedDrivers.delete(input.dataset.bulkDriver);
+      bulkReviewVersion++;
+      renderDrivers();
+    };
+  });
+  all.onchange = () => {
+    bulkSelectedDrivers.clear();
+    if (all.checked) eligible.forEach(d => bulkSelectedDrivers.add(String(d.employeeNumber)));
+    bulkReviewVersion++;
+    renderDrivers();
+  };
+  clear.onclick = () => { bulkSelectedDrivers.clear(); bulkReviewVersion++; renderDrivers(); };
+  target.onchange = () => { bulkReviewVersion++; attachBulkStatusControls(getActiveDrivers()); };
+  review.onclick = reviewBulkStatusChanges;
+}
+async function reviewBulkStatusChanges() {
+  if (bulkStatusBusy) return;
+  const plan = currentBulkPlan();
+  if (!plan.changes.length || plan.changes.length > 400) return;
+  const version = bulkReviewVersion;
+  const fingerprint = bulkStatusFingerprint(plan);
+  const rows = plan.changes.map(entry => `<tr><td>${escapeHtml(entry.name)}</td><td>${escapeHtml(minToTimeStr(entry.startMin))}–${escapeHtml(minToTimeStr(entry.endMin))}</td><td>${escapeHtml(entry.previousStatus)} → ${escapeHtml(plan.status)}</td></tr>`).join("");
+  const warning = plan.status === "Cancelled" ? "Duties will be cancelled. Assigned jobs are not deleted or reassigned. Driver responses reset to Pending." : plan.status === "Pending" ? "Pending duties are hidden from the driver work list. Driver responses reset to Pending." : "Assigned duties become visible to drivers. Existing driver responses are preserved.";
+  const ok = await confirmDispatchAction({
+    title: "Review duty status changes",
+    message: `<p><strong>${escapeHtml(plan.date)}</strong> · ${new Set(plan.changes.map(e => e.employeeNumber)).size} drivers · ${plan.changes.length} duty spans to change</p><div class="dispatch-bulk-review"><table><thead><tr><th>Driver</th><th>Duty time</th><th>Status change</th></tr></thead><tbody>${rows}</tbody></table></div><p>${plan.skipped} duties already at ${escapeHtml(plan.status)} will be skipped. Drivers without duties are excluded.</p><div class="dispatch-confirm-warning">${warning}</div>`,
+    confirmLabel: `Confirm ${plan.status === "Cancelled" ? "cancellation" : plan.status === "Assigned" ? "assignment" : "Pending status"}`,
+    tone: plan.status === "Cancelled" ? "danger" : "primary"
+  });
+  if (!ok) return;
+  if (version !== bulkReviewVersion || fingerprint !== bulkStatusFingerprint(currentBulkPlan())) {
+    showPageMessage("The selection or duties changed. No changes were made. Review again.", "error", 7000);
+    return;
+  }
+  bulkStatusBusy = true;
+  renderDrivers();
+  try {
+    await updateDutySpanStatusesBulk(plan.changes, plan.status, plan.date);
+    bulkSelectedDrivers.clear();
+    showPageMessage(`${plan.changes.length} duty statuses updated to ${plan.status}.`, "success", 6000);
+  } catch (error) {
+    showPageMessage(error?.message || "Bulk update failed. No statuses were changed.", "error", 8000);
+  } finally {
+    bulkStatusBusy = false;
+    renderDrivers();
+  }
+}
+
 function attachDispatchStatusEvents() {
   const controls = driversListEl.querySelectorAll("[data-dispatch-status]");
 
   controls.forEach((selectEl) => {
     selectEl.onchange = async (e) => {
       e.stopPropagation();
+      if (bulkStatusBusy) return;
 
       const empNo = String(selectEl.getAttribute("data-dispatch-status") || "");
       const nextStatus = String(selectEl.value || "Pending");
@@ -2295,7 +2393,8 @@ function attachDriverRowEvents(activeDrivers) {
           Number(span.startMin || 0),
           Number(span.endMin || 0)
         );
-        setTimelineRowDropState(driverEmpNo, conflict ? "overlap" : "valid");
+        e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
+        setTimelineRowDropState(driverEmpNo, conflict ? "overlap" : e.ctrlKey ? "copy" : "valid");
         return;
       }
 
@@ -2324,7 +2423,8 @@ function attachDriverRowEvents(activeDrivers) {
       if (dutySpanId) {
         draggedDutySpanId = "";
         clearAllTimelineRowDropStates();
-        await transferDutySpanToDriver(dutySpanId, targetDriverEmpNo);
+        if (e.ctrlKey) await copyDutySpanToDriver(dutySpanId, targetDriverEmpNo);
+        else await transferDutySpanToDriver(dutySpanId, targetDriverEmpNo);
         return;
       }
 
@@ -3141,6 +3241,7 @@ function clearAllTimelineRowDropStates() {
     const empNo = row.getAttribute("data-timeline-row") || "";
     const isSelected = String(selectedDriverEmpNo) === String(empNo);
     row.style.background = isSelected ? "#eef6ff" : "#fff";
+    row.removeAttribute("data-duty-drop-label");
   });
 }
 
@@ -3152,7 +3253,11 @@ function setTimelineRowDropState(empNo, state = "") {
 
   if (!row) return;
 
-  if (state === "overlap") {
+  row.removeAttribute("data-duty-drop-label");
+  if (state === "copy") {
+    row.style.background = "#dbeafe";
+    row.setAttribute("data-duty-drop-label", "+ Copy duty");
+  } else if (state === "overlap") {
     row.style.background = "#fee2e2";
   } else if (state === "valid") {
     row.style.background = "#dcfce7";
@@ -3273,13 +3378,59 @@ async function transferDutySpanToDriver(spanId, targetEmpNo) {
   }
 }
 
+async function copyDutySpanToDriver(spanId, targetEmpNo) {
+  if (dutyCopyBusy) return;
+  dutyCopyBusy = true;
+  try {
+    const source = dutySpansCache.find(s => String(s.id) === String(spanId));
+    const target = employeesCache.find(d => String(d.employeeNumber) === String(targetEmpNo));
+    if (!source || !target || source.deleted || source.serviceDate !== getSelectedDate()) throw new Error("Source duty or target driver is no longer available.");
+    if (String(source.driverEmployeeNumber) === String(targetEmpNo)) return;
+    if (String(target.role || "").toLowerCase().trim() !== "driver" || ["inactive", "on leave", "leave", "unavailable"].includes(String(target.status || "").toLowerCase().trim())) throw new Error("This driver is inactive, unavailable or on leave and cannot receive a copy.");
+    const readTargetRoster = async () => (await Promise.all(Array.from({length:34},(_,index)=>index-31).map(offset => getDutySpansByDriverAndDate(targetEmpNo, shiftServiceDate(source.serviceDate,offset))))).flat().filter(s => !s.deleted);
+    const roster = await readTargetRoster();
+    if (dutyCopyOverlaps(source, roster)) throw new Error("Copy blocked: the target driver already has an overlapping duty span.");
+    const candidateId = "duty-copy-preview";
+    const initialFatigue = calculateFatigue({startMin:source.startMin,endMin:source.endMin,breaks:source.breaks || [],fatigueCategory:target.fatigueCategory || "Unknown"});
+    const candidate = {...dutyCopyPayload(source,target,initialFatigue),id:candidateId};
+    const reviewed = refreshRosterFatigue([...roster,candidate],employeesCache,scheduleCoverage(source.serviceDate)).find(s => s.id === candidateId);
+    if (!reviewed) throw new Error("Unable to check the target driver's fatigue. No copy was created.");
+    const payload = dutyCopyPayload(source,target,{...initialFatigue,fatigueStatus:reviewed.fatigueStatus,fatigueWarning:reviewed.fatigueWarning});
+    const sourceFingerprint = JSON.stringify(source);
+    const rosterFingerprint = dutyCopyRosterFingerprint(roster);
+    const confirmed = await confirmDispatchAction({
+      title: "Copy duty to another driver",
+      message: `<p>Create a new copy for <strong>${escapeHtml(payload.driverName)}</strong> on <strong>${escapeHtml(payload.serviceDate)}</strong>?</p><div class="dispatch-confirm-grid"><span>Duty</span><strong>${escapeHtml(payload.dutyNumber || payload.dutyType)}</strong><span>Time</span><strong>${minToTimeStr(payload.startMin)}–${minToTimeStr(payload.endMin)}</strong></div><p>Times, locations, route details and breaks are copied. The new duty starts as <strong>Pending</strong>, with no bus and no assigned jobs. The original duty and its jobs stay with the original driver.</p>${payload.fatigueStatus !== "OK" ? `<div class="dispatch-confirm-warning">Scheduled fatigue review: ${escapeHtml(payload.fatigueWarning || "Review the duty and surrounding roster before assigning.")}</div>` : ""}`,
+      confirmLabel: "Create Pending Copy",
+      tone: payload.fatigueStatus === "OK" ? "primary" : "danger"
+    });
+    if (!confirmed) return;
+    // Refuse stale reviews rather than create a different copy from the one reviewed.
+    const latestRoster = await readTargetRoster();
+    const latestSource = (await getDutySpansByDriverAndDate(source.driverEmployeeNumber,source.serviceDate)).find(s => String(s.id) === String(spanId) && !s.deleted);
+    const sourceCopy = s => JSON.stringify(dutyCopyPayload(s,target,initialFatigue));
+    const currentTarget = employeesCache.find(d => String(d.employeeNumber) === String(targetEmpNo));
+    if (getSelectedDate() !== source.serviceDate || !latestSource || sourceCopy(latestSource) !== sourceCopy(source) ||
+        !currentTarget || JSON.stringify(currentTarget) !== JSON.stringify(target) ||
+        dutyCopyRosterFingerprint(latestRoster) !== rosterFingerprint ||
+        JSON.stringify(dutySpansCache.find(s => String(s.id) === String(spanId))) !== sourceFingerprint) throw new Error("The source duty or target roster changed. No copy was created. Review again.");
+    await addDutySpan(payload);
+    selectedDriverEmpNo = String(targetEmpNo);
+    showPageMessage(`Pending duty copied to ${payload.driverName}. Original duty, bus and jobs were not changed.`, "success", 7000);
+  } catch (error) {
+    showPageMessage(error?.message || "Unable to copy the duty.", "error", 7500);
+  } finally {
+    dutyCopyBusy = false;
+  }
+}
+
 function setupDutySpanDragEvents() {
   timelineBodyEl.querySelectorAll("[data-duty-span-bar]").forEach((bar) => {
     bar.ondragstart = (event) => {
       draggedDutySpanId = bar.dataset.dutySpanBar || "";
       draggedBlockId = "";
       event.dataTransfer.setData("dutySpanId", draggedDutySpanId);
-      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.effectAllowed = "copyMove";
       bar.classList.add("dragging");
     };
     bar.ondragend = () => {
