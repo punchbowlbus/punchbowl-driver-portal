@@ -85,8 +85,8 @@ els.contentArea.innerHTML = `
 
     <section id="unassignedJobsPanel" class="dispatch-unassigned-panel compact">
       <div class="dispatch-unassigned-head">
-        <button id="toggleUnassignedJobsBtn" class="dispatch-unassigned-title" type="button" aria-expanded="true">
-          <span class="dispatch-unassigned-chevron">⌄</span>
+        <button id="toggleUnassignedJobsBtn" class="dispatch-unassigned-title" type="button" aria-expanded="true" aria-controls="unassignedJobsAxisRow">
+          <span class="dispatch-unassigned-chevron" aria-hidden="true">⌄</span>
           <span>Unassigned Work</span>
           <strong id="unassignedJobsCount">0</strong>
         </button>
@@ -104,7 +104,7 @@ els.contentArea.innerHTML = `
           <span id="unassignedJobsDateLabel" class="dispatch-unassigned-date">${today}</span>
         </div>
       </div>
-      <div class="dispatch-unassigned-axis-row">
+      <div id="unassignedJobsAxisRow" class="dispatch-unassigned-axis-row">
         <div id="unassignedJobsGutter" class="dispatch-unassigned-gutter" aria-hidden="true">
           <div class="dispatch-unassigned-gutter-header">Unassigned</div>
           <div id="unassignedJobsGroupLabels" class="dispatch-unassigned-group-labels"></div>
@@ -227,6 +227,7 @@ let draggedBlockId = "";
 let draggedDutySpanId = "";
 let selectedBlockId = "";
 let unassignedDensity = "compact";
+let lastOpenUnassignedDensity = "compact";
 let messageTimer = null;
 const selectedDriverEmpNos = new Set();
 
@@ -2493,12 +2494,16 @@ function getUnassignedDisplayCode(block) {
 }
 
 function setUnassignedPanelState(state = "compact") {
+  state = ["collapsed", "compact", "expanded"].includes(state) ? state : "compact";
   unassignedDensity = state;
+  if (state !== "collapsed") lastOpenUnassignedDensity = state;
   if (!unassignedJobsPanelEl) return;
   unassignedJobsPanelEl.classList.remove("collapsed", "compact", "expanded");
   unassignedJobsPanelEl.classList.add(state);
   toggleUnassignedJobsBtn?.setAttribute("aria-expanded", String(state !== "collapsed"));
-  if (unassignedDensityBtn) unassignedDensityBtn.textContent = state === "expanded" ? "Compact" : "Expand";
+  const chevron = toggleUnassignedJobsBtn?.querySelector(".dispatch-unassigned-chevron");
+  if (chevron) chevron.textContent = state === "collapsed" ? "›" : "⌄";
+  if (unassignedDensityBtn) unassignedDensityBtn.textContent = state === "collapsed" ? "Show" : state === "expanded" ? "Compact" : "Expand";
   try { localStorage.setItem("dispatch-unassigned-density", state); } catch {}
   renderUnassignedJobs(blocksCache, getSelectedDate());
 }
@@ -3430,10 +3435,10 @@ document.addEventListener("fullscreenchange", () => {
 });
 
 toggleUnassignedJobsBtn.onclick = () => {
-  setUnassignedPanelState(unassignedDensity === "collapsed" ? "compact" : "collapsed");
+  setUnassignedPanelState(unassignedDensity === "collapsed" ? lastOpenUnassignedDensity : "collapsed");
 };
 unassignedDensityBtn.onclick = () => {
-  setUnassignedPanelState(unassignedDensity === "expanded" ? "compact" : "expanded");
+  setUnassignedPanelState(unassignedDensity === "collapsed" ? lastOpenUnassignedDensity : unassignedDensity === "expanded" ? "compact" : "expanded");
 };
 unassignedJobsSearchEl.oninput = () => renderUnassignedJobs(blocksCache, getSelectedDate());
 unassignedJobsTimeFilterEl.onchange = () => renderUnassignedJobs(blocksCache, getSelectedDate());

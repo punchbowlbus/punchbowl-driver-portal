@@ -5567,8 +5567,8 @@ button.btn.danger[data-remove-multi-return]:hover {
 .dispatch-unassigned-group-label strong { overflow:hidden; color:#172033; font-size:12px; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; }
 .dispatch-unassigned-group-label span { overflow:hidden; color:#64748b; font-size:10px; font-weight:700; text-overflow:ellipsis; white-space:nowrap; }
 .dispatch-unassigned-body,.dispatch-unassigned-scroll { min-width:0; overflow:auto; overscroll-behavior:contain; scrollbar-color:#aeb8c7 transparent; }
-.dispatch-unassigned-panel.collapsed .dispatch-unassigned-scroll { display: none; }
-.dispatch-unassigned-panel.collapsed .dispatch-unassigned-heading { border-bottom: 0; }
+.dispatch-unassigned-panel.collapsed .dispatch-unassigned-axis-row { display: none; }
+.dispatch-unassigned-panel.collapsed .dispatch-unassigned-head { border-bottom: 0; }
 .dispatch-unassigned-panel.compact .dispatch-unassigned-scroll,.dispatch-unassigned-panel.compact .dispatch-unassigned-gutter { height:220px; }
 .dispatch-unassigned-panel.expanded .dispatch-unassigned-scroll,.dispatch-unassigned-panel.expanded .dispatch-unassigned-gutter { height:420px; }
 .dispatch-unassigned-canvas { position: relative; min-height: 100%; background-color: #fbfcfe; background-image: repeating-linear-gradient(to right,transparent 0,transparent calc(var(--dispatch-slot-width,10px) - 1px),#e2e8f0 calc(var(--dispatch-slot-width,10px) - 1px),#e2e8f0 var(--dispatch-slot-width,10px)); }
