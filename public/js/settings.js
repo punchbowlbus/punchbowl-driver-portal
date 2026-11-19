@@ -12,6 +12,8 @@ import { auth, db, functions } from "./firebase.js";
 import { els, showError } from "./ui.js";
 import { escapeHtml } from "./utils.js";
 
+import {mountNotificationDeliveryLog} from "./notification_delivery_ui.js";
+
 const SETTINGS_PATH = "systemSettings/defectNotifications";
 
 function employeeName(employee) {
@@ -26,7 +28,7 @@ function employeeName(employee) {
 
 function employeeOption(employee, group, selectedIds) {
   const id = String(employee.id || employee.employeeNumber || "");
-  const tokenReady = employee.pushReady === true || Boolean(String(employee.fcmToken || "").trim());
+  const tokenReady = employee.pushReady === true || Boolean(String(employee.fcmToken || "").trim()) || Object.values(employee.fcmDevices || {}).some(device=>Boolean(device?.token));
   const emailReady = String(employee.email || "").includes("@");
   const detail = [employee.role, employee.department, employee.accessLevel]
     .filter(Boolean)
@@ -170,6 +172,8 @@ export async function renderSettingsPage() {
         </div>
       </section>
 
+      <details id="notificationDeliveryLog" class="card settings-panel notification-log"></details>
+
       <div id="generalPushReviewModal" class="settings-review-layer" hidden>
         <section
           class="settings-review-dialog"
@@ -229,6 +233,8 @@ export async function renderSettingsPage() {
   `;
 
   window.lucide?.createIcons?.();
+
+  mountNotificationDeliveryLog(document.getElementById("notificationDeliveryLog"));
 
   const enabledEl = document.getElementById("defectNotificationsEnabled");
   const occSafeEl = document.getElementById("notifyOccSafe");
@@ -360,7 +366,7 @@ export async function renderSettingsPage() {
       if (generalResultEl) {
         generalResultEl.textContent = result.dryRun
           ? "Local dry run successful. No notification was sent."
-          : `Notification sent to ${result.successCount || 0} device${result.successCount === 1 ? "" : "s"}. ` +
+          : `Firebase accepted the notification for ${result.successCount || 0} device${result.successCount === 1 ? "" : "s"}. ` +
             `${result.noDeviceCount || 0} active user${result.noDeviceCount === 1 ? " has" : "s have"} no registered device` +
             `${result.failureCount ? `; ${result.failureCount} delivery failed` : ""}.`;
         generalResultEl.className = "settings-save-message success";

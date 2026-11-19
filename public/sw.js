@@ -1,4 +1,4 @@
-const CACHE = "pbc-v90"; // Refresh Dispatch bulk status and duty-copy release
+const CACHE = "pbc-v92"; // Refresh notification delivery activity view
 
 const ASSETS = [
   "/",

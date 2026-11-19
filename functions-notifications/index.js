@@ -5,6 +5,10 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
+const {getDeliveryReport}=require("./delivery-report");
+const {createDeviceRegistry,recipientTokens,ownedRecipientTokens,keyFor}=require("./devices");
+const { createJobDeliveryHandler } = require("./job-delivery");
+const { createDutyDeliveryHandler, isRetryableMessagingError } = require("./duty-delivery");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
@@ -49,6 +53,26 @@ async function requirePortalAdmin(request) {
 
   return email;
 }
+
+const notificationDevices=createDeviceRegistry({db,FieldValue,HttpsError,resolveRecipient:async request=>{
+  const email=normalized(request.auth.token.email);
+  const employees=await db.collection("employees").where("email","==",email).limit(2).get();
+  if(employees.docs.length===1&&normalized(employees.docs[0].data().status)==="active"){
+    return {type:"employee",ref:employees.docs[0].ref};
+  }
+  await requirePortalAdmin(request);
+  const displayName=String(request.auth.token.name||email).slice(0,120);
+  const profile={displayName,email,role:"Portal Super Admin",accessLevel:"Super Admin",status:"Active"};
+  return {type:"admin",ref:db.collection("portalNotificationUsers").doc(request.auth.uid),profile,publicProfile:{id:`portalAdmin:${request.auth.uid}`,...profile,pushReady:true}};
+}});
+exports.registerPortalNotificationDevice=onCall({region:"australia-southeast1",maxInstances:10},notificationDevices.register);
+exports.unregisterPortalNotificationDevice=onCall({region:"australia-southeast1",maxInstances:10},notificationDevices.unregister);
+
+exports.getNotificationDeliveryLog=onCall({region:"australia-southeast1",maxInstances:10},async request=>{
+  await requirePortalAdmin(request);
+  if(!["duty","general","defect"].includes(request.data?.kind||"duty"))throw new HttpsError("invalid-argument","Choose a valid notification category.");
+  return getDeliveryReport(db,{kind:request.data?.kind||"duty",limit:request.data?.limit||100});
+});
 
 exports.registerPortalAdminNotificationDevice = onCall({
   region: "australia-southeast1",
@@ -103,7 +127,7 @@ exports.getPortalAdminNotificationRecipients = onCall({
       role: "Portal Super Admin",
       accessLevel: "Super Admin",
       status: "Active",
-      pushReady: Boolean(String(recipient.fcmToken || "").trim())
+      pushReady: recipientTokens(recipient).length > 0
     }));
 
   return { recipients };
@@ -144,12 +168,9 @@ exports.sendGeneralPushNotification = onCall({
   const activeEmployees = employeeSnap.docs
     .map((employeeDoc) => ({ id: employeeDoc.id, ...employeeDoc.data() }))
     .filter((employee) => normalized(employee.status) === "active");
-  const tokens = [...new Set(activeEmployees
-    .map((employee) => String(employee.fcmToken || "").trim())
-    .filter(Boolean))];
-  const noDeviceCount = activeEmployees.filter(
-    (employee) => !String(employee.fcmToken || "").trim()
-  ).length;
+  const deviceLists=await Promise.all(activeEmployees.map(employee=>ownedRecipientTokens(db,employee,"employees/"+employee.id)));
+  const tokens=[...new Set(deviceLists.flat())];
+  const noDeviceCount=deviceLists.filter(tokens=>!tokens.length).length;
 
   let successCount = 0;
   let failureCount = 0;
@@ -258,12 +279,14 @@ function dutyChanged(before, after) {
 
 function classifyDutyNotifications(before, after) {
   const notifications = [];
+  // Deleted records are not visible work. Restoration is a fresh publication.
+  if (before?.deleted === true) before = null;
   const beforeDriver = String(before?.driverEmployeeNumber || "").trim();
   const afterDriver = String(after?.driverEmployeeNumber || "").trim();
   const beforeStatus = normalizedDutyStatus(before?.dispatchStatus);
   const afterStatus = normalizedDutyStatus(after?.dispatchStatus);
 
-  if (!after) {
+  if (!after || after.deleted === true) {
     if (beforeDriver && beforeStatus === "assigned") {
       notifications.push({
         employeeNumber: beforeDriver,
@@ -277,7 +300,6 @@ function classifyDutyNotifications(before, after) {
   }
 
   const driverChanged = Boolean(beforeDriver && beforeDriver !== afterDriver);
-  const removed = before?.deleted !== true && after?.deleted === true;
 
   if (driverChanged && beforeStatus === "assigned") {
     notifications.push({
@@ -291,18 +313,10 @@ function classifyDutyNotifications(before, after) {
 
   if (!afterDriver) return notifications;
 
-  if (removed && beforeStatus === "assigned") {
-    notifications.push({
-      employeeNumber: afterDriver,
-      eventType: "removed",
-      title: "Duty removed",
-      body: "This duty has been removed from your work.",
-      linkToDuty: false
-    });
-    return notifications;
-  }
-
-  if (afterStatus === "cancelled" && beforeStatus !== "cancelled") {
+  if (afterStatus === "cancelled") {
+    // A draft cancellation must not notify a driver who never received it.
+    // On simultaneous reassignment/cancellation only the old driver's removal applies.
+    if (beforeStatus !== "assigned" || driverChanged) return notifications;
     notifications.push({
       employeeNumber: afterDriver,
       eventType: "cancelled",
@@ -350,7 +364,7 @@ function classifyDutyNotifications(before, after) {
   return notifications;
 }
 
-async function sendDutyNotification({ dutySpanId, duty, notification }) {
+async function sendDutyNotification({ dutySpanId, duty, notification, deliveryRef }) {
   const employeeNumber = String(notification.employeeNumber || "").trim();
   if (!employeeNumber) return { status: "skipped", reason: "no-employee-number" };
 
@@ -363,13 +377,25 @@ async function sendDutyNotification({ dutySpanId, duty, notification }) {
     return { status: "skipped", reason: "employee-inactive", employeeNumber };
   }
 
-  const token = String(employee.fcmToken || "").trim();
-  if (!token) return { status: "skipped", reason: "no-device", employeeNumber };
+  const tokens = recipientTokens(employee);
+  if (!tokens.length) return { status: "skipped", reason: "no-device", employeeNumber };
 
   const dutyLink = `https://punchbowl-driver-portal.web.app/?page=dutySheet&dutySpanId=${encodeURIComponent(dutySpanId)}`;
   const myWorkLink = "https://punchbowl-driver-portal.web.app/?page=myWork";
   const link = notification.linkToDuty ? dutyLink : myWorkLink;
 
+  const deviceResults=[];
+  for(const token of tokens){
+    const key=keyFor(token);
+    const deviceRef=deliveryRef?.collection("devices").doc(key);
+    const previous=deviceRef?await deviceRef.get():null;
+    if(previous?.exists&&["accepted","failed","skipped"].includes(previous.data().status)){deviceResults.push(previous.data());continue;}
+    const owner=await db.collection("portalNotificationDevices").doc(key).get();
+    if(owner.exists&&owner.data().recipientPath!==employeeRef.path){
+      const result={status:"skipped",reason:"device-account-changed",deviceId:key};
+      if(deviceRef)await deviceRef.set(result);deviceResults.push(result);continue;
+    }
+  let result;
   try {
     const messageId = await getMessaging().send({
       token,
@@ -392,61 +418,49 @@ async function sendDutyNotification({ dutySpanId, duty, notification }) {
         fcmOptions: { link }
       }
     });
-    return { status: "sent", employeeNumber, messageId };
+    result={ status: "accepted", deviceId:key, messageId };
   } catch (error) {
     const errorCode = String(error?.code || "unknown");
     if (
       errorCode === "messaging/registration-token-not-registered" ||
       errorCode === "messaging/invalid-registration-token"
     ) {
-      await employeeRef.set({
-        fcmToken: FieldValue.delete(),
-        fcmTokenUpdatedAt: FieldValue.serverTimestamp()
-      }, { merge: true });
+      try {
+        await db.runTransaction(async transaction => {
+          const latest = await transaction.get(employeeRef);
+          if (latest.exists && String(latest.data().fcmToken || "").trim() === token) {
+            transaction.update(employeeRef, {fcmToken: FieldValue.delete(), ["fcmDevices."+key]:FieldValue.delete(), fcmTokenUpdatedAt: FieldValue.serverTimestamp()});
+          } else if(latest.exists&&latest.data().fcmDevices?.[key]?.token===token){
+            transaction.update(employeeRef, {["fcmDevices."+key]:FieldValue.delete(),fcmTokenUpdatedAt:FieldValue.serverTimestamp()});
+          }
+        });
+      } catch (cleanupError) {
+        console.error("Unable to clear invalid duty notification token", {employeeNumber, code:cleanupError?.code || "unknown"});
+      }
     }
-    return { status: "failed", employeeNumber, errorCode };
+    result={ status: isRetryableMessagingError(errorCode) ? "retryable" : "failed", deviceId:key, errorCode };
   }
+    if(deviceRef)await deviceRef.set({...result,updatedAt:FieldValue.serverTimestamp()});
+    deviceResults.push(result);
+  }
+  const status=deviceResults.some(r=>r.status==="retryable")?"retryable":deviceResults.some(r=>r.status==="accepted")?"accepted":deviceResults.some(r=>r.status==="failed")?"failed":"skipped";
+  return {status,employeeNumber,deviceResults,reason:status==="skipped"?(deviceResults[0]?.reason||""):"",errorCode:[...new Set(deviceResults.map(r=>r.errorCode).filter(Boolean))].join(", "),acceptedDeviceCount:deviceResults.filter(r=>r.status==="accepted").length,failedDeviceCount:deviceResults.filter(r=>r.status==="failed").length};
 }
 
+const deliverDutyEvent = createDutyDeliveryHandler({db, FieldValue, classify:classifyDutyNotifications, send:sendDutyNotification});
 exports.notifyDriverOnDutyWritten = onDocumentWritten({
   document: "dutySpans/{dutySpanId}",
   region: "australia-southeast1",
   maxInstances: 10,
-  retry: false
-}, async (event) => {
-  const before = event.data?.before?.exists ? event.data.before.data() || {} : null;
-  const after = event.data?.after?.exists ? event.data.after.data() || {} : null;
-  const duty = after || before;
-  if (!duty) return;
+  timeoutSeconds: 60,
+  retry: true
+}, deliverDutyEvent);
 
-  const notifications = classifyDutyNotifications(before, after);
-  if (!notifications.length) return;
-
-  const results = [];
-  for (const notification of notifications) {
-    results.push(await sendDutyNotification({
-      dutySpanId: event.params.dutySpanId,
-      duty,
-      notification
-    }));
-  }
-
-  await db.collection("dutyNotificationDeliveries").doc(event.id).set({
-    eventId: event.id,
-    dutySpanId: event.params.dutySpanId,
-    serviceDate: String(duty.serviceDate || duty.date || ""),
-    eventTypes: notifications.map((item) => item.eventType),
-    recipientEmployeeNumbers: notifications.map((item) => item.employeeNumber),
-    results,
-    createdAt: FieldValue.serverTimestamp()
-  });
-
-  console.log("Driver duty notification completed", {
-    dutySpanId: event.params.dutySpanId,
-    eventTypes: notifications.map((item) => item.eventType),
-    results
-  });
-});
+// Job changes use the same recipient journal, stale checks and bounded retry sender.
+exports.notifyDriverOnDutyJobWritten = onDocumentWritten({
+  document: "blocks/{blockId}", region: "australia-southeast1",
+  maxInstances: 10, timeoutSeconds: 60, retry: true
+}, createJobDeliveryHandler({db, FieldValue, send:sendDutyNotification, dutySummary}));
 
 /* =========================================================
    Driver defect alerts — Firestore trigger
@@ -520,12 +534,9 @@ exports.notifyOnDefectReportCreated = onDocumentCreated({
     .map((snapshot) => ({ id: `portalAdmin:${snapshot.id}`, ...snapshot.data() }))
     .filter((recipient) => normalized(recipient.status) === "active");
   const activeRecipients = [...activeEmployeeRecipients, ...activePortalAdminRecipients];
-  const tokens = [...new Set(activeRecipients
-    .map((employee) => String(employee.fcmToken || "").trim())
-    .filter(Boolean))];
-  const noDeviceCount = activeRecipients.filter(
-    (employee) => !String(employee.fcmToken || "").trim()
-  ).length;
+  const deviceLists=await Promise.all(activeRecipients.map(recipient=>ownedRecipientTokens(db,recipient,recipient.id.startsWith("portalAdmin:")?"portalNotificationUsers/"+recipient.id.slice(12):"employees/"+recipient.id)));
+  const tokens=[...new Set(deviceLists.flat())];
+  const noDeviceCount=deviceLists.filter(tokens=>!tokens.length).length;
 
   const reportNumber = String(report.reportNumber || event.params.reportId);
   const fleetNumber = String(report.fleetNumber || report.busNumber || "Unknown bus");
