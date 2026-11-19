@@ -5746,3 +5746,15 @@ body.dispatch-board-fullscreen { overflow: hidden; }
 .charter-days-grid input:checked + span { color: var(--charter-ink); }
 .charter-days-grid label:has(input:checked) { border-color: var(--charter-red); background: #fee7e8; }
 .charter-days-grid input { margin: 0; cursor: pointer; }
+
+/* Dispatch bulk status: compact controls, separate from driver-view filters. */
+.dispatch-bulk-bar { display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin:10px 0; padding:12px 14px; border:1px solid #bfdbfe; border-radius:12px; background:#eff6ff; color:#172033; }
+.dispatch-bulk-bar label { display:flex; align-items:center; gap:8px; margin:0; font-size:12px; font-weight:700; }
+.dispatch-bulk-bar input[type=checkbox], .dispatch-bulk-row-check { width:18px; height:18px; min-width:18px; margin:0 8px 0 0; accent-color:#2563eb; cursor:pointer; }
+.dispatch-bulk-bar select { width:130px; height:36px; margin:0; }
+.dispatch-bulk-bar strong { font-size:12px; }
+.dispatch-bulk-bar small { flex-basis:100%; color:#52647b; }
+.dispatch-bulk-bar button:disabled { opacity:.5; cursor:default; }
+.dispatch-bulk-review { max-height:45vh; overflow:auto; }
+.dispatch-bulk-review table { width:100%; border-collapse:collapse; font-size:12px; }
+.dispatch-bulk-review th,.dispatch-bulk-review td { text-align:left; padding:9px 6px; border-bottom:1px solid #dbe3ed; }

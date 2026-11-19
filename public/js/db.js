@@ -11,6 +11,7 @@ import {
   getDoc,
   getDocs,
   writeBatch,
+  runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-firestore.js";
 
@@ -330,6 +331,32 @@ export async function updateDutySpanDispatchStatus(dutySpanId, dispatchStatus) {
   }
 
   await updateDoc(doc(db, "dutySpans", dutySpanId), patch);
+}
+
+// Recheck the reviewed records inside one atomic transaction before writing.
+export async function updateDutySpanStatusesBulk(entries, dispatchStatus, serviceDate) {
+  if (!["Pending", "Assigned", "Cancelled"].includes(dispatchStatus)) throw new Error("Invalid dispatch status.");
+  if (!entries.length || entries.length > 400 || new Set(entries.map(e => e.id)).size !== entries.length) throw new Error("Select between 1 and 400 unique duty spans.");
+  return runTransaction(db, async transaction => {
+    const refs = entries.map(entry => doc(db, "dutySpans", entry.id));
+    const snapshots = await Promise.all(refs.map(ref => transaction.get(ref)));
+    snapshots.forEach((snapshot, index) => {
+      const entry = entries[index];
+      const data = snapshot.exists() ? snapshot.data() : null;
+      if (!data || data.deleted || data.serviceDate !== serviceDate || entry.serviceDate !== serviceDate ||
+          String(data.driverEmployeeNumber || "") !== entry.employeeNumber ||
+          String(data.dispatchStatus || "Pending") !== entry.previousStatus ||
+          (data.startMin ?? null) !== entry.startMin || (data.endMin ?? null) !== entry.endMin) {
+        throw new Error("A reviewed duty changed. No statuses were updated. Review the latest duties and try again.");
+      }
+    });
+    refs.forEach(ref => {
+      const patch = {dispatchStatus, updatedAt: serverTimestamp()};
+      if (dispatchStatus === "Pending" || dispatchStatus === "Cancelled") patch.driverAcknowledgment = "Pending";
+      transaction.update(ref, patch);
+    });
+    return entries.length;
+  });
 }
 
 export async function updateDutySpanDriverAcknowledgment(dutySpanId, driverAcknowledgment) {

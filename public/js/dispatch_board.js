@@ -11,6 +11,7 @@ import {
   transferDutySpanWithBlocks,
   deleteDutySpan,
   updateDutySpanDispatchStatus,
+  updateDutySpanStatusesBulk,
   updateBlock
 } from "./db.js";
 
@@ -20,6 +21,8 @@ import { calculateFatigue, fatigueStatusLabel } from "./dispatch_fatigue.js";
 import { scheduleCoverage, refreshRosterFatigue } from "./fatigue_schedule.js";
 import { assignBlockToDriver } from "./dispatch_assignments.js";
 import { unassignBlockFromDriver } from "./dispatch_assignments.js";
+
+import { buildBulkStatusPlan, bulkStatusFingerprint } from "./dispatch_bulk_status.js";
 
 let nowLineTimer = null;
 
@@ -88,6 +91,15 @@ els.contentArea.innerHTML = `
 
     <div id="dispatchOperationalSummary" class="dispatch-summary-grid" aria-live="polite"></div>
     <div id="dispatchPageMessage" class="dispatch-page-message" hidden role="status"></div>
+
+    <section class="dispatch-bulk-bar" aria-label="Bulk duty status">
+      <label class="dispatch-bulk-select"><input id="bulkSelectAll" type="checkbox" /> Select all shown</label>
+      <strong id="bulkStatusCount" role="status">No drivers selected</strong>
+      <button id="bulkStatusClear" type="button" class="dispatch-quiet-btn">Clear</button>
+      <label>Change status <select id="bulkStatusTarget"><option value="Assigned">Assigned</option><option value="Pending">Pending</option><option value="Cancelled">Cancelled</option></select></label>
+      <button id="bulkStatusReview" type="button" class="dispatch-primary-btn" disabled>Review changes</button>
+      <small>Selected date only · all duty spans for selected drivers · no jobs or buses are allocated</small>
+    </section>
 
     <section id="unassignedJobsPanel" class="dispatch-unassigned-panel compact">
       <div class="dispatch-unassigned-head">
@@ -225,6 +237,10 @@ let dutySpansCache = [];
 let fatigueRosterCache = [];
 let jobGroupsCache = [];
 let selectedDriverEmpNo = "";
+const bulkSelectedDrivers = new Set();
+let bulkStatusBusy = false;
+let bulkFilterSignature = "";
+let bulkReviewVersion = 0;
 let slotWidth = 10;
 let unsubscribeDutySpans = null;
 let unsubscribeBlocks = null;
@@ -2017,6 +2033,14 @@ function renderNowLine() {
 function renderDrivers() {
   saveDispatchPreferences();
   const activeDrivers = getActiveDrivers();
+  const filterSignature = JSON.stringify([getSelectedDate(), driverViewFilterEl.value, [...selectedDriverEmpNos].sort()]);
+  if (bulkFilterSignature !== filterSignature) {
+    bulkSelectedDrivers.clear();
+    bulkReviewVersion++;
+    bulkFilterSignature = filterSignature;
+  }
+  const eligible = new Set(activeDrivers.filter(d => getDriverDutySpans(d.employeeNumber).some(s => !s.deleted)).map(d => String(d.employeeNumber)));
+  for (const empNo of bulkSelectedDrivers) if (!eligible.has(empNo)) bulkSelectedDrivers.delete(empNo);
 
   driversListEl.innerHTML = activeDrivers
     .map((d) => {
@@ -2043,6 +2067,7 @@ function renderDrivers() {
             overflow:hidden;
           "
         >
+          <input type="checkbox" class="dispatch-bulk-row-check" data-bulk-driver="${escapeHtml(d.employeeNumber || "")}" aria-label="Select duties for ${escapeHtml(d.displayName || d.employeeNumber || "Driver")}" ${bulkSelectedDrivers.has(String(d.employeeNumber)) ? "checked" : ""} ${!hasSpan || bulkStatusBusy ? "disabled" : ""} />
           <div style="width:100%; min-width:0; overflow:hidden;">
             <div style="
               font-weight:700;
@@ -2065,7 +2090,7 @@ function renderDrivers() {
             ">
               <select
                 data-dispatch-status="${escapeHtml(d.employeeNumber || "")}"
-                ${hasSpan ? "" : "disabled"}
+                ${hasSpan && !bulkStatusBusy ? "" : "disabled"}
                 style="
                   height:16px;
                   width:52px;
@@ -2111,6 +2136,7 @@ function renderDrivers() {
   setupDutySpanDragEvents();
   attachNumberedJobEvents(activeDrivers);
   attachDispatchStatusEvents();
+  attachBulkStatusControls(activeDrivers);
   if (visibleDriverCountEl) visibleDriverCountEl.textContent = `${activeDrivers.length} shown`;
   renderOperationalSummary();
   renderNowLine();
@@ -2191,12 +2217,81 @@ function renderTimelineRows(drivers) {
     .join("");
 }
 
+function currentBulkPlan() {
+  return buildBulkStatusPlan(getActiveDrivers(), dutySpansCache, bulkSelectedDrivers, getSelectedDate(), document.getElementById("bulkStatusTarget").value);
+}
+function attachBulkStatusControls(drivers) {
+  const all = document.getElementById("bulkSelectAll");
+  const target = document.getElementById("bulkStatusTarget");
+  const review = document.getElementById("bulkStatusReview");
+  const clear = document.getElementById("bulkStatusClear");
+  const eligible = drivers.filter(d => getDriverDutySpans(d.employeeNumber).some(s => !s.deleted));
+  const plan = currentBulkPlan();
+  all.checked = eligible.length > 0 && eligible.every(d => bulkSelectedDrivers.has(String(d.employeeNumber)));
+  all.indeterminate = bulkSelectedDrivers.size > 0 && !all.checked;
+  all.disabled = bulkStatusBusy || !eligible.length;
+  target.disabled = bulkStatusBusy;
+  clear.disabled = bulkStatusBusy || !bulkSelectedDrivers.size;
+  review.disabled = bulkStatusBusy || !plan.changes.length || plan.changes.length > 400;
+  document.getElementById("bulkStatusCount").textContent = bulkStatusBusy ? "Updating duty statuses…" : `${bulkSelectedDrivers.size} drivers selected · ${plan.entries.length} duty spans · ${plan.changes.length} to change`;
+  driversListEl.querySelectorAll("[data-bulk-driver]").forEach(input => {
+    input.onclick = event => event.stopPropagation();
+    input.onchange = () => {
+      if (input.checked) bulkSelectedDrivers.add(input.dataset.bulkDriver); else bulkSelectedDrivers.delete(input.dataset.bulkDriver);
+      bulkReviewVersion++;
+      renderDrivers();
+    };
+  });
+  all.onchange = () => {
+    bulkSelectedDrivers.clear();
+    if (all.checked) eligible.forEach(d => bulkSelectedDrivers.add(String(d.employeeNumber)));
+    bulkReviewVersion++;
+    renderDrivers();
+  };
+  clear.onclick = () => { bulkSelectedDrivers.clear(); bulkReviewVersion++; renderDrivers(); };
+  target.onchange = () => { bulkReviewVersion++; attachBulkStatusControls(getActiveDrivers()); };
+  review.onclick = reviewBulkStatusChanges;
+}
+async function reviewBulkStatusChanges() {
+  if (bulkStatusBusy) return;
+  const plan = currentBulkPlan();
+  if (!plan.changes.length || plan.changes.length > 400) return;
+  const version = bulkReviewVersion;
+  const fingerprint = bulkStatusFingerprint(plan);
+  const rows = plan.changes.map(entry => `<tr><td>${escapeHtml(entry.name)}</td><td>${escapeHtml(minToTimeStr(entry.startMin))}–${escapeHtml(minToTimeStr(entry.endMin))}</td><td>${escapeHtml(entry.previousStatus)} → ${escapeHtml(plan.status)}</td></tr>`).join("");
+  const warning = plan.status === "Cancelled" ? "Duties will be cancelled. Assigned jobs are not deleted or reassigned. Driver responses reset to Pending." : plan.status === "Pending" ? "Pending duties are hidden from the driver work list. Driver responses reset to Pending." : "Assigned duties become visible to drivers. Existing driver responses are preserved.";
+  const ok = await confirmDispatchAction({
+    title: "Review duty status changes",
+    message: `<p><strong>${escapeHtml(plan.date)}</strong> · ${new Set(plan.changes.map(e => e.employeeNumber)).size} drivers · ${plan.changes.length} duty spans to change</p><div class="dispatch-bulk-review"><table><thead><tr><th>Driver</th><th>Duty time</th><th>Status change</th></tr></thead><tbody>${rows}</tbody></table></div><p>${plan.skipped} duties already at ${escapeHtml(plan.status)} will be skipped. Drivers without duties are excluded.</p><div class="dispatch-confirm-warning">${warning}</div>`,
+    confirmLabel: `Confirm ${plan.status === "Cancelled" ? "cancellation" : plan.status === "Assigned" ? "assignment" : "Pending status"}`,
+    tone: plan.status === "Cancelled" ? "danger" : "primary"
+  });
+  if (!ok) return;
+  if (version !== bulkReviewVersion || fingerprint !== bulkStatusFingerprint(currentBulkPlan())) {
+    showPageMessage("The selection or duties changed. No changes were made. Review again.", "error", 7000);
+    return;
+  }
+  bulkStatusBusy = true;
+  renderDrivers();
+  try {
+    await updateDutySpanStatusesBulk(plan.changes, plan.status, plan.date);
+    bulkSelectedDrivers.clear();
+    showPageMessage(`${plan.changes.length} duty statuses updated to ${plan.status}.`, "success", 6000);
+  } catch (error) {
+    showPageMessage(error?.message || "Bulk update failed. No statuses were changed.", "error", 8000);
+  } finally {
+    bulkStatusBusy = false;
+    renderDrivers();
+  }
+}
+
 function attachDispatchStatusEvents() {
   const controls = driversListEl.querySelectorAll("[data-dispatch-status]");
 
   controls.forEach((selectEl) => {
     selectEl.onchange = async (e) => {
       e.stopPropagation();
+      if (bulkStatusBusy) return;
 
       const empNo = String(selectEl.getAttribute("data-dispatch-status") || "");
       const nextStatus = String(selectEl.value || "Pending");
