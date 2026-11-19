@@ -58,7 +58,6 @@ els.contentArea.innerHTML = `
 
     <div class="dispatch-pro-toolbar">
       <label><span>Dispatch date</span><input id="dispatchDate" type="date" value="${today}" /></label>
-      <button id="loadDispatchBtn" class="dispatch-primary-btn" type="button">Load Dispatch</button>
       <label><span>Sort drivers</span><select id="driverSortBy">
         <option value="name">Alphabetical</option>
         <option value="start_time">Start time</option>
@@ -156,7 +155,6 @@ els.contentArea.innerHTML = `
 `;
 
 const dispatchDateEl = document.getElementById("dispatchDate");
-const loadBtn = document.getElementById("loadDispatchBtn");
 const driversTopSpacerEl = document.getElementById("dispatchDriversTopSpacer");
 const driversScrollEl = document.getElementById("dispatchDriversScroll");
 const driversListEl = document.getElementById("dispatchDriversList");
@@ -3372,11 +3370,6 @@ function loadDispatchForDate(selectedDate, { openPanel = false } = {}) {
   loadUnassignedJobsForDate(selectedDate);
   startDutySpanListener(selectedDate);
 }
-
-loadBtn.onclick = () => {
-  loadDispatchForDate(dispatchDateEl.value, { openPanel: true });
-  showPageMessage("Dispatch board loaded.", "success");
-};
 
 dispatchDateEl.onchange = () => {
   loadDispatchForDate(dispatchDateEl.value, { openPanel: false });
