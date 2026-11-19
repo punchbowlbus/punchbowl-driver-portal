@@ -5758,3 +5758,5 @@ body.dispatch-board-fullscreen { overflow: hidden; }
 .dispatch-bulk-review { max-height:45vh; overflow:auto; }
 .dispatch-bulk-review table { width:100%; border-collapse:collapse; font-size:12px; }
 .dispatch-bulk-review th,.dispatch-bulk-review td { text-align:left; padding:9px 6px; border-bottom:1px solid #dbe3ed; }
+[data-timeline-row][data-duty-drop-label] { position:relative; }
+[data-timeline-row][data-duty-drop-label]::after { content:attr(data-duty-drop-label); position:absolute; right:10px; top:8px; z-index:40; padding:4px 9px; border-radius:6px; background:#1d4ed8; color:#fff; font-size:12px; font-weight:800; pointer-events:none; }

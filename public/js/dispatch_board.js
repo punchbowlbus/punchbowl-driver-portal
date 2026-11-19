@@ -24,6 +24,8 @@ import { unassignBlockFromDriver } from "./dispatch_assignments.js";
 
 import { buildBulkStatusPlan, bulkStatusFingerprint } from "./dispatch_bulk_status.js";
 
+import { dutyCopyPayload, dutyCopyRosterFingerprint, dutyCopyOverlaps } from "./dispatch_duty_copy.js";
+
 let nowLineTimer = null;
 
 export function renderDispatchBoardPage() {
@@ -141,7 +143,7 @@ els.contentArea.innerHTML = `
       </section>
 
       <section class="dispatch-timeline-panel">
-        <div class="dispatch-panel-heading"><span>Timeline</span><small>Drag empty space to move the board</small></div>
+        <div class="dispatch-panel-heading"><span>Timeline</span><small>Drag duty to transfer · Ctrl + drag to copy</small></div>
         <div id="dispatchTimelineOuter">
           <div id="dispatchTimelineInner">
             <div id="dispatchTimelineHeader"></div>
@@ -247,6 +249,7 @@ let unsubscribeBlocks = null;
 let blocksCache = [];
 let draggedBlockId = "";
 let draggedDutySpanId = "";
+let dutyCopyBusy = false;
 let selectedBlockId = "";
 let unassignedDensity = "compact";
 let lastOpenUnassignedDensity = "compact";
@@ -2390,7 +2393,8 @@ function attachDriverRowEvents(activeDrivers) {
           Number(span.startMin || 0),
           Number(span.endMin || 0)
         );
-        setTimelineRowDropState(driverEmpNo, conflict ? "overlap" : "valid");
+        e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
+        setTimelineRowDropState(driverEmpNo, conflict ? "overlap" : e.ctrlKey ? "copy" : "valid");
         return;
       }
 
@@ -2419,7 +2423,8 @@ function attachDriverRowEvents(activeDrivers) {
       if (dutySpanId) {
         draggedDutySpanId = "";
         clearAllTimelineRowDropStates();
-        await transferDutySpanToDriver(dutySpanId, targetDriverEmpNo);
+        if (e.ctrlKey) await copyDutySpanToDriver(dutySpanId, targetDriverEmpNo);
+        else await transferDutySpanToDriver(dutySpanId, targetDriverEmpNo);
         return;
       }
 
@@ -3236,6 +3241,7 @@ function clearAllTimelineRowDropStates() {
     const empNo = row.getAttribute("data-timeline-row") || "";
     const isSelected = String(selectedDriverEmpNo) === String(empNo);
     row.style.background = isSelected ? "#eef6ff" : "#fff";
+    row.removeAttribute("data-duty-drop-label");
   });
 }
 
@@ -3247,7 +3253,11 @@ function setTimelineRowDropState(empNo, state = "") {
 
   if (!row) return;
 
-  if (state === "overlap") {
+  row.removeAttribute("data-duty-drop-label");
+  if (state === "copy") {
+    row.style.background = "#dbeafe";
+    row.setAttribute("data-duty-drop-label", "+ Copy duty");
+  } else if (state === "overlap") {
     row.style.background = "#fee2e2";
   } else if (state === "valid") {
     row.style.background = "#dcfce7";
@@ -3368,13 +3378,59 @@ async function transferDutySpanToDriver(spanId, targetEmpNo) {
   }
 }
 
+async function copyDutySpanToDriver(spanId, targetEmpNo) {
+  if (dutyCopyBusy) return;
+  dutyCopyBusy = true;
+  try {
+    const source = dutySpansCache.find(s => String(s.id) === String(spanId));
+    const target = employeesCache.find(d => String(d.employeeNumber) === String(targetEmpNo));
+    if (!source || !target || source.deleted || source.serviceDate !== getSelectedDate()) throw new Error("Source duty or target driver is no longer available.");
+    if (String(source.driverEmployeeNumber) === String(targetEmpNo)) return;
+    if (String(target.role || "").toLowerCase().trim() !== "driver" || ["inactive", "on leave", "leave", "unavailable"].includes(String(target.status || "").toLowerCase().trim())) throw new Error("This driver is inactive, unavailable or on leave and cannot receive a copy.");
+    const readTargetRoster = async () => (await Promise.all(Array.from({length:34},(_,index)=>index-31).map(offset => getDutySpansByDriverAndDate(targetEmpNo, shiftServiceDate(source.serviceDate,offset))))).flat().filter(s => !s.deleted);
+    const roster = await readTargetRoster();
+    if (dutyCopyOverlaps(source, roster)) throw new Error("Copy blocked: the target driver already has an overlapping duty span.");
+    const candidateId = "duty-copy-preview";
+    const initialFatigue = calculateFatigue({startMin:source.startMin,endMin:source.endMin,breaks:source.breaks || [],fatigueCategory:target.fatigueCategory || "Unknown"});
+    const candidate = {...dutyCopyPayload(source,target,initialFatigue),id:candidateId};
+    const reviewed = refreshRosterFatigue([...roster,candidate],employeesCache,scheduleCoverage(source.serviceDate)).find(s => s.id === candidateId);
+    if (!reviewed) throw new Error("Unable to check the target driver's fatigue. No copy was created.");
+    const payload = dutyCopyPayload(source,target,{...initialFatigue,fatigueStatus:reviewed.fatigueStatus,fatigueWarning:reviewed.fatigueWarning});
+    const sourceFingerprint = JSON.stringify(source);
+    const rosterFingerprint = dutyCopyRosterFingerprint(roster);
+    const confirmed = await confirmDispatchAction({
+      title: "Copy duty to another driver",
+      message: `<p>Create a new copy for <strong>${escapeHtml(payload.driverName)}</strong> on <strong>${escapeHtml(payload.serviceDate)}</strong>?</p><div class="dispatch-confirm-grid"><span>Duty</span><strong>${escapeHtml(payload.dutyNumber || payload.dutyType)}</strong><span>Time</span><strong>${minToTimeStr(payload.startMin)}–${minToTimeStr(payload.endMin)}</strong></div><p>Times, locations, route details and breaks are copied. The new duty starts as <strong>Pending</strong>, with no bus and no assigned jobs. The original duty and its jobs stay with the original driver.</p>${payload.fatigueStatus !== "OK" ? `<div class="dispatch-confirm-warning">Scheduled fatigue review: ${escapeHtml(payload.fatigueWarning || "Review the duty and surrounding roster before assigning.")}</div>` : ""}`,
+      confirmLabel: "Create Pending Copy",
+      tone: payload.fatigueStatus === "OK" ? "primary" : "danger"
+    });
+    if (!confirmed) return;
+    // Refuse stale reviews rather than create a different copy from the one reviewed.
+    const latestRoster = await readTargetRoster();
+    const latestSource = (await getDutySpansByDriverAndDate(source.driverEmployeeNumber,source.serviceDate)).find(s => String(s.id) === String(spanId) && !s.deleted);
+    const sourceCopy = s => JSON.stringify(dutyCopyPayload(s,target,initialFatigue));
+    const currentTarget = employeesCache.find(d => String(d.employeeNumber) === String(targetEmpNo));
+    if (getSelectedDate() !== source.serviceDate || !latestSource || sourceCopy(latestSource) !== sourceCopy(source) ||
+        !currentTarget || JSON.stringify(currentTarget) !== JSON.stringify(target) ||
+        dutyCopyRosterFingerprint(latestRoster) !== rosterFingerprint ||
+        JSON.stringify(dutySpansCache.find(s => String(s.id) === String(spanId))) !== sourceFingerprint) throw new Error("The source duty or target roster changed. No copy was created. Review again.");
+    await addDutySpan(payload);
+    selectedDriverEmpNo = String(targetEmpNo);
+    showPageMessage(`Pending duty copied to ${payload.driverName}. Original duty, bus and jobs were not changed.`, "success", 7000);
+  } catch (error) {
+    showPageMessage(error?.message || "Unable to copy the duty.", "error", 7500);
+  } finally {
+    dutyCopyBusy = false;
+  }
+}
+
 function setupDutySpanDragEvents() {
   timelineBodyEl.querySelectorAll("[data-duty-span-bar]").forEach((bar) => {
     bar.ondragstart = (event) => {
       draggedDutySpanId = bar.dataset.dutySpanBar || "";
       draggedBlockId = "";
       event.dataTransfer.setData("dutySpanId", draggedDutySpanId);
-      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.effectAllowed = "copyMove";
       bar.classList.add("dragging");
     };
     bar.ondragend = () => {
