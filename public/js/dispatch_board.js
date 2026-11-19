@@ -61,6 +61,7 @@ els.contentArea.innerHTML = `
       <button id="loadDispatchBtn" class="dispatch-primary-btn" type="button">Load Dispatch</button>
       <label><span>Sort drivers</span><select id="driverSortBy">
         <option value="name">Alphabetical</option>
+        <option value="start_time">Start time</option>
         <option value="empno">Employee Number</option>
         <option value="type_name">Employee Type</option>
       </select></label>
@@ -395,6 +396,20 @@ const selectedDriverEmpNos = new Set();
 
     const sortBy = driverSortByEl?.value || "type_name";
 
+    // Build once per render; preserve extended hours for overnight duties.
+    const earliestStarts = new Map();
+    if (sortBy === "start_time") {
+      const selectedDate = getSelectedDate();
+      for (const span of dutySpansCache) {
+        if (String(span.serviceDate || "") !== selectedDate) continue;
+        if (span.startMin == null || String(span.startMin).trim() === "") continue;
+        const start = Number(span.startMin);
+        if (!Number.isFinite(start) || start < 0) continue;
+        const empNo = String(span.driverEmployeeNumber || "");
+        earliestStarts.set(empNo, Math.min(earliestStarts.get(empNo) ?? Infinity, start));
+      }
+    }
+
     drivers.sort((a, b) => {
       const aName = String(a.displayName || a.firstName || "").toLowerCase();
       const bName = String(b.displayName || b.firstName || "").toLowerCase();
@@ -411,6 +426,13 @@ const selectedDriverEmpNos = new Set();
         if (v.includes("casual")) return 3;
         return 9;
       };
+
+      if (sortBy === "start_time") {
+        const aStart = earliestStarts.get(aEmp) ?? Infinity;
+        const bStart = earliestStarts.get(bEmp) ?? Infinity;
+        if (aStart !== bStart) return aStart < bStart ? -1 : 1;
+        return aName.localeCompare(bName) || aEmp.localeCompare(bEmp, undefined, { numeric: true });
+      }
 
       if (sortBy === "name") {
         return aName.localeCompare(bName);
