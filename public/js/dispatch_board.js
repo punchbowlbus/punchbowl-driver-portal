@@ -34,7 +34,13 @@ export function renderDispatchBoardPage() {
     return `${y}-${m}-${d}`;
   }
 
-  const today = state.dispatchDate || getLocalTodayStr();
+  let dispatchPreferences = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem("dispatch-preferences") || "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) dispatchPreferences = saved;
+  } catch {}
+  const savedDate = /^\d{4}-\d{2}-\d{2}$/.test(dispatchPreferences.date || "") ? dispatchPreferences.date : "";
+  const today = state.dispatchDate || savedDate || getLocalTodayStr();
   state.dispatchDate = null; // consume it
 
 els.contentArea.innerHTML = `
@@ -58,9 +64,9 @@ els.contentArea.innerHTML = `
 
     <div class="dispatch-pro-toolbar">
       <label><span>Dispatch date</span><input id="dispatchDate" type="date" value="${today}" /></label>
-      <button id="loadDispatchBtn" class="dispatch-primary-btn" type="button">Load Dispatch</button>
       <label><span>Sort drivers</span><select id="driverSortBy">
         <option value="name">Alphabetical</option>
+        <option value="start_time">Start time</option>
         <option value="empno">Employee Number</option>
         <option value="type_name">Employee Type</option>
       </select></label>
@@ -85,8 +91,8 @@ els.contentArea.innerHTML = `
 
     <section id="unassignedJobsPanel" class="dispatch-unassigned-panel compact">
       <div class="dispatch-unassigned-head">
-        <button id="toggleUnassignedJobsBtn" class="dispatch-unassigned-title" type="button" aria-expanded="true">
-          <span class="dispatch-unassigned-chevron">⌄</span>
+        <button id="toggleUnassignedJobsBtn" class="dispatch-unassigned-title" type="button" aria-expanded="true" aria-controls="unassignedJobsAxisRow">
+          <span class="dispatch-unassigned-chevron" aria-hidden="true">⌄</span>
           <span>Unassigned Work</span>
           <strong id="unassignedJobsCount">0</strong>
         </button>
@@ -104,7 +110,7 @@ els.contentArea.innerHTML = `
           <span id="unassignedJobsDateLabel" class="dispatch-unassigned-date">${today}</span>
         </div>
       </div>
-      <div class="dispatch-unassigned-axis-row">
+      <div id="unassignedJobsAxisRow" class="dispatch-unassigned-axis-row">
         <div id="unassignedJobsGutter" class="dispatch-unassigned-gutter" aria-hidden="true">
           <div class="dispatch-unassigned-gutter-header">Unassigned</div>
           <div id="unassignedJobsGroupLabels" class="dispatch-unassigned-group-labels"></div>
@@ -134,7 +140,7 @@ els.contentArea.innerHTML = `
 
       <aside id="dispatchRightPanel" class="dispatch-detail-panel">
         <div class="dispatch-panel-heading dispatch-detail-heading">
-          <button id="toggleDetailPanelBtn" type="button" class="dispatch-icon-btn" title="Hide details">›</button>
+          <button id="toggleDetailPanelBtn" type="button" class="dispatch-detail-toggle" title="Close duty details" aria-label="Close duty details" aria-expanded="true" aria-controls="dispatchDetailPanel"><span class="dispatch-detail-toggle-arrow" aria-hidden="true">›</span><span class="dispatch-detail-toggle-label" aria-hidden="true">Duty details</span></button>
           <span id="dispatchRightPanelTitle">Driver / Duty Details</span>
         </div>
         <div id="dispatchDetailPanel"><div class="dispatch-empty-state">Select a driver or numbered job to view details.</div></div>
@@ -155,7 +161,6 @@ els.contentArea.innerHTML = `
 `;
 
 const dispatchDateEl = document.getElementById("dispatchDate");
-const loadBtn = document.getElementById("loadDispatchBtn");
 const driversTopSpacerEl = document.getElementById("dispatchDriversTopSpacer");
 const driversScrollEl = document.getElementById("dispatchDriversScroll");
 const driversListEl = document.getElementById("dispatchDriversList");
@@ -177,25 +182,25 @@ const pageMessageEl = document.getElementById("dispatchPageMessage");
 const visibleDriverCountEl = document.getElementById("visibleDriverCount");
 const toggleDetailPanelBtn = document.getElementById("toggleDetailPanelBtn");
 
-toggleDetailPanelBtn.onclick = () => {
+function setDetailPanelCollapsed(collapsed) {
   const mainWorkArea = document.getElementById("dispatchMainWorkArea");
-  const rightPanel = detailPanelEl.parentElement;
+  const rightPanel = document.getElementById("dispatchRightPanel");
+  if (!mainWorkArea || !rightPanel || !detailPanelEl) return;
+  rightPanel.classList.toggle("collapsed", collapsed);
+  mainWorkArea.classList.toggle("details-collapsed", collapsed);
+  detailPanelEl.hidden = collapsed;
+  dispatchPreferences.detailsCollapsed = collapsed;
+  saveDispatchPreferences();
+  const label = collapsed ? "Open duty details" : "Close duty details";
+  toggleDetailPanelBtn.title = label;
+  toggleDetailPanelBtn.setAttribute("aria-label", label);
+  toggleDetailPanelBtn.setAttribute("aria-expanded", String(!collapsed));
+  toggleDetailPanelBtn.querySelector(".dispatch-detail-toggle-arrow").textContent = collapsed ? "‹" : "›";
+}
 
-  if (!mainWorkArea || !rightPanel) return;
-
-  if (detailPanelEl.style.display === "none") {
-    detailPanelEl.style.display = "block";
-    rightPanel.classList.remove("collapsed");
-    mainWorkArea.classList.remove("details-collapsed");
-    toggleDetailPanelBtn.textContent = "›";
-    toggleDetailPanelBtn.title = "Hide details";
-  } else {
-    detailPanelEl.style.display = "none";
-    rightPanel.classList.add("collapsed");
-    mainWorkArea.classList.add("details-collapsed");
-    toggleDetailPanelBtn.textContent = "‹";
-    toggleDetailPanelBtn.title = "Show details";
-  }
+toggleDetailPanelBtn.onclick = () => {
+  const rightPanel = document.getElementById("dispatchRightPanel");
+  setDetailPanelCollapsed(!rightPanel?.classList.contains("collapsed"));
 };
 
 const unassignedJobsPanelEl = document.getElementById("unassignedJobsPanel");
@@ -228,8 +233,22 @@ let draggedBlockId = "";
 let draggedDutySpanId = "";
 let selectedBlockId = "";
 let unassignedDensity = "compact";
+let lastOpenUnassignedDensity = "compact";
 let messageTimer = null;
-const selectedDriverEmpNos = new Set();
+const selectedDriverEmpNos = new Set(Array.isArray(dispatchPreferences.drivers) ? dispatchPreferences.drivers.filter(value => typeof value === "string") : []);
+if (["name", "empno", "type_name", "start_time"].includes(dispatchPreferences.sort)) driverSortByEl.value = dispatchPreferences.sort;
+if (["all", "working", "on_leave", "no_jobs"].includes(dispatchPreferences.view)) driverViewFilterEl.value = dispatchPreferences.view;
+
+function saveDispatchPreferences() {
+  dispatchPreferences = {
+    ...dispatchPreferences,
+    date: getSelectedDate(),
+    sort: driverSortByEl.value,
+    view: driverViewFilterEl.value,
+    drivers: [...selectedDriverEmpNos]
+  };
+  try { localStorage.setItem("dispatch-preferences", JSON.stringify(dispatchPreferences)); } catch {}
+}
 
   const SLOT_MINUTES = 15;
   const TOTAL_SLOTS = 144;
@@ -395,6 +414,20 @@ const selectedDriverEmpNos = new Set();
 
     const sortBy = driverSortByEl?.value || "type_name";
 
+    // Build once per render; preserve extended hours for overnight duties.
+    const earliestStarts = new Map();
+    if (sortBy === "start_time") {
+      const selectedDate = getSelectedDate();
+      for (const span of dutySpansCache) {
+        if (String(span.serviceDate || "") !== selectedDate) continue;
+        if (span.startMin == null || String(span.startMin).trim() === "") continue;
+        const start = Number(span.startMin);
+        if (!Number.isFinite(start) || start < 0) continue;
+        const empNo = String(span.driverEmployeeNumber || "");
+        earliestStarts.set(empNo, Math.min(earliestStarts.get(empNo) ?? Infinity, start));
+      }
+    }
+
     drivers.sort((a, b) => {
       const aName = String(a.displayName || a.firstName || "").toLowerCase();
       const bName = String(b.displayName || b.firstName || "").toLowerCase();
@@ -411,6 +444,13 @@ const selectedDriverEmpNos = new Set();
         if (v.includes("casual")) return 3;
         return 9;
       };
+
+      if (sortBy === "start_time") {
+        const aStart = earliestStarts.get(aEmp) ?? Infinity;
+        const bStart = earliestStarts.get(bEmp) ?? Infinity;
+        if (aStart !== bStart) return aStart < bStart ? -1 : 1;
+        return aName.localeCompare(bName) || aEmp.localeCompare(bEmp, undefined, { numeric: true });
+      }
 
       if (sortBy === "name") {
         return aName.localeCompare(bName);
@@ -1975,6 +2015,7 @@ function renderNowLine() {
     return "#3b82f6"; // pending = blue
   }
 function renderDrivers() {
+  saveDispatchPreferences();
   const activeDrivers = getActiveDrivers();
 
   driversListEl.innerHTML = activeDrivers
@@ -2473,12 +2514,16 @@ function getUnassignedDisplayCode(block) {
 }
 
 function setUnassignedPanelState(state = "compact") {
+  state = ["collapsed", "compact", "expanded"].includes(state) ? state : "compact";
   unassignedDensity = state;
+  if (state !== "collapsed") lastOpenUnassignedDensity = state;
   if (!unassignedJobsPanelEl) return;
   unassignedJobsPanelEl.classList.remove("collapsed", "compact", "expanded");
   unassignedJobsPanelEl.classList.add(state);
   toggleUnassignedJobsBtn?.setAttribute("aria-expanded", String(state !== "collapsed"));
-  if (unassignedDensityBtn) unassignedDensityBtn.textContent = state === "expanded" ? "Compact" : "Expand";
+  const chevron = toggleUnassignedJobsBtn?.querySelector(".dispatch-unassigned-chevron");
+  if (chevron) chevron.textContent = state === "collapsed" ? "›" : "⌄";
+  if (unassignedDensityBtn) unassignedDensityBtn.textContent = state === "collapsed" ? "Show" : state === "expanded" ? "Compact" : "Expand";
   try { localStorage.setItem("dispatch-unassigned-density", state); } catch {}
   renderUnassignedJobs(blocksCache, getSelectedDate());
 }
@@ -3336,7 +3381,8 @@ function loadDispatchForDate(selectedDate, { openPanel = false } = {}) {
     return;
   }
 
-  sessionStorage.setItem("dispatchDate", selectedDate);
+  try { sessionStorage.setItem("dispatchDate", selectedDate); } catch {}
+  saveDispatchPreferences();
   showError("");
 
   if (unassignedJobsDateLabelEl) {
@@ -3350,11 +3396,6 @@ function loadDispatchForDate(selectedDate, { openPanel = false } = {}) {
   loadUnassignedJobsForDate(selectedDate);
   startDutySpanListener(selectedDate);
 }
-
-loadBtn.onclick = () => {
-  loadDispatchForDate(dispatchDateEl.value, { openPanel: true });
-  showPageMessage("Dispatch board loaded.", "success");
-};
 
 dispatchDateEl.onchange = () => {
   loadDispatchForDate(dispatchDateEl.value, { openPanel: false });
@@ -3415,10 +3456,10 @@ document.addEventListener("fullscreenchange", () => {
 });
 
 toggleUnassignedJobsBtn.onclick = () => {
-  setUnassignedPanelState(unassignedDensity === "collapsed" ? "compact" : "collapsed");
+  setUnassignedPanelState(unassignedDensity === "collapsed" ? lastOpenUnassignedDensity : "collapsed");
 };
 unassignedDensityBtn.onclick = () => {
-  setUnassignedPanelState(unassignedDensity === "expanded" ? "compact" : "expanded");
+  setUnassignedPanelState(unassignedDensity === "collapsed" ? lastOpenUnassignedDensity : unassignedDensity === "expanded" ? "compact" : "expanded");
 };
 unassignedJobsSearchEl.oninput = () => renderUnassignedJobs(blocksCache, getSelectedDate());
 unassignedJobsTimeFilterEl.onchange = () => renderUnassignedJobs(blocksCache, getSelectedDate());
@@ -3482,6 +3523,8 @@ if (nowLineTimer) {
 nowLineTimer = setInterval(() => {
   renderNowLine();
 }, 60000);
+
+setDetailPanelCollapsed(dispatchPreferences.detailsCollapsed === true);
 
 const savedBoardView = localStorage.getItem("dispatch-board-view") || "standard";
 boardViewModeEl.value = savedBoardView === "fullscreen" ? "standard" : savedBoardView;
