@@ -5,6 +5,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
+const { createJobDeliveryHandler } = require("./job-delivery");
 const { createDutyDeliveryHandler, isRetryableMessagingError } = require("./duty-delivery");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -416,6 +417,12 @@ exports.notifyDriverOnDutyWritten = onDocumentWritten({
   timeoutSeconds: 60,
   retry: true
 }, deliverDutyEvent);
+
+// Job changes use the same recipient journal, stale checks and bounded retry sender.
+exports.notifyDriverOnDutyJobWritten = onDocumentWritten({
+  document: "blocks/{blockId}", region: "australia-southeast1",
+  maxInstances: 10, timeoutSeconds: 60, retry: true
+}, createJobDeliveryHandler({db, FieldValue, send:sendDutyNotification, dutySummary}));
 
 /* =========================================================
    Driver defect alerts — Firestore trigger

@@ -9,6 +9,7 @@ function harness({sendError, replacementToken}={}){
  const c=vm.createContext({exports:exported,process:{env:{}},console:{log(){},error(){}},require:name=>{
   if(name==='firebase-functions/v2/https')return {onCall:(options,run)=>({options,run}),HttpsError:Error};
   if(name==='firebase-functions/v2/firestore')return {onDocumentCreated:(options,run)=>({options,run}),onDocumentWritten:(options,run)=>({options,run})};
+  if(name==='./job-delivery')return require('../functions-notifications/job-delivery');
   if(name==='./duty-delivery')return require('../functions-notifications/duty-delivery');
   if(name==='firebase-admin')return {initializeApp(){}};
   if(name==='firebase-admin/firestore')return {getFirestore:()=>db,FieldValue:{serverTimestamp:()=> 'TIMESTAMP',delete:()=> 'DELETE'}};

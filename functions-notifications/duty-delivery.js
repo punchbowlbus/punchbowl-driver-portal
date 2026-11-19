@@ -23,7 +23,7 @@ function isCurrentNotification(notification, after, current) {
 }
 function retryError() { return new Error('Duty notification delivery is pending a bounded retry.'); }
 
-function createDutyDeliveryHandler({db, FieldValue, classify, send, now = Date.now, leaseId = randomUUID}) {
+function createDutyDeliveryHandler({db, FieldValue, classify, send, isRelevant = async () => true, now = Date.now, leaseId = randomUUID}) {
   return async function handle(event) {
     const before = event.data?.before?.exists ? event.data.before.data() || {} : null;
     const after = event.data?.after?.exists ? event.data.after.data() || {} : null;
@@ -79,7 +79,7 @@ function createDutyDeliveryHandler({db, FieldValue, classify, send, now = Date.n
       try {
         const latest = await db.collection('dutySpans').doc(event.params.dutySpanId).get();
         const current = latest.exists ? latest.data() : null;
-        result = isCurrentNotification(notification, after, current)
+        result = isCurrentNotification(notification, after, current) && await isRelevant({notification, current})
           ? await send({dutySpanId:event.params.dutySpanId, duty, notification})
           : {status:'skipped', reason:'stale-event', employeeNumber:notification.employeeNumber};
       } catch (error) {
