@@ -4,11 +4,12 @@ function harness({sendError, replacementToken, sendHook}={}){
  const sends=[],logs=[];
  const records=new Map();
  const ref=path=>({path,collection:name=>({doc:id=>ref(path+'/'+name+'/'+id)}),get:async()=>({exists:records.has(path)||path.startsWith('employees/'),data:()=>records.get(path)||{status:'Active',fcmToken:'TEST-DEVICE-'+path.split('/')[1]}}),set:async(data,options)=>{records.set(path,options?.merge?{...records.get(path),...data}:data);logs.push({name:path.split('/')[0],id:path.split('/')[1],data})}});
- const db={collection:name=>({doc:id=>ref(name+'/'+id)}),runTransaction:async fn=>fn({get:r=>r.get(),set:(r,data,options)=>records.set(r.path,options?.merge?{...records.get(r.path),...data}:data),update:(r,data)=>records.set(r.path,{...records.get(r.path),...data})})};
+ const db={collection:name=>({doc:id=>ref(name+'/'+id),where:()=>({limit:()=>({get:async()=>({empty:false,docs:[{data:()=>({role:'Driver',accessLevel:'Driver',status:'Active'})}]})})})}),runTransaction:async fn=>fn({get:r=>r.get(),set:(r,data,options)=>records.set(r.path,options?.merge?{...records.get(r.path),...data}:data),update:(r,data)=>records.set(r.path,{...records.get(r.path),...data})})};
  const exported={};
  const c=vm.createContext({exports:exported,process:{env:{}},console:{log(){},error(){}},require:name=>{
   if(name==='firebase-functions/v2/https')return {onCall:(options,run)=>({options,run}),HttpsError:Error};
   if(name==='firebase-functions/v2/firestore')return {onDocumentCreated:(options,run)=>({options,run}),onDocumentWritten:(options,run)=>({options,run})};
+  if(name==='./delivery-report')return require('../functions-notifications/delivery-report');
   if(name==='./devices')return require('../functions-notifications/devices');
   if(name==='./job-delivery')return require('../functions-notifications/job-delivery');
   if(name==='./duty-delivery')return require('../functions-notifications/duty-delivery');
@@ -21,7 +22,7 @@ function harness({sendError, replacementToken, sendHook}={}){
  const classify=(before,after)=>JSON.parse(JSON.stringify(c.classifyDutyNotifications(before,after)));
  const snapshot=data=>({exists:!!data,data:()=>data});
  const run=(before,after)=>{if(after)records.set('dutySpans/duty-1',after);else records.delete('dutySpans/duty-1');return exported.notifyDriverOnDutyWritten.run({id:'event-1',time:new Date().toISOString(),params:{dutySpanId:'duty-1'},data:{before:snapshot(before),after:snapshot(after)}})};
- return{classify,run,sends,logs,records};
+ return{classify,run,sends,logs,records,functions:exported};
 }
 const duty={driverEmployeeNumber:'963',dispatchStatus:'Assigned',driverAcknowledgment:'Yes',serviceDate:'2026-11-20',dutyNumber:'RAIL1',startMin:1380,endMin:1560,breaks:[],assignedBus:'BUS1'};
 const types=events=>events.map(e=>e.eventType+':'+e.employeeNumber);
@@ -90,4 +91,12 @@ test('duty sender never sends to a managed token now owned by another employee',
  const h=harness(),{keyFor}=require('../functions-notifications/devices');
  h.records.set('portalNotificationDevices/'+keyFor('TEST-DEVICE-963'),{recipientPath:'employees/943',uid:'other-user'});
  await h.run({...duty,dispatchStatus:'Pending'},duty);assert.equal(h.sends.length,0);
+});
+
+test('delivery activity callable rejects unsigned or unverified requests before reading logs',async()=>{
+ const h=harness();await assert.rejects(h.functions.getNotificationDeliveryLog.run({data:{kind:'duty'}}));await assert.rejects(h.functions.getNotificationDeliveryLog.run({auth:{uid:'x',token:{email:'driver@test',email_verified:false}},data:{kind:'duty'}}));assert.equal(h.sends.length,0);assert.equal(h.logs.length,0);
+});
+
+test('verified ordinary driver cannot read management delivery logs',async()=>{
+ const h=harness();await assert.rejects(h.functions.getNotificationDeliveryLog.run({auth:{uid:'driver',token:{email:'driver@test.example',email_verified:true}},data:{kind:'duty'}}));assert.equal(h.sends.length,0);assert.equal(h.logs.length,0);
 });

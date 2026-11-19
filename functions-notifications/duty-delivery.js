@@ -69,7 +69,7 @@ function createDutyDeliveryHandler({db, FieldValue, classify, send, isRelevant =
           return {result};
         }
         const attempts = (previous.attempts || 0) + 1;
-        if (!parent.exists) tx.set(logRef, {createdAt:FieldValue.serverTimestamp()}, {merge:true});
+        if (!parent.exists) tx.set(logRef, {createdAt:FieldValue.serverTimestamp(),updatedAt:FieldValue.serverTimestamp(),eventId:event.id,dutySpanId:event.params.dutySpanId,dutyNumber:String(duty.dutyNumber||''),serviceDate:String(duty.serviceDate||duty.date||''),eventTypes:notifications.map(n=>n.eventType),recipientEmployeeNumbers:notifications.map(n=>n.employeeNumber),status:'processing'}, {merge:true});
         tx.set(recipientRef, {status:'processing', attempts, firstAttemptAt:previous.firstAttemptAt ?? currentTime, leaseUntil:currentTime + LEASE_MS, owner, employeeNumber:notification.employeeNumber, eventType:notification.eventType});
         return {attempts};
       });
@@ -97,7 +97,7 @@ function createDutyDeliveryHandler({db, FieldValue, classify, send, isRelevant =
       if (!finalized || result.status === 'retryable') pending = true;
       results.push(result);
     }
-    await logRef.set({deliveryVersion:2,eventId:event.id,dutySpanId:event.params.dutySpanId,serviceDate:String(duty.serviceDate || duty.date || ''),eventTypes:notifications.map(n=>n.eventType),recipientEmployeeNumbers:notifications.map(n=>n.employeeNumber),status:pending?'pending-retry':'complete',results,updatedAt:FieldValue.serverTimestamp()}, {merge:true});
+    await logRef.set({deliveryVersion:2,eventId:event.id,dutySpanId:event.params.dutySpanId,serviceDate:String(duty.serviceDate || duty.date || ''),dutyNumber:String(duty.dutyNumber||''),eventTypes:notifications.map(n=>n.eventType),recipientEmployeeNumbers:notifications.map(n=>n.employeeNumber),status:pending?'pending-retry':'complete',results,updatedAt:FieldValue.serverTimestamp()}, {merge:true});
     if (pending) throw retryError();
     return results;
   };

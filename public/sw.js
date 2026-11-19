@@ -1,4 +1,4 @@
-const CACHE = "pbc-v91"; // Refresh multi-device notification registration
+const CACHE = "pbc-v92"; // Refresh notification delivery activity view
 
 const ASSETS = [
   "/",

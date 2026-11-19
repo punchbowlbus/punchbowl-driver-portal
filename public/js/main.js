@@ -397,7 +397,7 @@ export async function go(pageId) {
     if (!state.isAdmin) return showError("No admin access");
 
     stopAllListeners();
-    const mod = await import("./settings.js?v=7");
+    const mod = await import("./settings.js?v=8");
     await mod.renderSettingsPage();
     return;
   }

@@ -5,6 +5,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
+const {getDeliveryReport}=require("./delivery-report");
 const {createDeviceRegistry,recipientTokens,ownedRecipientTokens,keyFor}=require("./devices");
 const { createJobDeliveryHandler } = require("./job-delivery");
 const { createDutyDeliveryHandler, isRetryableMessagingError } = require("./duty-delivery");
@@ -66,6 +67,12 @@ const notificationDevices=createDeviceRegistry({db,FieldValue,HttpsError,resolve
 }});
 exports.registerPortalNotificationDevice=onCall({region:"australia-southeast1",maxInstances:10},notificationDevices.register);
 exports.unregisterPortalNotificationDevice=onCall({region:"australia-southeast1",maxInstances:10},notificationDevices.unregister);
+
+exports.getNotificationDeliveryLog=onCall({region:"australia-southeast1",maxInstances:10},async request=>{
+  await requirePortalAdmin(request);
+  if(!["duty","general","defect"].includes(request.data?.kind||"duty"))throw new HttpsError("invalid-argument","Choose a valid notification category.");
+  return getDeliveryReport(db,{kind:request.data?.kind||"duty",limit:request.data?.limit||100});
+});
 
 exports.registerPortalAdminNotificationDevice = onCall({
   region: "australia-southeast1",
@@ -437,7 +444,7 @@ async function sendDutyNotification({ dutySpanId, duty, notification, deliveryRe
     deviceResults.push(result);
   }
   const status=deviceResults.some(r=>r.status==="retryable")?"retryable":deviceResults.some(r=>r.status==="accepted")?"accepted":deviceResults.some(r=>r.status==="failed")?"failed":"skipped";
-  return {status,employeeNumber,deviceResults,acceptedDeviceCount:deviceResults.filter(r=>r.status==="accepted").length,failedDeviceCount:deviceResults.filter(r=>r.status==="failed").length};
+  return {status,employeeNumber,deviceResults,reason:status==="skipped"?(deviceResults[0]?.reason||""):"",errorCode:[...new Set(deviceResults.map(r=>r.errorCode).filter(Boolean))].join(", "),acceptedDeviceCount:deviceResults.filter(r=>r.status==="accepted").length,failedDeviceCount:deviceResults.filter(r=>r.status==="failed").length};
 }
 
 const deliverDutyEvent = createDutyDeliveryHandler({db, FieldValue, classify:classifyDutyNotifications, send:sendDutyNotification});
