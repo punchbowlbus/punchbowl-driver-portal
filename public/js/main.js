@@ -378,7 +378,7 @@ export async function go(pageId) {
 
     stopAllListeners();
 
-    const mod = await import("./dispatch_board.js?v=18");
+    const mod = await import("./dispatch_board.js?v=19");
     mod.renderDispatchBoardPage();
     return;
   }
