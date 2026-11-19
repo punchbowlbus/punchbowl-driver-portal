@@ -80,7 +80,7 @@ function createDutyDeliveryHandler({db, FieldValue, classify, send, isRelevant =
         const latest = await db.collection('dutySpans').doc(event.params.dutySpanId).get();
         const current = latest.exists ? latest.data() : null;
         result = isCurrentNotification(notification, after, current) && await isRelevant({notification, current})
-          ? await send({dutySpanId:event.params.dutySpanId, duty, notification})
+          ? await send({dutySpanId:event.params.dutySpanId, duty, notification, deliveryRef:recipientRef})
           : {status:'skipped', reason:'stale-event', employeeNumber:notification.employeeNumber};
       } catch (error) {
         // Firestore/network failures outside the Messaging send are retried within the same bound.

@@ -18,7 +18,7 @@ import {
   uploadBytes,
   getDownloadURL
 } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-storage.js";
-import { getToken, onMessage } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
+import { getToken, deleteToken, onMessage } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-messaging.js";
 import { httpsCallable } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-functions.js";
 import { auth, provider, db, functions, messaging, storage } from "./firebase.js";
 import { ADMIN_EMAILS, FCM_VAPID_KEY } from "./config.js";
@@ -41,6 +41,8 @@ import { renderShifts } from "./shifts_ui.js";
 import { openLegModal } from "./modals.js";
 import { updateDutySpanDriverAcknowledgment } from "./db.js";
 let notificationRegisteredForEmpNo = "";
+let notificationCurrentToken = "";
+let notificationRegistrationQueue = Promise.resolve();
 
 /* =========================================================
    Helpers
@@ -1208,8 +1210,15 @@ function setupMobileMenu() {
   window.closeMobileMenu = closeMenu;
 }
 
-async function registerPortalNotifications(employee, { requestPermission = false } = {}) {
+function registerPortalNotifications(employee, options = {}) {
+  const uid=state.currentUser?.uid;
+  const work=notificationRegistrationQueue.catch(()=>{}).then(()=>performPortalNotificationRegistration(employee,{...options,expectedUid:uid}));
+  notificationRegistrationQueue=work;
+  return work;
+}
+async function performPortalNotificationRegistration(employee, { requestPermission = false, expectedUid } = {}) {
   try {
+    if(state.currentUser?.uid!==expectedUid)return {ok:false,status:"account-changed",message:"The signed-in account changed."};
     const portalAdmin = Boolean(state.currentUser && isAdminEmail(state.currentUser.email));
     if (!employee && !portalAdmin) {
       return {
@@ -1291,15 +1300,6 @@ async function registerPortalNotifications(employee, { requestPermission = false
     }
 
     const registrationKey = activeEmployeeRecipient ? empNo : `portalAdmin:${state.currentUser.uid}`;
-    if (notificationRegisteredForEmpNo === registrationKey) {
-      console.log("FCM already registered for portal user:", registrationKey);
-      return {
-        ok: true,
-        status: "already-registered",
-        message: "Alerts are already enabled on this device."
-      };
-    }
-
     const token = await getToken(messaging, {
       vapidKey: FCM_VAPID_KEY
     });
@@ -1313,24 +1313,14 @@ async function registerPortalNotifications(employee, { requestPermission = false
       };
     }
 
-    let portalAdminRecipient = null;
-    if (activeEmployeeRecipient) {
-      await setDoc(
-        doc(db, "employees", empNo),
-        {
-          fcmToken: token,
-          fcmTokenUpdatedAt: serverTimestamp()
-        },
-        { merge: true }
-      );
-    } else {
-      const registerAdminDevice = httpsCallable(functions, "registerPortalAdminNotificationDevice");
-      const response = await registerAdminDevice({
-        token,
-        displayName: state.currentUser?.displayName || state.currentUser?.email || "Portal administrator"
-      });
-      portalAdminRecipient = response.data?.recipient || null;
-    }
+    if(state.currentUser?.uid!==expectedUid)return {ok:false,status:"account-changed",message:"Please enable alerts for the current signed-in account."};
+    if(notificationRegisteredForEmpNo===registrationKey&&notificationCurrentToken===token)return {ok:true,status:"already-registered",message:"Alerts are already enabled on this device."};
+    notificationCurrentToken=token;
+    const registerDevice=httpsCallable(functions,"registerPortalNotificationDevice");
+    const response=await registerDevice({token});
+    const portalAdminRecipient=response.data?.recipient||null;
+    if(state.currentUser?.uid!==expectedUid)return {ok:false,status:"account-changed",message:"The signed-in account changed."};
+    notificationCurrentToken=token;
 
     console.log("FCM token saved for portal user:", registrationKey);
     notificationRegisteredForEmpNo = registrationKey;
@@ -1348,6 +1338,28 @@ async function registerPortalNotifications(employee, { requestPermission = false
       message: err?.message || "Notification setup failed. Please try again."
     };
   }
+}
+
+function signOutPortalWithNotificationDevice() {
+  const uid=state.currentUser?.uid;
+  const work=notificationRegistrationQueue.catch(()=>{}).then(()=>performSignOutPortal(uid));
+  notificationRegistrationQueue=work;
+  return work;
+}
+async function performSignOutPortal(expectedUid) {
+  if(state.currentUser?.uid!==expectedUid)return;
+  const token=notificationCurrentToken;
+  let detached=false;
+  if(token){
+    try{await httpsCallable(functions,"unregisterPortalNotificationDevice")({token});detached=true;}catch(error){console.error("Device alert unregister failed",error);}
+  }
+  if(state.currentUser?.uid!==expectedUid)return;
+  try{await deleteToken(messaging);detached=true;}catch(error){console.error("Device push token reset failed",error);}
+  if(state.currentUser?.uid!==expectedUid)return;
+  notificationRegisteredForEmpNo="";
+  notificationCurrentToken="";
+  await signOut(auth);
+  if(token&&!detached)showError("Signed out, but alert registration could not be removed. Disable this site's notifications in browser settings on a shared device.");
 }
 
 window.enablePortalNotifications = () => registerPortalNotifications(state.employee, {
@@ -1459,7 +1471,7 @@ renderAuth(
   state.currentUser,
   state.employee,
   () => signInWithPopup(auth, provider),
-  () => signOut(auth)
+  () => signOutPortalWithNotificationDevice()
 )
 
   els.contentArea.style.display = u ? "block" : "none";

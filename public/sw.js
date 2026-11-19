@@ -1,4 +1,4 @@
-const CACHE = "pbc-v90"; // Refresh Dispatch bulk status and duty-copy release
+const CACHE = "pbc-v91"; // Refresh multi-device notification registration
 
 const ASSETS = [
   "/",
