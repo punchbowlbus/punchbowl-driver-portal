@@ -5,6 +5,7 @@
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
+const { createDutyDeliveryHandler, isRetryableMessagingError } = require("./duty-delivery");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 
@@ -385,61 +386,36 @@ async function sendDutyNotification({ dutySpanId, duty, notification }) {
         fcmOptions: { link }
       }
     });
-    return { status: "sent", employeeNumber, messageId };
+    return { status: "accepted", employeeNumber, messageId };
   } catch (error) {
     const errorCode = String(error?.code || "unknown");
     if (
       errorCode === "messaging/registration-token-not-registered" ||
       errorCode === "messaging/invalid-registration-token"
     ) {
-      await employeeRef.set({
-        fcmToken: FieldValue.delete(),
-        fcmTokenUpdatedAt: FieldValue.serverTimestamp()
-      }, { merge: true });
+      try {
+        await db.runTransaction(async transaction => {
+          const latest = await transaction.get(employeeRef);
+          if (latest.exists && String(latest.data().fcmToken || "").trim() === token) {
+            transaction.update(employeeRef, {fcmToken: FieldValue.delete(), fcmTokenUpdatedAt: FieldValue.serverTimestamp()});
+          }
+        });
+      } catch (cleanupError) {
+        console.error("Unable to clear invalid duty notification token", {employeeNumber, code:cleanupError?.code || "unknown"});
+      }
     }
-    return { status: "failed", employeeNumber, errorCode };
+    return { status: isRetryableMessagingError(errorCode) ? "retryable" : "failed", employeeNumber, errorCode };
   }
 }
 
+const deliverDutyEvent = createDutyDeliveryHandler({db, FieldValue, classify:classifyDutyNotifications, send:sendDutyNotification});
 exports.notifyDriverOnDutyWritten = onDocumentWritten({
   document: "dutySpans/{dutySpanId}",
   region: "australia-southeast1",
   maxInstances: 10,
-  retry: false
-}, async (event) => {
-  const before = event.data?.before?.exists ? event.data.before.data() || {} : null;
-  const after = event.data?.after?.exists ? event.data.after.data() || {} : null;
-  const duty = after || before;
-  if (!duty) return;
-
-  const notifications = classifyDutyNotifications(before, after);
-  if (!notifications.length) return;
-
-  const results = [];
-  for (const notification of notifications) {
-    results.push(await sendDutyNotification({
-      dutySpanId: event.params.dutySpanId,
-      duty,
-      notification
-    }));
-  }
-
-  await db.collection("dutyNotificationDeliveries").doc(event.id).set({
-    eventId: event.id,
-    dutySpanId: event.params.dutySpanId,
-    serviceDate: String(duty.serviceDate || duty.date || ""),
-    eventTypes: notifications.map((item) => item.eventType),
-    recipientEmployeeNumbers: notifications.map((item) => item.employeeNumber),
-    results,
-    createdAt: FieldValue.serverTimestamp()
-  });
-
-  console.log("Driver duty notification completed", {
-    dutySpanId: event.params.dutySpanId,
-    eventTypes: notifications.map((item) => item.eventType),
-    results
-  });
-});
+  timeoutSeconds: 60,
+  retry: true
+}, deliverDutyEvent);
 
 /* =========================================================
    Driver defect alerts — Firestore trigger
