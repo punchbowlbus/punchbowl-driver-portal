@@ -50,3 +50,14 @@ test('a new driver block snapshot does not leave a removed orphan job behind',as
 test('an obsolete async duty render cannot overwrite a newer page or snapshot',async()=>{
  const h=harness();h.els.contentArea.innerHTML='New page';await h.render([job],{isCurrent:()=>false});assert.equal(h.els.contentArea.innerHTML,'New page');
 });
+test('offline export includes only resolved sections for the current duty, with stops and no unrelated fields',async()=>{
+ const h=harness();let saved;
+ await h.render([{...job,dutySpanId:'current',from:'Depot',to:'School',generatedLegs:[{from:'Depot',to:'School',startMin:555,endMin:570}],privateField:'omit'},
+ {...job,id:'another-driver',dutySpanId:'current',assignedDriverEmployeeNumber:'999'}],{onResolved:(span,jobs)=>{saved={span,jobs};}});
+ assert.equal(saved.jobs.length,1);assert.equal(saved.jobs[0].name,"ST MAROUN'S COLLEGE");assert.equal(saved.jobs[0].stops.length,1);assert.equal(saved.jobs[0].privateField,undefined);
+});
+test('unverified or obsolete duty renders cannot export a misleading offline sheet',async()=>{
+ for(const options of [{records:{'old-deleted-duty':new Error('unavailable')}},{isCurrent:()=>false}]){
+  const h=harness(options.records);let calls=0;await h.render([job],{isCurrent:options.isCurrent,onResolved:()=>{calls++;}});assert.equal(calls,0);
+ }
+});

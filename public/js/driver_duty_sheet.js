@@ -321,13 +321,18 @@ function breakCardHtml(breakItem) {
   `;
 }
 
-export async function renderDriverDutySheet({dutySpan, blocks, dutySpans = [dutySpan], isAdmin, onYes, onNo, onBack, isCurrent = () => true}) {
+export async function renderDriverDutySheet({dutySpan, blocks, dutySpans = [dutySpan], isAdmin, onYes, onNo, onBack, onResolved, isCurrent = () => true}) {
   const knownDuties = [...dutySpans.filter(duty => String(duty.id) !== String(dutySpan.id)), dutySpan];
   const [jobGroups, {linkedDuties, failed}] = await Promise.all([
     loadJobGroups(), loadLinkedDuties(blocks || [], dutySpan, knownDuties)
   ]);
   if (!isCurrent()) return;
   const assignedBlocks = (blocks || []).filter((block) => assignedToDuty(block, dutySpan, knownDuties, linkedDuties));
+  if (!failed) onResolved?.(dutySpan, assignedBlocks.map(block => ({
+    id: block.id, name: jobGroupName(block, jobGroups), direction: blockDirection(block),
+    from: blockFrom(block), to: blockTo(block), startMin: blockStart(block), endMin: blockEnd(block),
+    stops: Array.isArray(block.generatedLegs) ? block.generatedLegs : []
+  })));
   const groupedJobs = groupAssignedBlocks(assignedBlocks);
   const breaks = Array.isArray(dutySpan.breaks)
     ? dutySpan.breaks.slice().sort((a, b) => Number(a.startMin) - Number(b.startMin))

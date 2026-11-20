@@ -121,7 +121,7 @@ export function listenBlocksAll(onData, onErr) {
   );
 }
 
-export function listenBlocksByDate(date, onData, onErr) {
+export function listenBlocksByDate(date, onData, onErr, includeMetadataChanges = false) {
   if (!date) return listenBlocksAll(onData, onErr);
 
   const qy = query(
@@ -132,12 +132,13 @@ export function listenBlocksByDate(date, onData, onErr) {
 
   return onSnapshot(
     qy,
+    { includeMetadataChanges },
     (snap) => {
       const list = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((item) => item.deleted !== true);
 
-      onData(list);
+      onData(list, { fromCache: snap.metadata.fromCache, hasPendingWrites: snap.metadata.hasPendingWrites });
     },
     onErr
   );
@@ -360,6 +361,7 @@ export async function updateDutySpanStatusesBulk(entries, dispatchStatus, servic
 }
 
 export async function updateDutySpanDriverAcknowledgment(dutySpanId, driverAcknowledgment) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) throw new Error("Reconnect before confirming a duty. Offline work is read-only.");
   await updateDoc(doc(db, "dutySpans", dutySpanId), {
     driverAcknowledgment: normalizeDriverAcknowledgment(driverAcknowledgment),
     updatedAt: serverTimestamp()
@@ -482,12 +484,13 @@ export function listenDutySpansByDriverAndDateRange(driverEmployeeNumber, startD
 
   return onSnapshot(
     qy,
+    { includeMetadataChanges: true },
     (snap) => {
       const list = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((item) => item.deleted !== true);
 
-      onData(list);
+      onData(list, { fromCache: snap.metadata.fromCache, hasPendingWrites: snap.metadata.hasPendingWrites });
     },
     onErr
   );

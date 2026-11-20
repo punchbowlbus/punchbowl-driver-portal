@@ -1,4 +1,4 @@
-const CACHE = "pbc-v92"; // Refresh notification delivery activity view
+const CACHE = "pbc-v93"; // Saved read-only driver work
 
 const ASSETS = [
   "/",
@@ -40,8 +40,10 @@ const ASSETS = [
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
+    // Offline entry must be complete even if an unrelated optional asset fails.
+    await cache.addAll(["/offline.html", "/js/offline_driver_page.js", "/js/offline_driver_store.js", "/js/offline_driver_bridge.js"]);
     try {
-      await cache.addAll(ASSETS);
+      await Promise.allSettled(ASSETS.map(asset => cache.add(asset)));
     } catch (e) {
       console.log("SW precache warning:", e);
     }
@@ -90,9 +92,12 @@ self.addEventListener("fetch", (event) => {
       try {
         const fresh = await fetch(req, { cache: "no-store" });
         const cache = await caches.open(CACHE);
-        cache.put(req, fresh.clone());
+        if (fresh.ok) cache.put(req, fresh.clone());
         return fresh;
       } catch {
+        if (isHTML && ["/", "/index.html", "/offline.html"].includes(url.pathname)) {
+          return (await caches.match("/offline.html")) || Response.error();
+        }
         return (await caches.match(req)) || (isHTML ? caches.match("/index.html") : Response.error());
       }
     })());
