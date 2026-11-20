@@ -1,3 +1,4 @@
+import "./offline_driver_bridge.js";
 // public/js/main.js
 import { onAuthStateChanged, signInWithPopup, signOut } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
 import {
@@ -64,6 +65,7 @@ function isAdminEmail(email) {
     }
     state.blocks = null;
     state.blocksDate = "";
+    state.offlineBlocksVerified = false;
 
     if (state.unsubscribeDriverMonitor) {
       state.unsubscribeDriverMonitor();
@@ -675,28 +677,33 @@ if (pageId === "adminAllJobs") {
 
             state.unsubscribeJobDetailsBlocks = listenBlocksByDate(
               dutyDate,
-              (blocks) => {
+              (blocks, metadata) => {
                 // Ignore late snapshots from a stopped subscription. The date
                 // listener also serves another duty opened on this same date.
                 if (String(state.blocksDate || "") !== dutyDate) return;
+                state.offlineBlocksVerified = metadata?.fromCache === false && metadata?.hasPendingWrites === false;
                 state.blocks = blocks || [];
                 if (state.activePage === "jobDetails") {
                   go("jobDetails");
                 }
               },
-              (error) => showError(error?.message || "Failed to load assigned jobs")
+              (error) => showError(error?.message || "Failed to load assigned jobs"),
+              true // Server-confirmed snapshots are required for saved offline work.
             );
             return;
           }
 
           const displayedBlocks = state.blocks || [];
-          const dutySheetModule = await import("./driver_duty_sheet.js?v=7");
+          const dutySheetModule = await import("./driver_duty_sheet.js?v=8");
           await dutySheetModule.renderDriverDutySheet({
             dutySpan,
             blocks: displayedBlocks,
             isCurrent: () => state.activePage === "jobDetails" &&
               String(state.selectedJobId || "") === String(dutySpan.id || "") &&
               state.blocks === displayedBlocks,
+            onResolved: (duty, jobs) => {
+              if (state.offlineBlocksVerified && !state.isAdmin && state.isDriver) window.pbcOfflineDriver?.saveSheet(duty, jobs);
+            },
             dutySpans: state.driverDutySpans || [dutySpan],
             isAdmin: state.isAdmin,
             onYes: () => updateDutySpanDriverAcknowledgment(dutySpan.id, "Yes"),
@@ -1152,7 +1159,8 @@ function loadDriverWork() {
     driverEmployeeNumber,
     startDate,
     endDate,
-    (dutySpans) => {
+    (dutySpans, metadata) => {
+      if (!state.isAdmin && state.isDriver) window.pbcOfflineDriver?.saveRoster(dutySpans || [], metadata);
       state.driverDutySpans = dutySpans || [];
       console.log("driver duty spans loaded:", state.driverDutySpans);
       render();
@@ -1341,6 +1349,7 @@ async function performPortalNotificationRegistration(employee, { requestPermissi
 }
 
 function signOutPortalWithNotificationDevice() {
+  window.pbcOfflineDriver?.clear();
   const uid=state.currentUser?.uid;
   const work=notificationRegistrationQueue.catch(()=>{}).then(()=>performSignOutPortal(uid));
   notificationRegistrationQueue=work;
@@ -1433,6 +1442,7 @@ async function openLinkedDutyIfRequested() {
 setupMobileMenu();
 
 onAuthStateChanged(auth, async (u) => {
+  window.pbcOfflineDriver?.setUser(u?.uid || "");
   state.currentUser = u;
 
   // ✅ NEW (add this block)
@@ -1466,6 +1476,8 @@ if (u?.email) {
     String(state.employee?.role || "").trim().toLowerCase() === "driver" ||
     String(state.employee?.accessLevel || "").trim().toLowerCase() === "driver"
   );
+
+window.pbcOfflineDriver?.identify(u?.uid || "", state.employee, state.isDriver && !state.isAdmin);
 
 renderAuth(
   state.currentUser,

@@ -41,7 +41,7 @@ test('inactive, missing and signed-out accounts do not gain Driver or Yard acces
 });
 test('service worker installation preloads the shared access helper needed by Driver auth',async()=>{
  const listeners={},cached=[],worker=read('sw.js');
- const context=vm.createContext({self:{addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting(){}},caches:{open:async()=>({addAll:async assets=>cached.push(...assets)})},console});
+ const context=vm.createContext({self:{addEventListener:(name,fn)=>listeners[name]=fn,skipWaiting(){}},caches:{open:async()=>({addAll:async assets=>cached.push(...assets),add:async asset=>cached.push(asset)})},console});
  vm.runInContext(worker,context);let done;listeners.install({waitUntil:promise=>done=promise});await done;
  assert.ok(cached.includes('/js/main.js'));assert.ok(cached.includes('/js/ui.js'));assert.ok(cached.includes('/js/yard_access.js'));
 });
